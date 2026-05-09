@@ -25,10 +25,11 @@ export async function createOrder(
   }
 
   // 2. Validate all menu items belong to this branch and are available
+  // FIX: fetch addons JSONB so we can resolve addon prices by name
   const menuItemIds = items.map((i) => i.menu_item_id);
   const { data: menuItems, error: menuErr } = await supabaseAdmin
     .from('menu_items')
-    .select('id, name, price, status, branch_id')
+    .select('id, name, price, status, branch_id, addons')
     .in('id', menuItemIds)
     .eq('branch_id', branchId);
 
@@ -46,38 +47,27 @@ export async function createOrder(
     );
   }
 
-  // 3. Build price map and resolve addon prices from menu_items.addons JSONB
-  // (no separate menu_addons table — addons are stored as JSONB on menu_items)
-  const priceMap = Object.fromEntries(menuItems.map((m) => [m.id, m.price]));
-  const addonPriceMap: Record<string, number> = {};
+  // 3. Build price map + per-item addon price maps keyed by lowercase name
+  // FIX: no separate menu_addons table — addons live as JSONB on menu_items.
+  // Match by name (case-insensitive) to resolve prices.
+  const priceMap = Object.fromEntries(menuItems.map((m) => [m.id, Number(m.price)]));
 
-  const addonIds = items.flatMap((i) => (i.addons ?? []).map((a) => a.addon_id));
-  if (addonIds.length > 0) {
-    // Fetch full menu items (with addons JSONB) for items that have addons
-    const itemsWithAddons = items
-      .filter((i) => i.addons && i.addons.length > 0)
-      .map((i) => i.menu_item_id);
-
-    const { data: itemsWithAddonData } = await supabaseAdmin
-      .from('menu_items')
-      .select('id, addons')
-      .in('id', itemsWithAddons);
-
-    for (const menuItem of itemsWithAddonData ?? []) {
-      for (const addon of (menuItem.addons as any[]) ?? []) {
-        // addons JSONB may use 'id' or index position — match by name or position
-        if (addon.id) addonPriceMap[addon.id] = addon.price ?? 0;
-      }
-    }
+  const addonMap: Record<string, Record<string, number>> = {};
+  for (const menuItem of menuItems) {
+    const addonsJson = (menuItem.addons as any[]) ?? [];
+    addonMap[menuItem.id] = Object.fromEntries(
+      addonsJson.map((a: any) => [String(a.name).toLowerCase(), Number(a.price) || 0])
+    );
   }
 
-  // 4. Calculate total (stored per order_items, not on orders table)
+  // 4. Calculate total
   let total = 0;
   for (const item of items) {
-    const unitPrice = Number(priceMap[item.menu_item_id]) || 0;
+    const unitPrice = priceMap[item.menu_item_id] || 0;
     let addonTotal = 0;
     for (const addon of item.addons ?? []) {
-      addonTotal += (addonPriceMap[addon.addon_id] ?? 0) * addon.quantity;
+      const addonPrice = addonMap[item.menu_item_id]?.[addon.name.toLowerCase()] ?? 0;
+      addonTotal += addonPrice * addon.quantity;
     }
     total += (unitPrice + addonTotal) * item.quantity;
   }
@@ -85,10 +75,9 @@ export async function createOrder(
   // 5. Auto-assign waiter
   const assignedWaiterId = await findLeastBusyWaiter(branchId);
 
-  // 6. FIX: Insert only columns that exist in orders table
-  // FIX: status starts as 'confirmed' (not 'created') — orders are auto-confirmed
-  // when placed by staff. 'created' is only used for customer self-order flows
-  // that need manager approval. Kitchen CHEF_TRANSITIONS starts from 'confirmed'.
+  // 6. Insert order — FIX: status 'confirmed' not 'created'
+  // Kitchen CHEF_TRANSITIONS starts from 'confirmed'. Staff-placed orders are
+  // auto-confirmed. 'created' is reserved for customer self-order approval flows.
   const { data: order, error: orderErr } = await supabaseAdmin
     .from('orders')
     .insert({
@@ -107,22 +96,18 @@ export async function createOrder(
   if (orderErr || !order) throw orderErr ?? new Error('Failed to create order');
 
   // 7. Insert order items
-  const orderItemsPayload = items.map((item) => {
-    const unitPrice = Number(priceMap[item.menu_item_id]) || 0;
-    return {
-      order_id: order.id,
-      menu_item_id: item.menu_item_id,
-      quantity: item.quantity,
-      unit_price: unitPrice,
-      notes: item.notes ?? null,
-      status: 'pending',
-      addons: item.addons?.length ? item.addons : null,
-    };
-  });
+  const orderItemsPayload = items.map((item) => ({
+    order_id: order.id,
+    menu_item_id: item.menu_item_id,
+    quantity: item.quantity,
+    unit_price: priceMap[item.menu_item_id] || 0,
+    notes: item.notes ?? null,
+    status: 'pending',
+    addons: item.addons?.length ? item.addons : null,
+  }));
 
   const { error: itemsErr } = await supabaseAdmin.from('order_items').insert(orderItemsPayload);
   if (itemsErr) {
-    // Rollback order on item insert failure
     await supabaseAdmin.from('orders').delete().eq('id', order.id);
     throw itemsErr;
   }
@@ -133,29 +118,28 @@ export async function createOrder(
     .update({ status: 'occupied', updated_at: new Date().toISOString() })
     .eq('id', table_id);
 
-  // 9. Emit Realtime events to kitchen and cashier channels
+  // 9. Broadcast to kitchen and cashier (non-fatal)
   const realtimePayload = {
     event: 'order_created',
     order_id: order.id,
     branch_id: branchId,
     table_id,
     computed_total: total,
-    status: 'created',
+    status: 'confirmed',
   };
 
-  await supabaseAdmin.channel(`branch:${branchId}:kitchen`).send({
-    type: 'broadcast',
-    event: 'order_created',
-    payload: realtimePayload,
-  });
+  try {
+    await supabaseAdmin.channel(`branch:${branchId}:kitchen`).send({
+      type: 'broadcast', event: 'order_created', payload: realtimePayload,
+    });
+    await supabaseAdmin.channel(`branch:${branchId}:cashier`).send({
+      type: 'broadcast', event: 'order_created', payload: realtimePayload,
+    });
+  } catch {
+    // Realtime is best-effort — never fail the HTTP response
+  }
 
-  await supabaseAdmin.channel(`branch:${branchId}:cashier`).send({
-    type: 'broadcast',
-    event: 'order_created',
-    payload: realtimePayload,
-  });
-
-  // 10. Trigger inventory deduction (fire-and-forget)
+  // 10. Inventory deduction (fire-and-forget)
   deductInventory(branchId, items).catch((err) =>
     console.error('[inventory] deduction failed:', err)
   );
@@ -243,6 +227,7 @@ export async function cancelOrder(orderId: string, branchId: string, reason?: st
     );
   }
 
+  // FIX: 'cancelled' added to OrderStatus enum via migration (ALTER TYPE)
   const { data: updated, error: updateErr } = await supabaseAdmin
     .from('orders')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
@@ -252,7 +237,6 @@ export async function cancelOrder(orderId: string, branchId: string, reason?: st
 
   if (updateErr) throw updateErr;
 
-  // Cache cancellation reason in Redis for UI display (not persisted in DB)
   if (reason) {
     await redis.setex(`order_cancel_reason:${orderId}`, 60 * 60 * 24, reason);
   }

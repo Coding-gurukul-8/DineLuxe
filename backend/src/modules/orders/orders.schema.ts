@@ -9,10 +9,11 @@ export const createOrderSchema = z.object({
         menu_item_id: z.string().uuid(),
         quantity: z.number().int().positive(),
         notes: z.string().max(500).optional(),
+        // Addons are JSONB on menu_items — referenced by name, not UUID
         addons: z
           .array(
             z.object({
-              addon_id: z.string().uuid(),
+              name: z.string().min(1),           // matches addon.name in JSONB
               quantity: z.number().int().positive().default(1),
             })
           )

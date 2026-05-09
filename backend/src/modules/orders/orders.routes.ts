@@ -25,16 +25,14 @@ router.post(
   handleCreateOrder
 );
 
-// GET /orders/table/:tableId — waiter/cashier — active orders for table
-// FIX: must be declared BEFORE /:id so Express doesn't treat 'table' as an order id
+// GET /orders/table/:tableId — FIX: must be BEFORE /:id (else 'table' parsed as order id)
 router.get(
   '/table/:tableId',
   requireRole('waiter', 'cashier', 'manager', 'owner'),
   handleGetOrdersByTable
 );
 
-// GET /orders/branch/:branchId/active — manager/cashier
-// FIX: must be declared BEFORE /:id for same reason
+// GET /orders/branch/:branchId/active — FIX: must be BEFORE /:id
 router.get(
   '/branch/:branchId/active',
   requireRole('manager', 'owner', 'cashier'),
