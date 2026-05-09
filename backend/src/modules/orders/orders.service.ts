@@ -8,9 +8,11 @@ export async function createOrder(
   input: CreateOrderInput,
   restaurantId: string,
   branchId: string,
-  createdBy: string
+  createdBy: string,
+  customerIdOverride?: string | null
 ) {
   const { table_id, order_type, items, special_instructions } = input;
+  const customerId = customerIdOverride ?? createdBy;
 
   // 1. Validate table belongs to this branch
   const { data: table, error: tableErr } = await supabaseAdmin
@@ -83,7 +85,7 @@ export async function createOrder(
     .insert({
       branch_id: branchId,
       table_id: table_id ?? null,
-      customer_id: createdBy,
+      customer_id: customerId,
       waiter_id: assignedWaiterId ?? null,
       order_type,
       special_instructions: special_instructions ?? null,

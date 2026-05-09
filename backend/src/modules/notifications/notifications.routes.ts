@@ -17,16 +17,15 @@ router.use(authenticate);
 // GET /notifications
 router.get('/', getNotifications);
 
-// PATCH /notifications/read-all  ← MUST be before /:id/read or Express matches "read-all" as :id
+// POST/DELETE literal paths BEFORE dynamic /:id/read
+router.post('/register-device', validate(registerDeviceSchema), registerDevice);
+
+router.delete('/device/:token', removeDevice);
+
+// PATCH /notifications/read-all  ← before /:id/read
 router.patch('/read-all', markAllRead);
 
 // PATCH /notifications/:id/read
 router.patch('/:id/read', markRead);
-
-// POST /notifications/register-device
-router.post('/register-device', validate(registerDeviceSchema), registerDevice);
-
-// DELETE /notifications/device/:token
-router.delete('/device/:token', removeDevice);
 
 export default router;

@@ -1,8 +1,22 @@
 import { supabaseAdmin } from '../../config/supabase';
 import { paginate } from '../../utils/pagination';
-import { sendPush } from '../notifications/notifications.service';
+import { createInApp, sendPush } from '../notifications/notifications.service';
 
 const AUTO_ESCALATE_HOURS = 24;
+
+type ConversationEntry = {
+  sender_id: string;
+  sender_role: string;
+  message: string;
+  created_at: string;
+  attachments?: unknown[];
+};
+
+function parseConversation(raw: unknown): ConversationEntry[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as ConversationEntry[];
+  return [];
+}
 
 // ─── Create ticket ─────────────────────────────────────────────────────────────
 export async function createTicket(
@@ -15,43 +29,61 @@ export async function createTicket(
     priority: string;
   }
 ) {
+  const now = new Date().toISOString();
+  const firstMessage: ConversationEntry = {
+    sender_id: userId,
+    sender_role: 'customer',
+    message: payload.description,
+    created_at: now,
+    attachments: [],
+  };
+
   const { data: ticket, error } = await supabaseAdmin
     .from('support_tickets')
     .insert({
       user_id: userId,
       subject: payload.subject,
-      description: payload.description,
-      category: payload.category,
-      order_id: payload.order_id ?? null,
-      priority: payload.priority,
+      conversation: [
+        {
+          ...firstMessage,
+          meta: {
+            category: payload.category,
+            priority: payload.priority,
+            order_id: payload.order_id ?? null,
+          },
+        },
+      ],
       status: 'open',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     })
     .select()
     .single();
 
   if (error) throw error;
 
-  // Notify support agents — fire and forget
+  await createInApp(
+    userId,
+    'system_alert',
+    'Support ticket submitted',
+    `We received "${payload.subject}" and will get back to you soon.`,
+    ticket.id,
+    'support_ticket',
+  ).catch(() => {});
+
   notifySupportAgents(ticket.id, payload.subject, payload.priority);
 
   return ticket;
 }
 
 async function notifySupportAgents(ticketId: string, subject: string, priority: string) {
-  const { data: agents } = await supabaseAdmin
-    .from('users')
-    .select('id')
-    .eq('role', 'support');
+  const { data: agents } = await supabaseAdmin.from('users').select('id').eq('role', 'support');
 
   for (const agent of agents ?? []) {
-    sendPush(
-      agent.id,
-      `New ${priority} priority ticket`,
-      subject,
-      { ticket_id: ticketId, type: 'new_ticket' }
-    );
+    sendPush(agent.id, `New ${priority} priority ticket`, subject, {
+      ticket_id: ticketId,
+      type: 'new_ticket',
+    });
   }
 }
 
@@ -65,7 +97,6 @@ export async function getTickets(userId: string, role: string, page: number, lim
     .order('created_at', { ascending: false })
     .range(from, to);
 
-  // Agents see all tickets; customers see only their own
   if (role === 'customer') {
     query = query.eq('user_id', userId);
   }
@@ -85,9 +116,8 @@ export async function getTicketById(ticketId: string, userId: string, role: stri
 
   if (error) throw error;
 
-  // Customers can only view their own tickets
   if (role === 'customer' && data.user_id !== userId) {
-    throw new Error('Forbidden');
+    throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
   }
 
   return data;
@@ -98,42 +128,67 @@ export async function updateTicketStatus(
   ticketId: string,
   agentId: string,
   status: string,
-  resolutionNote?: string
+  _resolutionNote?: string
 ) {
-  const { data, error } = await supabaseAdmin
-    .from('support_tickets')
-    .update({
-      status,
-      resolution_note: resolutionNote ?? null,
-      resolved_by: agentId,
-      resolved_at: ['resolved', 'closed'].includes(status) ? new Date().toISOString() : null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', ticketId)
-    .select('*, user_id')
-    .single();
+  void _resolutionNote;
+
+  const resolvedAt =
+    status === 'resolved' || status === 'closed' ? new Date().toISOString() : null;
+
+  let error = (
+    await supabaseAdmin
+      .from('support_tickets')
+      .update({
+        status,
+        updated_at: new Date().toISOString(),
+        resolved_at: resolvedAt,
+        agent_id: agentId,
+      })
+      .eq('id', ticketId)
+  ).error;
+
+  if (error) {
+    error = (
+      await supabaseAdmin
+        .from('support_tickets')
+        .update({
+          status,
+          updated_at: new Date().toISOString(),
+          resolved_at: resolvedAt,
+        })
+        .eq('id', ticketId)
+    ).error;
+  }
 
   if (error) throw error;
 
-  // Notify customer — fire and forget
+  const { data: row, error: fetchErr } = await supabaseAdmin
+    .from('support_tickets')
+    .select('*')
+    .eq('id', ticketId)
+    .single();
+
+  if (fetchErr || !row) throw fetchErr ?? new Error('Ticket not found');
+  notifyTicketStatus(row.user_id, ticketId, status);
+  return row;
+}
+
+function notifyTicketStatus(customerUserId: string, ticketId: string, status: string) {
   const statusMessages: Record<string, string> = {
-    in_progress: 'Your ticket is being reviewed.',
+    assigned: 'Your ticket is being reviewed.',
     resolved: 'Your support ticket has been resolved.',
     closed: 'Your support ticket has been closed.',
-    escalated: 'Your ticket has been escalated for priority review.',
   };
 
   if (statusMessages[status]) {
-    sendPush(data.user_id, 'Ticket Update', statusMessages[status], {
+    sendPush(customerUserId, 'Ticket Update', statusMessages[status], {
       ticket_id: ticketId,
       type: 'ticket_update',
     });
   }
-
-  return data;
 }
 
-// ─── Post message to ticket ───────────────────────────────────────────────────
+// ─── Post message to ticket (appends to conversation JSON) ─────────────────
 export async function postMessage(
   ticketId: string,
   senderId: string,
@@ -141,43 +196,49 @@ export async function postMessage(
   message: string,
   attachments?: string[]
 ) {
+  const { data: ticket, error: fetchErr } = await supabaseAdmin
+    .from('support_tickets')
+    .select('conversation')
+    .eq('id', ticketId)
+    .single();
+
+  if (fetchErr || !ticket) throw fetchErr ?? new Error('Ticket not found');
+
+  const conv = parseConversation(ticket.conversation);
+  const entry: ConversationEntry = {
+    sender_id: senderId,
+    sender_role: senderRole,
+    message,
+    created_at: new Date().toISOString(),
+    attachments: attachments ?? [],
+  };
+
   const { data, error } = await supabaseAdmin
-    .from('support_messages')
-    .insert({
-      ticket_id: ticketId,
-      sender_id: senderId,
-      sender_role: senderRole,
-      message,
-      attachments: attachments ?? [],
-      created_at: new Date().toISOString(),
+    .from('support_tickets')
+    .update({
+      conversation: [...conv, entry],
+      updated_at: new Date().toISOString(),
     })
+    .eq('id', ticketId)
     .select()
     .single();
 
   if (error) throw error;
-
-  // Update ticket updated_at
-  await supabaseAdmin
-    .from('support_tickets')
-    .update({ updated_at: new Date().toISOString() })
-    .eq('id', ticketId);
-
   return data;
 }
 
-// ─── Get messages for ticket ──────────────────────────────────────────────────
+// ─── Get messages for ticket ─────────────────────────────────────────────────
 export async function getMessages(ticketId: string, userId: string, role: string) {
-  // Verify access
   await getTicketById(ticketId, userId, role);
 
   const { data, error } = await supabaseAdmin
-    .from('support_messages')
-    .select('*, sender:users(id, name, profile_pic_url)')
-    .eq('ticket_id', ticketId)
-    .order('created_at', { ascending: true });
+    .from('support_tickets')
+    .select('conversation')
+    .eq('id', ticketId)
+    .single();
 
   if (error) throw error;
-  return data;
+  return parseConversation(data?.conversation);
 }
 
 // ─── Auto-escalation check (called by cron) ───────────────────────────────────
@@ -193,18 +254,14 @@ export async function autoEscalateStaleTickets() {
   if (error) throw error;
   if (!staleTickets?.length) return;
 
-  const ids = staleTickets.map((t: any) => t.id);
+  const ids = staleTickets.map((t: { id: string }) => t.id);
 
   await supabaseAdmin
     .from('support_tickets')
-    .update({ status: 'escalated', updated_at: new Date().toISOString() })
+    .update({ status: 'assigned', updated_at: new Date().toISOString() })
     .in('id', ids);
 
-  // Notify managers
-  const { data: managers } = await supabaseAdmin
-    .from('users')
-    .select('id')
-    .eq('role', 'admin');
+  const { data: managers } = await supabaseAdmin.from('users').select('id').eq('role', 'admin');
 
   for (const manager of managers ?? []) {
     sendPush(

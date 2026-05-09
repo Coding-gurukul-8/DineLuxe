@@ -63,10 +63,10 @@ async function serveItem(itemId, branchId) {
         throw remainErr;
     const allServed = !remainingItems || remainingItems.length === 0;
     if (allServed) {
-        // Update entire order status to 'served'
+        // FIX: orders table has no served_at column — only order_items does
         await supabase_1.supabaseAdmin
             .from('orders')
-            .update({ status: 'served', served_at: new Date().toISOString() })
+            .update({ status: 'served', updated_at: new Date().toISOString() })
             .eq('id', orderId);
     }
     // BUG FIX: supabaseAdmin.channel(...).send() is a Realtime broadcast — it

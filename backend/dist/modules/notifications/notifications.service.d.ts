@@ -1,6 +1,6 @@
 export declare function sendPush(userId: string, title: string, body: string, data?: Record<string, string>): Promise<void>;
 export declare function sendEmailNotification(userId: string, templateName: string, templateData: Record<string, unknown>): Promise<void>;
-export declare function createInApp(userId: string, type: string, title: string, body: string, referenceId?: string, referenceType?: string): Promise<void>;
+export declare function createInApp(userId: string, type: 'order_update' | 'booking_update' | 'payment' | 'queue_update' | 'system_alert' | 'promotional', title: string, body: string, referenceId?: string, referenceType?: string): Promise<void>;
 export declare function getForUser(userId: string, page: number, limit: number): Promise<{
     data: any[];
     count: number | null;

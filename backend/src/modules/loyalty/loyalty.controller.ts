@@ -23,16 +23,18 @@ export async function earnPoints(req: Request, res: Response, next: NextFunction
     if (!order_id || typeof order_id !== 'string') {
       return res.status(400).json(error('VALIDATION_ERROR', 'order_id is required'));
     }
-    if (typeof amount_paid !== 'number' || amount_paid <= 0) {
+    const amountNum = Number(amount_paid);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
       return res.status(400).json(error('VALIDATION_ERROR', 'amount_paid must be a positive number'));
     }
     if (!restaurant_id || typeof restaurant_id !== 'string') {
       return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id is required'));
     }
 
-    const data = await loyaltyService.earn(req.user!.id, order_id, amount_paid, restaurant_id);
+    const data = await loyaltyService.earn(req.user!.id, order_id, amountNum, restaurant_id);
     res.json(success(data));
-  } catch (err) {
+  } catch (err: any) {
+    if (err.statusCode) return res.status(err.statusCode).json(error(err.message));
     next(err);
   }
 }
@@ -41,19 +43,21 @@ export async function earnPoints(req: Request, res: Response, next: NextFunction
 
 export async function redeemPoints(req: Request, res: Response, next: NextFunction) {
   try {
-    const { order_id, points_to_redeem, restaurant_id } = req.body;
+    const { order_id, restaurant_id } = req.body;
+    const rawPoints = req.body.points_to_redeem ?? req.body.points;
+    const pointsNum = Number(rawPoints);
 
     if (!order_id || typeof order_id !== 'string') {
       return res.status(400).json(error('VALIDATION_ERROR', 'order_id is required'));
     }
-    if (typeof points_to_redeem !== 'number') {
+    if (!Number.isFinite(pointsNum)) {
       return res.status(400).json(error('VALIDATION_ERROR', 'points_to_redeem must be a number'));
     }
     if (!restaurant_id || typeof restaurant_id !== 'string') {
       return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id is required'));
     }
 
-    const data = await loyaltyService.redeem(req.user!.id, order_id, points_to_redeem, restaurant_id);
+    const data = await loyaltyService.redeem(req.user!.id, order_id, pointsNum, restaurant_id);
     res.json(success(data));
   } catch (err: any) {
     if (err.statusCode) return res.status(err.statusCode).json(error(err.message));

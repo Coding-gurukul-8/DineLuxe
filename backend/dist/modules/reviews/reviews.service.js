@@ -21,7 +21,7 @@ async function create(userId, payload) {
         .in('status', ['paid', 'served', 'closed'])
         .single();
     if (orderErr || !order) {
-        throw new Error('No completed order found for this user');
+        throw Object.assign(new Error('No completed order found for this user'), { statusCode: 422 });
     }
     // Check duplicate
     const { data: existing } = await supabase_1.supabaseAdmin
@@ -30,8 +30,9 @@ async function create(userId, payload) {
         .eq('order_id', payload.order_id)
         .eq('user_id', userId)
         .single();
-    if (existing)
-        throw new Error('Review already submitted for this order');
+    if (existing) {
+        throw Object.assign(new Error('Review already submitted for this order'), { statusCode: 409 });
+    }
     // Insert main review
     // FIX: fetch branch_id from order so getByBranch queries can filter correctly
     const { data: orderBranch } = await supabase_1.supabaseAdmin

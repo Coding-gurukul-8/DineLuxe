@@ -7,21 +7,21 @@ export declare const createOrderSchema: z.ZodObject<{
         quantity: z.ZodNumber;
         notes: z.ZodOptional<z.ZodString>;
         addons: z.ZodDefault<z.ZodOptional<z.ZodArray<z.ZodObject<{
-            addon_id: z.ZodString;
+            name: z.ZodString;
             quantity: z.ZodDefault<z.ZodNumber>;
         }, "strip", z.ZodTypeAny, {
+            name: string;
             quantity: number;
-            addon_id: string;
         }, {
-            addon_id: string;
+            name: string;
             quantity?: number | undefined;
         }>, "many">>>;
     }, "strip", z.ZodTypeAny, {
         quantity: number;
         menu_item_id: string;
         addons: {
+            name: string;
             quantity: number;
-            addon_id: string;
         }[];
         notes?: string | undefined;
     }, {
@@ -29,23 +29,26 @@ export declare const createOrderSchema: z.ZodObject<{
         menu_item_id: string;
         notes?: string | undefined;
         addons?: {
-            addon_id: string;
+            name: string;
             quantity?: number | undefined;
         }[] | undefined;
     }>, "many">;
     special_instructions: z.ZodOptional<z.ZodString>;
+    /** Waiter/manager/cashier: place order on behalf of this customer */
+    customer_id: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     items: {
         quantity: number;
         menu_item_id: string;
         addons: {
+            name: string;
             quantity: number;
-            addon_id: string;
         }[];
         notes?: string | undefined;
     }[];
     table_id: string;
     order_type: "delivery" | "dine_in" | "takeaway";
+    customer_id?: string | undefined;
     special_instructions?: string | undefined;
 }, {
     items: {
@@ -53,12 +56,13 @@ export declare const createOrderSchema: z.ZodObject<{
         menu_item_id: string;
         notes?: string | undefined;
         addons?: {
-            addon_id: string;
+            name: string;
             quantity?: number | undefined;
         }[] | undefined;
     }[];
     table_id: string;
     order_type: "delivery" | "dine_in" | "takeaway";
+    customer_id?: string | undefined;
     special_instructions?: string | undefined;
 }>;
 export declare const cancelOrderSchema: z.ZodObject<{

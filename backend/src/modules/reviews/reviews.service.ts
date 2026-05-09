@@ -27,7 +27,7 @@ export async function create(
     .single();
 
   if (orderErr || !order) {
-    throw new Error('No completed order found for this user');
+    throw Object.assign(new Error('No completed order found for this user'), { statusCode: 422 });
   }
 
   // Check duplicate
@@ -38,7 +38,9 @@ export async function create(
     .eq('user_id', userId)
     .single();
 
-  if (existing) throw new Error('Review already submitted for this order');
+  if (existing) {
+    throw Object.assign(new Error('Review already submitted for this order'), { statusCode: 409 });
+  }
 
   // Insert main review
   // FIX: fetch branch_id from order so getByBranch queries can filter correctly

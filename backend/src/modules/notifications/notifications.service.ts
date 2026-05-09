@@ -43,7 +43,13 @@ export async function sendEmailNotification(
 // ─── Create in-app notification ───────────────────────────────────────────────
 export async function createInApp(
   userId: string,
-  type: string,
+  type:
+    | 'order_update'
+    | 'booking_update'
+    | 'payment'
+    | 'queue_update'
+    | 'system_alert'
+    | 'promotional',
   title: string,
   body: string,
   referenceId?: string,
@@ -66,7 +72,6 @@ export async function createInApp(
 
   if (error) throw error;
 
-  // Emit Supabase Realtime event to user's channel
   await supabaseAdmin.channel(`user:${userId}`).send({
     type: 'broadcast',
     event: 'new_notification',
@@ -88,11 +93,11 @@ export async function getForUser(userId: string, page: number, limit: number) {
   return { data, count };
 }
 
-// ─── Mark single notification read ────────────────────────────────────────────
+// ─── Mark single notification read ─────────────────────────────────────────────
 export async function markRead(id: string, userId: string) {
   const { data, error } = await supabaseAdmin
     .from('notifications')
-    .update({ is_read: true, read_at: new Date().toISOString() })
+    .update({ is_read: true })
     .eq('id', id)
     .eq('user_id', userId)
     .select()
@@ -106,35 +111,41 @@ export async function markRead(id: string, userId: string) {
 export async function markAllRead(userId: string) {
   const { error } = await supabaseAdmin
     .from('notifications')
-    .update({ is_read: true, read_at: new Date().toISOString() })
+    .update({ is_read: true })
     .eq('user_id', userId)
     .eq('is_read', false);
 
   if (error) throw error;
 }
 
-// ─── Register device token ────────────────────────────────────────────────────
+// ─── Register device token ─────────────────────────────────────────────────────
 export async function registerDevice(userId: string, token: string, platform?: string) {
   const { data, error } = await supabaseAdmin
     .from('device_tokens')
     .upsert(
       { user_id: userId, token, platform: platform ?? null, updated_at: new Date().toISOString() },
-      { onConflict: 'token' }
+      { onConflict: 'token' },
     )
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    const msg = String(error.message ?? '');
+    if (msg.includes('device_tokens') || msg.includes('Could not find')) {
+      return { user_id: userId, token, platform: platform ?? null, stub: true as const };
+    }
+    throw error;
+  }
   return data;
 }
 
-// ─── Remove device token ──────────────────────────────────────────────────────
+// ─── Remove device token ───────────────────────────────────────────────────────
 export async function removeDevice(userId: string, token: string) {
-  const { error } = await supabaseAdmin
-    .from('device_tokens')
-    .delete()
-    .eq('token', token)
-    .eq('user_id', userId);
+  const { error } = await supabaseAdmin.from('device_tokens').delete().eq('token', token).eq('user_id', userId);
 
-  if (error) throw error;
+  if (error) {
+    const msg = String(error.message ?? '');
+    if (msg.includes('device_tokens') || msg.includes('Could not find')) return;
+    throw error;
+  }
 }

@@ -10,9 +10,10 @@ exports.createOrderSchema = zod_1.z.object({
         menu_item_id: zod_1.z.string().uuid(),
         quantity: zod_1.z.number().int().positive(),
         notes: zod_1.z.string().max(500).optional(),
+        // Addons are JSONB on menu_items — referenced by name, not UUID
         addons: zod_1.z
             .array(zod_1.z.object({
-            addon_id: zod_1.z.string().uuid(),
+            name: zod_1.z.string().min(1), // matches addon.name in JSONB
             quantity: zod_1.z.number().int().positive().default(1),
         }))
             .optional()
@@ -20,6 +21,8 @@ exports.createOrderSchema = zod_1.z.object({
     }))
         .min(1, 'Order must have at least one item'),
     special_instructions: zod_1.z.string().max(1000).optional(),
+    /** Waiter/manager/cashier: place order on behalf of this customer */
+    customer_id: zod_1.z.string().uuid().optional(),
 });
 exports.cancelOrderSchema = zod_1.z.object({
     reason: zod_1.z.string().min(1).max(500).optional(),

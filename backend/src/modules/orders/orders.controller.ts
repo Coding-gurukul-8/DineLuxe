@@ -7,14 +7,28 @@ import {
   getActiveBranchOrders,
   cancelOrder,
 } from './orders.service';
+import type { CreateOrderInput } from './orders.schema';
+
+const STAFF_ORDER_ROLES = ['waiter', 'manager', 'owner', 'cashier', 'host'];
 
 export async function handleCreateOrder(req: Request, res: Response, next: NextFunction) {
   try {
+    const body = req.body as Record<string, unknown>;
+    const rawCustomerId = body.customer_id;
+    const { customer_id: _c, ...orderPayload } = body;
+    void _c;
+
+    const customerIdOverride =
+      STAFF_ORDER_ROLES.includes(req.user!.role) && typeof rawCustomerId === 'string'
+        ? rawCustomerId
+        : undefined;
+
     const order = await createOrder(
-      req.body,
+      orderPayload as CreateOrderInput,
       req.restaurantId!,
       req.branchId!,
-      req.user!.id
+      req.user!.id,
+      customerIdOverride
     );
     res.status(201).json(success(order, 'Order created successfully'));
   } catch (err) {

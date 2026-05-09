@@ -17,21 +17,21 @@ export declare const createTableSchema: z.ZodObject<{
     shape: "round" | "square" | "rectangle" | "booth";
     capacity: number;
     label: string;
-    zone: string;
     floor_number: number;
-    photo_url?: string | undefined;
+    zone: string;
     x_pos?: number | undefined;
     y_pos?: number | undefined;
+    photo_url?: string | undefined;
 }, {
     branch_id: string;
     capacity: number;
     label: string;
     shape?: "round" | "square" | "rectangle" | "booth" | undefined;
-    zone?: string | undefined;
-    photo_url?: string | undefined;
-    floor_number?: number | undefined;
     x_pos?: number | undefined;
     y_pos?: number | undefined;
+    floor_number?: number | undefined;
+    zone?: string | undefined;
+    photo_url?: string | undefined;
 }>;
 export declare const updateStatusSchema: z.ZodObject<{
     new_status: z.ZodEnum<["free", "reserved", "occupied", "cleaning", "maintenance"]>;

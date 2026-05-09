@@ -23,6 +23,8 @@ export const createOrderSchema = z.object({
     )
     .min(1, 'Order must have at least one item'),
   special_instructions: z.string().max(1000).optional(),
+  /** Waiter/manager/cashier: place order on behalf of this customer */
+  customer_id: z.string().uuid().optional(),
 });
 
 export const cancelOrderSchema = z.object({

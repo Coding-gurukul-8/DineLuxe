@@ -7,9 +7,17 @@ exports.handleGetActiveBranchOrders = handleGetActiveBranchOrders;
 exports.handleCancelOrder = handleCancelOrder;
 const response_1 = require("../../utils/response");
 const orders_service_1 = require("./orders.service");
+const STAFF_ORDER_ROLES = ['waiter', 'manager', 'owner', 'cashier', 'host'];
 async function handleCreateOrder(req, res, next) {
     try {
-        const order = await (0, orders_service_1.createOrder)(req.body, req.restaurantId, req.branchId, req.user.id);
+        const body = req.body;
+        const rawCustomerId = body.customer_id;
+        const { customer_id: _c, ...orderPayload } = body;
+        void _c;
+        const customerIdOverride = STAFF_ORDER_ROLES.includes(req.user.role) && typeof rawCustomerId === 'string'
+            ? rawCustomerId
+            : undefined;
+        const order = await (0, orders_service_1.createOrder)(orderPayload, req.restaurantId, req.branchId, req.user.id, customerIdOverride);
         res.status(201).json((0, response_1.success)(order, 'Order created successfully'));
     }
     catch (err) {
