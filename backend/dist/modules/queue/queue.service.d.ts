@@ -23,7 +23,12 @@ export declare function getQueuePosition(queueId: string): Promise<{
     avg_turn_time_minutes: number;
 }>;
 export declare function markQueueArrived(queueId: string): Promise<any>;
-export declare function assignTable(queueId: string, tableId: string, hostId: string): Promise<any>;
+export declare function assignTable(queueId: string, tableId: string, hostId: string): Promise<{
+    queue_id: string;
+    table_id: string;
+    booking_id: any;
+    status: string;
+}>;
 export declare function markQueueNoShow(queueId: string): Promise<any>;
 export declare function removeFromQueue(queueId: string): Promise<{
     removed: boolean;

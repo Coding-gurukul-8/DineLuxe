@@ -37,10 +37,10 @@ export declare const updateStatusSchema: z.ZodObject<{
     new_status: z.ZodEnum<["free", "reserved", "occupied", "cleaning", "maintenance"]>;
     reason: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    new_status: "free" | "occupied" | "cleaning" | "reserved" | "maintenance";
+    new_status: "free" | "reserved" | "occupied" | "cleaning" | "maintenance";
     reason?: string | undefined;
 }, {
-    new_status: "free" | "occupied" | "cleaning" | "reserved" | "maintenance";
+    new_status: "free" | "reserved" | "occupied" | "cleaning" | "maintenance";
     reason?: string | undefined;
 }>;
 export declare const mergeSchema: z.ZodEffects<z.ZodObject<{

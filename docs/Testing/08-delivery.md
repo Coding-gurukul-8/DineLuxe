@@ -92,18 +92,19 @@ curl $BASE/delivery/$DELIVERY_ID \
 
 ---
 
-## STEP 6 — Update Delivery Status: assigned → picked_up
+## STEP 6 — Update Delivery Status: assigned → accepted
 
 ```bash
 curl -X PATCH $BASE/delivery/$DELIVERY_ID/status \
   -H "Authorization: Bearer $DELIVERY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "status": "picked_up"
+    "status": "accepted"
   }'
 ```
 
-**Expected:** `200` — status: `picked_up`
+**Expected:** `200` — status: `accepted`
+
 
 ---
 
@@ -137,20 +138,20 @@ curl -X POST $BASE/delivery/location \
 
 ---
 
-## STEP 8 — Update Delivery Status: picked_up → out_for_delivery
+## STEP 8 — Update Delivery Status: accepted → picked_up
 
 ```bash
 curl -X PATCH $BASE/delivery/$DELIVERY_ID/status \
   -H "Authorization: Bearer $DELIVERY_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"status": "out_for_delivery"}'
+  -d '{"status": "picked_up"}'
 ```
 
-**Expected:** `200`
+**Expected:** `200` — status: `picked_up`
 
 ---
 
-## STEP 9 — Update Delivery Status: out_for_delivery → delivered
+## STEP 9 — Update Delivery Status: picked_up → delivered
 
 ```bash
 curl -X PATCH $BASE/delivery/$DELIVERY_ID/status \
@@ -160,6 +161,7 @@ curl -X PATCH $BASE/delivery/$DELIVERY_ID/status \
 ```
 
 **Expected:** `200` — status: `delivered`, order marked complete
+
 
 ---
 
@@ -188,23 +190,29 @@ curl -X POST $BASE/delivery/orders/$FAILED_ORDER_ID/assign \
 
 # Save: export FAILED_DELIVERY_ID="<id>"
 
-# picked_up
+# assigned → accepted
+curl -X PATCH $BASE/delivery/$FAILED_DELIVERY_ID/status \
+  -H "Authorization: Bearer $DELIVERY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"accepted"}'
+
+# accepted → picked_up
 curl -X PATCH $BASE/delivery/$FAILED_DELIVERY_ID/status \
   -H "Authorization: Bearer $DELIVERY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status":"picked_up"}'
 
-# Mark as failed (e.g. customer not home)
+# picked_up → failed
 curl -X PATCH $BASE/delivery/$FAILED_DELIVERY_ID/status \
   -H "Authorization: Bearer $DELIVERY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "status": "failed",
-    "reason": "Customer unreachable at address"
+    "status": "failed"
   }'
 ```
 
 **Expected:** `200` — status: `failed`
+
 
 ---
 

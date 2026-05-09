@@ -184,22 +184,72 @@ async function assignTable(queueId, tableId, hostId) {
         throw Object.assign(new Error(`Table is currently ${table.status}`), { statusCode: 409 });
     if (table.capacity < entry.people_count)
         throw Object.assign(new Error('Table capacity too small'), { statusCode: 422 });
-    // Use RPC for atomic: update queue + table + create booking
-    const { data: result, error: rpcErr } = await supabase_1.supabaseAdmin.rpc('assign_queue_to_table', {
-        p_queue_id: queueId,
-        p_table_id: tableId,
-        p_host_id: hostId,
-    });
-    if (rpcErr)
-        throw rpcErr;
+    // FIX: RPC 'assign_queue_to_table' doesn't exist — use direct fallback instead
+    // 1. Mark queue entry as seated
+    const { data: updatedEntry, error: qErr } = await supabase_1.supabaseAdmin
+        .from('queue_entries')
+        .update({ status: 'seated', seated_at: new Date().toISOString() })
+        .eq('id', queueId)
+        .select()
+        .single();
+    if (qErr)
+        throw qErr;
+    // 2. Mark table as occupied
+    const { error: tErr } = await supabase_1.supabaseAdmin
+        .from('tables')
+        .update({ status: 'occupied' })
+        .eq('id', tableId);
+    if (tErr) {
+        // Rollback queue entry if table update fails
+        await supabase_1.supabaseAdmin
+            .from('queue_entries')
+            .update({ status: 'arrived', seated_at: null })
+            .eq('id', queueId);
+        throw tErr;
+    }
+    // 3. Create a booking from the queue entry
+    const now = new Date();
+    const futureArrival = new Date(now.getTime() + 15 * 60000); // 15 min from now (default wait)
+    const { data: booking, error: bErr } = await supabase_1.supabaseAdmin
+        .from('bookings')
+        .insert({
+        user_id: entry.user_id,
+        branch_id: entry.branch_id,
+        table_id: tableId,
+        people_count: entry.people_count,
+        arrival_time: futureArrival.toISOString(),
+        status: 'seated',
+        source: 'walk_in',
+        special_requests: `Queue entry: ${entry.guest_name || 'Walk-in'}`,
+    })
+        .select()
+        .single();
+    if (bErr) {
+        // Rollback queue and table if booking fails
+        await supabase_1.supabaseAdmin
+            .from('queue_entries')
+            .update({ status: 'arrived', seated_at: null })
+            .eq('id', queueId);
+        await supabase_1.supabaseAdmin
+            .from('tables')
+            .update({ status: 'free' })
+            .eq('id', tableId);
+        throw bErr;
+    }
     // Recalculate queue positions after seating
     await recalculatePositions(entry.branch_id);
     await broadcastToChannel(`branch:${entry.branch_id}`, 'queue_updated', {
         action: 'seated',
         queue_id: queueId,
         table_id: tableId,
+        booking_id: booking.id,
     });
-    return result;
+    return {
+        queue_id: queueId,
+        table_id: tableId,
+        booking_id: booking.id,
+        status: 'seated',
+    };
 }
 // ─── Mark no-show ─────────────────────────────────────────────────────────────
 async function markQueueNoShow(queueId) {
