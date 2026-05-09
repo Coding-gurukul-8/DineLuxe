@@ -46,18 +46,29 @@ export async function createOrder(
     );
   }
 
-  // 3. Build price map and validate addons
+  // 3. Build price map and resolve addon prices from menu_items.addons JSONB
+  // (no separate menu_addons table — addons are stored as JSONB on menu_items)
   const priceMap = Object.fromEntries(menuItems.map((m) => [m.id, m.price]));
-  const addonIds = items.flatMap((i) => (i.addons ?? []).map((a) => a.addon_id));
-  let addonPriceMap: Record<string, number> = {};
+  const addonPriceMap: Record<string, number> = {};
 
+  const addonIds = items.flatMap((i) => (i.addons ?? []).map((a) => a.addon_id));
   if (addonIds.length > 0) {
-    const { data: addons, error: addonErr } = await supabaseAdmin
-      .from('menu_addons')
-      .select('id, price')
-      .in('id', addonIds);
-    if (addonErr) throw addonErr;
-    addonPriceMap = Object.fromEntries((addons ?? []).map((a) => [a.id, a.price]));
+    // Fetch full menu items (with addons JSONB) for items that have addons
+    const itemsWithAddons = items
+      .filter((i) => i.addons && i.addons.length > 0)
+      .map((i) => i.menu_item_id);
+
+    const { data: itemsWithAddonData } = await supabaseAdmin
+      .from('menu_items')
+      .select('id, addons')
+      .in('id', itemsWithAddons);
+
+    for (const menuItem of itemsWithAddonData ?? []) {
+      for (const addon of (menuItem.addons as any[]) ?? []) {
+        // addons JSONB may use 'id' or index position — match by name or position
+        if (addon.id) addonPriceMap[addon.id] = addon.price ?? 0;
+      }
+    }
   }
 
   // 4. Calculate total (stored per order_items, not on orders table)
@@ -75,6 +86,9 @@ export async function createOrder(
   const assignedWaiterId = await findLeastBusyWaiter(branchId);
 
   // 6. FIX: Insert only columns that exist in orders table
+  // FIX: status starts as 'confirmed' (not 'created') — orders are auto-confirmed
+  // when placed by staff. 'created' is only used for customer self-order flows
+  // that need manager approval. Kitchen CHEF_TRANSITIONS starts from 'confirmed'.
   const { data: order, error: orderErr } = await supabaseAdmin
     .from('orders')
     .insert({
@@ -84,7 +98,8 @@ export async function createOrder(
       waiter_id: assignedWaiterId ?? null,
       order_type,
       special_instructions: special_instructions ?? null,
-      status: 'created',
+      status: 'confirmed',
+      confirmed_at: new Date().toISOString(),
     })
     .select()
     .single();
@@ -181,7 +196,7 @@ export async function getOrdersByTable(tableId: string, branchId: string) {
     .select('*, order_items(*, menu_items(name, price))')
     .eq('table_id', tableId)
     .eq('branch_id', branchId)
-    .not('status', 'in', '("paid","closed")')
+    .not('status', 'in', '("paid","closed","cancelled")')
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -194,7 +209,7 @@ export async function getActiveBranchOrders(branchId: string) {
     .from('orders')
     .select('*, order_items(id, status, menu_items(name)), tables(label)')
     .eq('branch_id', branchId)
-    .not('status', 'in', '("paid","closed")')
+    .not('status', 'in', '("paid","closed","cancelled")')
     .order('created_at', { ascending: true });
 
   if (error) throw error;
@@ -214,7 +229,7 @@ export async function cancelOrder(orderId: string, branchId: string, reason?: st
     throw Object.assign(new Error('Order not found'), { statusCode: 404 });
   }
 
-  if (['paid', 'closed'].includes(order.status)) {
+  if (['paid', 'closed', 'cancelled'].includes(order.status)) {
     throw Object.assign(new Error(`Cannot cancel order with status: ${order.status}`), { statusCode: 422 });
   }
 
@@ -228,10 +243,9 @@ export async function cancelOrder(orderId: string, branchId: string, reason?: st
     );
   }
 
-  // FIX: cancellation_reason and cancelled_at do not exist in schema — just update status
   const { data: updated, error: updateErr } = await supabaseAdmin
     .from('orders')
-    .update({ status: 'closed', updated_at: new Date().toISOString() })
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
     .eq('id', orderId)
     .select()
     .single();

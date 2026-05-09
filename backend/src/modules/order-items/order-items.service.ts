@@ -72,10 +72,10 @@ export async function serveItem(itemId: string, branchId: string) {
   const allServed = !remainingItems || remainingItems.length === 0;
 
   if (allServed) {
-    // Update entire order status to 'served'
+    // Update entire order status to 'served' — no served_at column on orders table
     await supabaseAdmin
       .from('orders')
-      .update({ status: 'served', served_at: new Date().toISOString() })
+      .update({ status: 'served', updated_at: new Date().toISOString() })
       .eq('id', orderId);
   }
 

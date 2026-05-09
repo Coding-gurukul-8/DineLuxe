@@ -50,6 +50,7 @@ enum OrderStatus {
   served
   paid
   closed
+  cancelled
 }
 
 enum OrderType {
