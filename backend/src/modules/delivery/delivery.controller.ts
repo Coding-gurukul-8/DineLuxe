@@ -14,7 +14,8 @@ export async function handleAssignDelivery(req: Request, res: Response, next: Ne
     const delivery = await assignDelivery(
       req.params.orderId,
       req.branchId!,
-      req.restaurantId!
+      req.restaurantId!,
+      req.body.partner_id
     );
     res.status(201).json(success(delivery, 'Delivery assigned'));
   } catch (err) {

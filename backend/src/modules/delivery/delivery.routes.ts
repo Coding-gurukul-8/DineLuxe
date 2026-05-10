@@ -22,6 +22,11 @@ router.post(
   '/orders/:orderId/assign',
   injectTenant,
   requireRole('manager', 'owner'),
+  validate({
+    body: z.object({
+      partner_id: z.string().uuid(),
+    }),
+  }),
   handleAssignDelivery
 );
 

@@ -232,7 +232,9 @@ export async function getAlerts(branchId: string) {
   if (error) throw error;
 
   // Client-side filter + ratio sort
-  const withRatio = (data ?? [])
+  // Deduplicate alerts to avoid multiple inventory rows for the same ingredient producing repeated alerts.
+  // (Observed behavior: same ingredient_name can appear multiple times in inventory_items.)
+  const lowStock = (data ?? [])
     .filter((item: any) => Number(item.current_quantity) <= Number(item.reorder_threshold))
     .map((item: any) => ({
       ...item,
@@ -240,7 +242,17 @@ export async function getAlerts(branchId: string) {
         ? Number(item.current_quantity) / Number(item.reorder_threshold)
         : 0,
     }))
-    .sort((a: any, b: any) => a.stock_ratio - b.stock_ratio);
+    // For each ingredient_name keep the row with the lowest stock_ratio
+    .reduce((acc: Record<string, any>, item: any) => {
+      const key = String(item.ingredient_name ?? item.id);
+      const prev = acc[key];
+      if (!prev || item.stock_ratio < prev.stock_ratio) acc[key] = item;
+      return acc;
+    }, {});
+
+  const withRatio = Object.values(lowStock).sort(
+    (a: any, b: any) => a.stock_ratio - b.stock_ratio
+  );
 
   return withRatio.map(normalizeInventoryItem);
 }
