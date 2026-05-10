@@ -10,11 +10,21 @@
 
 ```bash
 BASE="http://localhost:5001/api/v1"
-export CASHIER_TOKEN="<cashier accessToken>"
-export CUSTOMER_TOKEN="<customer accessToken>"
-export MANAGER_TOKEN="<manager accessToken>"
 export ORDER_ID="<completed order UUID>"         # from Group 05 Step 1
 export DELIVERY_ORDER_ID="<delivery order UUID>" # from Group 05 Step 14
+
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
+
+login_cashier()  { export CASHIER_TOKEN=$(login "sneha.cashier@spicegarden.com" "25111995"); }
+login_customer() { export CUSTOMER_TOKEN=$(login "rahul.sharma@gmail.com" "Customer@123"); }
+login_waiter()   { export WAITER_TOKEN=$(login "ravi.waiter@spicegarden.com" "20081999"); }
 ```
 
 ---
@@ -24,6 +34,7 @@ export DELIVERY_ORDER_ID="<delivery order UUID>" # from Group 05 Step 14
 ## STEP 1 — Initiate Cash Payment
 
 ```bash
+login_cashier
 curl -X POST $BASE/payments/initiate \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -42,6 +53,7 @@ curl -X POST $BASE/payments/initiate \
 ## STEP 2 — Verify Cash Payment
 
 ```bash
+login_cashier
 curl -X POST $BASE/payments/verify \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -58,6 +70,7 @@ curl -X POST $BASE/payments/verify \
 ## STEP 3 — Get Receipt
 
 ```bash
+login_cashier
 curl $BASE/payments/receipt/$ORDER_ID \
   -H "Authorization: Bearer $CASHIER_TOKEN"
 ```
@@ -74,6 +87,7 @@ curl $BASE/payments/receipt/$ORDER_ID \
 # New order needed — run Group 05 Step 1 again to get a fresh ORDER_ID
 export UPI_ORDER_ID="<fresh order UUID>"
 
+login_cashier
 curl -X POST $BASE/payments/upi/generate-qr \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -91,6 +105,7 @@ curl -X POST $BASE/payments/upi/generate-qr \
 ## STEP 5 — Poll UPI Payment Status
 
 ```bash
+login_cashier
 curl $BASE/payments/upi/status/$UPI_REF \
   -H "Authorization: Bearer $CASHIER_TOKEN"
 ```
@@ -102,6 +117,7 @@ curl $BASE/payments/upi/status/$UPI_REF \
 ## STEP 6 — Initiate UPI Payment
 
 ```bash
+login_cashier
 curl -X POST $BASE/payments/initiate \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -118,6 +134,7 @@ curl -X POST $BASE/payments/initiate \
 ## STEP 7 — Verify UPI Payment (Simulate Gateway Callback)
 
 ```bash
+login_cashier
 curl -X POST $BASE/payments/verify \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -141,6 +158,7 @@ curl -X POST $BASE/payments/verify \
 # Use another fresh order
 export CARD_ORDER_ID="<fresh order UUID>"
 
+login_cashier
 curl -X POST $BASE/payments/initiate \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -157,6 +175,7 @@ curl -X POST $BASE/payments/initiate \
 ## STEP 9 — Verify Card Payment
 
 ```bash
+login_cashier
 curl -X POST $BASE/payments/verify \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -179,6 +198,7 @@ curl -X POST $BASE/payments/verify \
 # Fresh order for split test
 export SPLIT_ORDER_ID="<fresh order UUID>"
 
+login_cashier
 curl -X POST $BASE/payments/split \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -199,6 +219,7 @@ curl -X POST $BASE/payments/split \
 ## STEP 11 — Partial UPI Amount (Split Override)
 
 ```bash
+login_cashier
 curl -X POST $BASE/payments/upi/generate-qr \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -236,6 +257,7 @@ curl -X POST $BASE/payments/webhook \
 ## STEP 13 — Customer Gets Their Receipt
 
 ```bash
+login_customer
 curl $BASE/payments/receipt/$ORDER_ID \
   -H "Authorization: Bearer $CUSTOMER_TOKEN"
 ```
@@ -247,6 +269,7 @@ curl $BASE/payments/receipt/$ORDER_ID \
 ## STEP 14 — Waiter Gets Receipt (Allowed)
 
 ```bash
+login_waiter
 curl $BASE/payments/receipt/$ORDER_ID \
   -H "Authorization: Bearer $WAITER_TOKEN"
 ```
@@ -259,24 +282,28 @@ curl $BASE/payments/receipt/$ORDER_ID \
 
 ```bash
 # Initiate payment for already-paid order → 409
+login_cashier
 curl -X POST $BASE/payments/initiate \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"order_id":"'$ORDER_ID'","payment_method":"cash"}'
 
 # Split with only 1 person → 400 (min 2 splits)
+login_cashier
 curl -X POST $BASE/payments/split \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"order_id":"'$SPLIT_ORDER_ID'","splits":[{"label":"Solo","amount":500,"payment_method":"cash"}]}'
 
 # Customer initiating split bill → 403
+login_customer
 curl -X POST $BASE/payments/split \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"order_id":"'$SPLIT_ORDER_ID'","splits":[{"label":"P1","amount":250,"payment_method":"cash"},{"label":"P2","amount":250,"payment_method":"upi"}]}'
 
 # Verify with invalid status → 400
+login_cashier
 curl -X POST $BASE/payments/verify \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \

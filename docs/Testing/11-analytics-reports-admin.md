@@ -10,11 +10,26 @@
 
 ```bash
 BASE="http://localhost:5001/api/v1"
-export OWNER_TOKEN="<owner accessToken>"
-export MANAGER_TOKEN="<manager accessToken>"
-export ADMIN_TOKEN="<admin accessToken>"
 export BRANCH_ID="<branch UUID>"
 export RESTAURANT_ID="<restaurant UUID>"
+
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
+
+login_owner()   { export OWNER_TOKEN=$(login "priya.mehta1@restaurant.com" "Owner@1234"); }
+login_manager() { export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988"); }
+login_admin()   { export ADMIN_TOKEN=$(login "admin@platform.com" "Admin@Secure123"); }
+
+# For the "another owner's branch" negative test
+export OTHER_OWNER_EMAIL="<other owner email>"
+export OTHER_OWNER_PASSWORD="<other owner password>"
+login_other_owner() { export OTHER_OWNER_TOKEN=$(login "$OTHER_OWNER_EMAIL" "$OTHER_OWNER_PASSWORD"); }
 ```
 
 > **Note:** Reports are most useful after Groups 05–10 have run (orders, payments, reviews etc. must exist)
@@ -26,6 +41,7 @@ export RESTAURANT_ID="<restaurant UUID>"
 ## STEP 1 — Menu Suggestions (AI-based)
 
 ```bash
+login_owner
 curl $BASE/analytics/menu-suggestions/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -37,6 +53,7 @@ curl $BASE/analytics/menu-suggestions/$BRANCH_ID \
 ## STEP 2 — Demand Forecast
 
 ```bash
+login_owner
 curl $BASE/analytics/demand-forecast/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -48,6 +65,7 @@ curl $BASE/analytics/demand-forecast/$BRANCH_ID \
 ## STEP 3 — Bundle Opportunities
 
 ```bash
+login_owner
 curl $BASE/analytics/bundle-opportunities/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -59,6 +77,7 @@ curl $BASE/analytics/bundle-opportunities/$BRANCH_ID \
 ## STEP 4 — Staffing Recommendation
 
 ```bash
+login_owner
 curl $BASE/analytics/staffing-recommendation/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -70,6 +89,7 @@ curl $BASE/analytics/staffing-recommendation/$BRANCH_ID \
 ## STEP 5 — Manager Gets Analytics (Same Endpoints)
 
 ```bash
+login_manager
 curl $BASE/analytics/menu-suggestions/$BRANCH_ID \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 
@@ -86,6 +106,7 @@ curl $BASE/analytics/demand-forecast/$BRANCH_ID \
 ## STEP 6 — Sales Report (Date Range)
 
 ```bash
+login_owner
 curl "$BASE/reports/sales?branch_id=$BRANCH_ID&from=2026-05-01&to=2026-05-08" \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -98,6 +119,7 @@ curl "$BASE/reports/sales?branch_id=$BRANCH_ID&from=2026-05-01&to=2026-05-08" \
 
 ```bash
 TODAY=$(date +%Y-%m-%d)
+login_manager
 curl "$BASE/reports/sales?branch_id=$BRANCH_ID&from=$TODAY&to=$TODAY" \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -109,6 +131,7 @@ curl "$BASE/reports/sales?branch_id=$BRANCH_ID&from=$TODAY&to=$TODAY" \
 ## STEP 8 — Menu Performance Report
 
 ```bash
+login_owner
 curl "$BASE/reports/menu-performance?branch_id=$BRANCH_ID" \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -120,6 +143,7 @@ curl "$BASE/reports/menu-performance?branch_id=$BRANCH_ID" \
 ## STEP 9 — Kitchen Performance Report
 
 ```bash
+login_manager
 curl "$BASE/reports/kitchen-performance?branch_id=$BRANCH_ID" \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -131,6 +155,7 @@ curl "$BASE/reports/kitchen-performance?branch_id=$BRANCH_ID" \
 ## STEP 10 — Customer Insights Report (Owner Only)
 
 ```bash
+login_owner
 curl "$BASE/reports/customer-insights?branch_id=$BRANCH_ID" \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -142,6 +167,7 @@ curl "$BASE/reports/customer-insights?branch_id=$BRANCH_ID" \
 ## STEP 11 — Try Customer Insights as Manager (Should Fail)
 
 ```bash
+login_manager
 curl "$BASE/reports/customer-insights?branch_id=$BRANCH_ID" \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -153,6 +179,7 @@ curl "$BASE/reports/customer-insights?branch_id=$BRANCH_ID" \
 ## STEP 12 — Export Sales Report as CSV
 
 ```bash
+login_owner
 curl -X POST $BASE/reports/export \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -172,6 +199,7 @@ curl -X POST $BASE/reports/export \
 ## STEP 13 — Export Menu Performance as PDF
 
 ```bash
+login_owner
 curl -X POST $BASE/reports/export \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -201,6 +229,7 @@ curl $BASE/admin/health
 ## STEP 15 — Detailed Health Check (Admin)
 
 ```bash
+login_admin
 curl $BASE/admin/health/detailed \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -212,6 +241,7 @@ curl $BASE/admin/health/detailed \
 ## STEP 16 — Admin Dashboard Overview
 
 ```bash
+login_admin
 curl $BASE/admin/dashboard \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -223,6 +253,7 @@ curl $BASE/admin/dashboard \
 ## STEP 17 — Platform-Wide Stats
 
 ```bash
+login_admin
 curl $BASE/admin/platform-stats \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -234,6 +265,7 @@ curl $BASE/admin/platform-stats \
 ## STEP 18 — Admin: Get All Restaurants
 
 ```bash
+login_admin
 curl "$BASE/admin/restaurants?page=1&limit=20&status=active" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -245,6 +277,7 @@ curl "$BASE/admin/restaurants?page=1&limit=20&status=active" \
 ## STEP 19 — Admin: Get All Customers
 
 ```bash
+login_admin
 curl "$BASE/admin/customers?page=1&limit=20" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -259,6 +292,7 @@ curl "$BASE/admin/customers?page=1&limit=20" \
 # Get a customer ID from Step 19
 export CUSTOMER_USER_ID="<customer user id>"
 
+login_admin
 curl -X PATCH $BASE/admin/customers/$CUSTOMER_USER_ID/status \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -282,6 +316,7 @@ curl -X POST $BASE/auth/login \
 ## STEP 21 — Admin: Reinstate Customer
 
 ```bash
+login_admin
 curl -X PATCH $BASE/admin/customers/$CUSTOMER_USER_ID/status \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -295,6 +330,7 @@ curl -X PATCH $BASE/admin/customers/$CUSTOMER_USER_ID/status \
 ## STEP 22 — Admin: Get All Feedback/Reviews
 
 ```bash
+login_admin
 curl "$BASE/admin/feedback?page=1&limit=20" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -306,6 +342,7 @@ curl "$BASE/admin/feedback?page=1&limit=20" \
 ## STEP 23 — Admin: Platform-Level Report
 
 ```bash
+login_admin
 curl $BASE/reports/admin/platform \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -317,6 +354,7 @@ curl $BASE/reports/admin/platform \
 ## STEP 24 — Admin: Trends Report
 
 ```bash
+login_admin
 curl $BASE/reports/admin/trends \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -329,26 +367,32 @@ curl $BASE/reports/admin/trends \
 
 ```bash
 # Owner accessing admin dashboard → 403
+login_owner
 curl $BASE/admin/dashboard \
   -H "Authorization: Bearer $OWNER_TOKEN"
 
 # Manager accessing admin platform stats → 403
+login_manager
 curl $BASE/admin/platform-stats \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 
 # Report without branch_id → 400
+login_owner
 curl "$BASE/reports/sales?from=2026-05-01&to=2026-05-08" \
   -H "Authorization: Bearer $OWNER_TOKEN"
 
 # Report with from > to → 400
+login_owner
 curl "$BASE/reports/sales?branch_id=$BRANCH_ID&from=2026-05-08&to=2026-05-01" \
   -H "Authorization: Bearer $OWNER_TOKEN"
 
 # Analytics on another owner's branch → 403
+login_other_owner
 curl $BASE/analytics/menu-suggestions/$BRANCH_ID \
   -H "Authorization: Bearer $OTHER_OWNER_TOKEN"
 
 # Export with invalid format → 400
+login_owner
 curl -X POST $BASE/reports/export \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \

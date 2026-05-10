@@ -11,91 +11,19 @@
 ```bash
 BASE="http://localhost:5001/api/v1"
 
-# Login as Admin first
-export ADMIN_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"admin@platform.com","password":"Admin@Secure123"}' \
-  | jq -r '.data.accessToken')
-echo "Admin Token: $ADMIN_TOKEN"
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
+
+login_owner()   { export OWNER_TOKEN=$(login "priya.mehta1@restaurant.com" "Owner@1234"); }
+login_manager() { export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988"); }
+login_admin()   { export ADMIN_TOKEN=$(login "admin@platform.com" "Admin@Secure123"); }
 ```
-
-
-BASE="http://localhost:5001/api/v1"
-
-## OWNER
-```bash
-export OWNER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"priya.mehta1@restaurant.com","password":"Owner@1234"}' \
-  | jq -r '.data.accessToken')
-echo "OWNER: $OWNER_TOKEN"
-```
-## MANAGER
-
-```bash
-export MANAGER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"arjun.manager@spicegarden.com","password":"15051988"}' \
-  | jq -r '.data.accessToken')
-echo "MANAGER: $MANAGER_TOKEN"
-```
-
-## WAITER
-
-```bash
-export WAITER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"ravi.waiter@spicegarden.com","password":"20081999"}' \
-  | jq -r '.data.accessToken')
-echo "WAITER: $WAITER_TOKEN"
-```
-## CHEF
-```bash
-export CHEF_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sanjay.chef@spicegarden.com","password":"10031985"}' \
-  | jq -r '.data.accessToken')
-echo "CHEF: $CHEF_TOKEN"
-```
-
-## CASHIER
-
-```bash
-export CASHIER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sneha.cashier@spicegarden.com","password":"25111995"}' \
-  | jq -r '.data.accessToken')
-echo "CASHIER: $CASHIER_TOKEN"
-```
-## HOST
-```bash
-export HOST_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"pooja.host@spicegarden.com","password":"04072000"}' \
-  | jq -r '.data.accessToken')
-echo "HOST: $HOST_TOKEN"
-```
-
-## CUSTOMER
-```bash
-export CUSTOMER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"rahul.sharma@gmail.com","password":"Customer@123"}' \
-  | jq -r '.data.accessToken')
-echo "CUSTOMER: $CUSTOMER_TOKEN"
-```
-## ADMIN
-```bash
-export ADMIN_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"admin@platform.com","password":"Admin@Secure123"}' \
-  | jq -r '.data.accessToken')
-echo "ADMIN: $ADMIN_TOKEN"
-```
-
-
-
-
 ---
 
 ## STEP 1 — Register Restaurant (Public — No Token Needed) (WORKING)
@@ -145,6 +73,7 @@ export BRANCH_ID="<branch.id>"
 ## STEP 2 — Admin Activates Restaurant(WORKING)
 
 ```bash
+login_admin
 curl -X PATCH $BASE/restaurants/$RESTAURANT_ID/status \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -158,10 +87,7 @@ curl -X PATCH $BASE/restaurants/$RESTAURANT_ID/status \
 ## STEP 3 — Login as Owner(WORKING)
 
 ```bash
-export OWNER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"priya.mehta1@restaurant.com","password":"Owner@1234"}' \
-  | jq -r '.data.accessToken')
+login_owner
 echo "Owner Token: $OWNER_TOKEN"
 ```
 
@@ -170,6 +96,7 @@ echo "Owner Token: $OWNER_TOKEN"
 ## STEP 4 — Get All Branches (Owner)(WORKING)
 
 ```bash
+login_owner
 curl $BASE/branches \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -181,6 +108,7 @@ curl $BASE/branches \
 ## STEP 5 — Get Single Branch by ID(WORKING)
 
 ```bash
+login_owner
 curl $BASE/branches/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -192,6 +120,7 @@ curl $BASE/branches/$BRANCH_ID \
 ## STEP 6 — Update Branch Info (Owner/Manager)(WORKING)
 
 ```bash
+login_owner
 curl -X PATCH $BASE/branches/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -217,6 +146,7 @@ curl -X PATCH $BASE/branches/$BRANCH_ID \
 ## STEP 7 — Get Branch Live Stats(WORKING)
 
 ```bash
+login_owner
 curl $BASE/branches/$BRANCH_ID/live-stats \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -228,6 +158,7 @@ curl $BASE/branches/$BRANCH_ID/live-stats \
 ## STEP 8 — Toggle Branch Status (Temporarily Close)(WORKING)
 
 ```bash
+login_owner
 curl -X PATCH $BASE/branches/$BRANCH_ID/status \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -239,6 +170,7 @@ curl -X PATCH $BASE/branches/$BRANCH_ID/status \
 ### Reopen it
 
 ```bash
+login_owner
 curl -X PATCH $BASE/branches/$BRANCH_ID/status \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -250,6 +182,7 @@ curl -X PATCH $BASE/branches/$BRANCH_ID/status \
 ## STEP 9 — Create a Second Branch(WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/branches \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -271,6 +204,7 @@ curl -X POST $BASE/branches \
 ## STEP 10 — Update Restaurant Info(Working)
 
 ```bash
+login_owner
 curl -X PATCH $BASE/restaurants/$RESTAURANT_ID \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -318,6 +252,7 @@ curl $BASE/restaurants/$RESTAURANT_ID/live-status
 ## STEP 14 — Admin: Get All Restaurants(WORKING)
 
 ```bash
+login_admin
 curl "$BASE/restaurants?page=1&limit=20" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
@@ -329,6 +264,7 @@ curl "$BASE/restaurants?page=1&limit=20" \
 ## STEP 15 — Admin: Suspend a Restaurant(WORKING)
 
 ```bash
+login_admin
 curl -X PATCH $BASE/restaurants/$RESTAURANT_ID/status \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -340,6 +276,7 @@ curl -X PATCH $BASE/restaurants/$RESTAURANT_ID/status \
 ### Reactivate(WORKING)
 
 ```bash
+login_admin
 curl -X PATCH $BASE/restaurants/$RESTAURANT_ID/status \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -357,12 +294,14 @@ curl -X POST $BASE/restaurants/register \
   -d '{"owner":{"first_name":"X","last_name":"Y","email":"priya.mehta@restaurant.com","phone":"9876543200","dob":"1995-01-01","password":"Test@1234"},"restaurant":{"name":"Dup","cuisine_types":["Indian"]},"branch":{"name":"Dup Branch","address_line1":"123 Road","city":"Delhi","state":"Delhi","pincode":"110001","seating_capacity":10}}'
 
 # Invalid pincode → 400
+login_owner
 curl -X POST $BASE/branches \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"Bad Branch","address_line1":"1 Road","city":"Delhi","state":"Delhi","pincode":"123","seating_capacity":10}'
 
 # Non-owner updating restaurant → 403
+login_manager
 curl -X PATCH $BASE/restaurants/$RESTAURANT_ID \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \

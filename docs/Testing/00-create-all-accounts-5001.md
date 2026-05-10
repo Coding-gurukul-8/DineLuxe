@@ -5,6 +5,28 @@
 
 ---
 
+## Prerequisites (token helpers)
+
+```bash
+BASE="http://localhost:5001/api/v1"
+
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
+
+login_owner() { export OWNER_TOKEN=$(login "priya.mehta1@restaurant.com" "Owner@1234"); }
+
+# If you have a seeded super admin, set these and run login_super_admin
+export SUPER_ADMIN_EMAIL="<super admin email>"
+export SUPER_ADMIN_PASSWORD="<super admin password>"
+login_super_admin() { export SUPER_ADMIN_TOKEN=$(login "$SUPER_ADMIN_EMAIL" "$SUPER_ADMIN_PASSWORD"); }
+```
+
 ## Account Types in Your System
 
 | Role | How Created | Auth Required |
@@ -95,12 +117,8 @@ curl -X POST http://localhost:5001/api/v1/restaurants/register \
 
 ### Then login as Owner
 ```bash
-curl -X POST http://localhost:5001/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "emailOrUsername": "priya.mehta1@restaurant.com",
-    "password": "Owner@1234"
-  }'
+login_owner
+echo "Owner Token: $OWNER_TOKEN"
 ```
 
 Save the token:
@@ -118,7 +136,8 @@ export BRANCH_ID="<branch.id from register response>"
 > Staff must change it on first login (`force_password_change: true`)
 
 ```bash
-curl -X POST http://localhost:5001/api/v1/staff/create \
+login_owner
+curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -137,12 +156,8 @@ curl -X POST http://localhost:5001/api/v1/staff/create \
 
 ### Login as Manager
 ```bash
-curl -X POST http://localhost:5001/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "emailOrUsername": "arjun.manager@spicegarden.com",
-    "password": "15051988"
-  }'
+export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988")
+echo "Manager Token: $MANAGER_TOKEN"
 ```
 
 ```bash
@@ -154,7 +169,8 @@ export MANAGER_TOKEN="<accessToken from response>"
 ## 4. WAITER Account (Created by Owner or Manager)
 
 ```bash
-curl -X POST http://localhost:5001/api/v1/staff/create \
+login_owner
+curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -173,12 +189,8 @@ curl -X POST http://localhost:5001/api/v1/staff/create \
 
 ### Login as Waiter
 ```bash
-curl -X POST http://localhost:5001/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "emailOrUsername": "ravi.waiter1@spicegarden.com",
-    "password": "20081999"
-  }'
+export WAITER_TOKEN=$(login "ravi.waiter1@spicegarden.com" "20081999")
+echo "Waiter Token: $WAITER_TOKEN"
 ```
 
 ---
@@ -186,7 +198,8 @@ curl -X POST http://localhost:5001/api/v1/auth/login \
 ## 5. CHEF Account (Created by Owner or Manager)
 
 ```bash
-curl -X POST http://localhost:5001/api/v1/staff/create \
+login_owner
+curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -205,12 +218,8 @@ curl -X POST http://localhost:5001/api/v1/staff/create \
 
 ### Login as Chef
 ```bash
-curl -X POST http://localhost:5001/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "emailOrUsername": "sanjay.chef@spicegarden.com",
-    "password": "10031985"
-  }'
+export CHEF_TOKEN=$(login "sanjay.chef@spicegarden.com" "10031985")
+echo "Chef Token: $CHEF_TOKEN"
 ```
 
 ---
@@ -218,7 +227,8 @@ curl -X POST http://localhost:5001/api/v1/auth/login \
 ## 6. CASHIER Account (Created by Owner or Manager)
 
 ```bash
-curl -X POST http://localhost:5001/api/v1/staff/create \
+login_owner
+curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -237,12 +247,8 @@ curl -X POST http://localhost:5001/api/v1/staff/create \
 
 ### Login as Cashier
 ```bash
-curl -X POST http://localhost:5001/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "emailOrUsername": "sneha.cashier@spicegarden.com",
-    "password": "25111995"
-  }'
+export CASHIER_TOKEN=$(login "sneha.cashier@spicegarden.com" "25111995")
+echo "Cashier Token: $CASHIER_TOKEN"
 ```
 
 ---
@@ -250,7 +256,8 @@ curl -X POST http://localhost:5001/api/v1/auth/login \
 ## 7. HOST Account (Created by Owner or Manager)
 
 ```bash
-curl -X POST http://localhost:5001/api/v1/staff/create \
+login_owner
+curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -269,12 +276,8 @@ curl -X POST http://localhost:5001/api/v1/staff/create \
 
 ### Login as Host
 ```bash
-curl -X POST http://localhost:5001/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "emailOrUsername": "pooja.host@spicegarden.com",
-    "password": "04072000"
-  }'
+export HOST_TOKEN=$(login "pooja.host@spicegarden.com" "04072000")
+echo "Host Token: $HOST_TOKEN"
 ```
 
 ---
@@ -285,7 +288,8 @@ curl -X POST http://localhost:5001/api/v1/auth/login \
 
 ### Create an admin account as super admin
 ```bash
-curl -X POST http://localhost:5001/api/v1/admin/create-admin \
+login_super_admin
+curl -X POST $BASE/admin/create-admin \
   -H "Authorization: Bearer $SUPER_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

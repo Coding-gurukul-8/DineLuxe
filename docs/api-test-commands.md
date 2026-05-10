@@ -6,6 +6,12 @@
 ```bash
 BASE="http://localhost:5001/api/v1"
 TOKEN="YOUR_TOKEN"
+
+# Tokens expire quickly — refresh TOKEN anytime with:
+# TOKEN=$(curl -s -X POST $BASE/auth/login \
+#   -H "Content-Type: application/json" \
+#   -d '{"emailOrUsername":"ravi.waiter@spicegarden.com","password":"20081999"}' \
+#   | jq -r '.data.accessToken')
 ```
 
 ---
@@ -344,7 +350,7 @@ curl -X DELETE $BASE/menu/items/ITEM_ID \
 curl -X POST $BASE/orders \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"branchId":"BRANCH_ID","tableId":"TABLE_ID","items":[{"menuItemId":"ITEM_ID","quantity":2}],"type":"dine_in"}'
+  -d '{"table_id":"TABLE_ID","order_type":"dine_in","items":[{"menu_item_id":"ITEM_ID","quantity":2}]}'
 
 # Get order by ID (any authenticated)
 curl $BASE/orders/ORDER_ID \

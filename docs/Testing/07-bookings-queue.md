@@ -10,12 +10,23 @@
 
 ```bash
 BASE="http://localhost:5001/api/v1"
-export CUSTOMER_TOKEN="<customer accessToken>"
-export HOST_TOKEN="<host accessToken>"
-export MANAGER_TOKEN="<manager accessToken>"
 export BRANCH_ID="<branch UUID>"
 export TABLE_1_ID="<table UUID>"
 export TABLE_2_ID="<table UUID>"
+
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
+
+login_customer() { export CUSTOMER_TOKEN=$(login "rahul.sharma@gmail.com" "Customer@123"); }
+login_host()     { export HOST_TOKEN=$(login "pooja.host@spicegarden.com" "04072000"); }
+login_manager()  { export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988"); }
+login_waiter()   { export WAITER_TOKEN=$(login "ravi.waiter@spicegarden.com" "20081999"); }
 ```
 
 ---
@@ -25,6 +36,7 @@ export TABLE_2_ID="<table UUID>"
 ## STEP 1 — Customer Creates a Booking
 
 ```bash
+login_customer
 curl -X POST $BASE/bookings \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -46,6 +58,7 @@ curl -X POST $BASE/bookings \
 ## STEP 2 — Customer Creates Another Booking (for cancel test)
 
 ```bash
+login_customer
 curl -X POST $BASE/bookings \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -65,6 +78,7 @@ curl -X POST $BASE/bookings \
 ## STEP 3 — Get My Bookings (Customer)
 
 ```bash
+login_customer
 curl $BASE/bookings/user/me \
   -H "Authorization: Bearer $CUSTOMER_TOKEN"
 ```
@@ -76,6 +90,7 @@ curl $BASE/bookings/user/me \
 ## STEP 4 — Get Booking by ID
 
 ```bash
+login_customer
 curl $BASE/bookings/$BOOKING_ID \
   -H "Authorization: Bearer $CUSTOMER_TOKEN"
 ```
@@ -87,6 +102,7 @@ curl $BASE/bookings/$BOOKING_ID \
 ## STEP 5 — Get Branch Bookings (Host/Manager View)
 
 ```bash
+login_host
 curl "$BASE/bookings/branch/$BRANCH_ID?date=2026-05-15" \
   -H "Authorization: Bearer $HOST_TOKEN"
 ```
@@ -98,6 +114,7 @@ curl "$BASE/bookings/branch/$BRANCH_ID?date=2026-05-15" \
 ## STEP 6 — Customer Marks Arrived (Geo-triggered)
 
 ```bash
+login_customer
 curl -X PATCH $BASE/bookings/$BOOKING_ID/arrived \
   -H "Authorization: Bearer $CUSTOMER_TOKEN"
 ```
@@ -109,6 +126,7 @@ curl -X PATCH $BASE/bookings/$BOOKING_ID/arrived \
 ## STEP 7 — Host Seats the Guest
 
 ```bash
+login_host
 curl -X PATCH $BASE/bookings/$BOOKING_ID/seat \
   -H "Authorization: Bearer $HOST_TOKEN" \
   -H "Content-Type: application/json" \
@@ -124,6 +142,7 @@ curl -X PATCH $BASE/bookings/$BOOKING_ID/seat \
 ## STEP 8 — Customer Cancels Their Booking
 
 ```bash
+login_customer
 curl -X PATCH $BASE/bookings/$BOOKING_ID_2/cancel \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -140,6 +159,7 @@ curl -X PATCH $BASE/bookings/$BOOKING_ID_2/cancel \
 
 ```bash
 # Create one more booking to cancel
+login_customer
 curl -X POST $BASE/bookings \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -152,6 +172,7 @@ curl -X POST $BASE/bookings \
 
 # Save: export BOOKING_ID_3="<id>"
 
+login_manager
 curl -X PATCH $BASE/bookings/$BOOKING_ID_3/cancel \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -166,6 +187,7 @@ curl -X PATCH $BASE/bookings/$BOOKING_ID_3/cancel \
 
 ```bash
 # Create a booking that will be no-showed
+login_customer
 curl -X POST $BASE/bookings \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -178,6 +200,7 @@ curl -X POST $BASE/bookings \
 
 # Save: export BOOKING_NOSHOW="<id>"
 
+login_host
 curl -X PATCH $BASE/bookings/$BOOKING_NOSHOW/no-show \
   -H "Authorization: Bearer $HOST_TOKEN"
 ```
@@ -229,6 +252,7 @@ curl -X POST $BASE/queue/join \
 ## STEP 13 — Get Branch Queue (Host View)
 
 ```bash
+login_host
 curl $BASE/queue/branch/$BRANCH_ID \
   -H "Authorization: Bearer $HOST_TOKEN"
 ```
@@ -240,6 +264,7 @@ curl $BASE/queue/branch/$BRANCH_ID \
 ## STEP 14 — Check Queue Position
 
 ```bash
+login_host
 curl $BASE/queue/position/$QUEUE_ID_1 \
   -H "Authorization: Bearer $HOST_TOKEN"
 ```
@@ -251,6 +276,7 @@ curl $BASE/queue/position/$QUEUE_ID_1 \
 ## STEP 15 — Mark First Guest as Arrived
 
 ```bash
+login_host
 curl -X PATCH $BASE/queue/$QUEUE_ID_1/arrive \
   -H "Authorization: Bearer $HOST_TOKEN"
 ```
@@ -262,6 +288,7 @@ curl -X PATCH $BASE/queue/$QUEUE_ID_1/arrive \
 ## STEP 16 — Assign Table to Queue Guest
 
 ```bash
+login_host
 curl -X PATCH $BASE/queue/$QUEUE_ID_1/assign-table \
   -H "Authorization: Bearer $HOST_TOKEN" \
   -H "Content-Type: application/json" \
@@ -277,6 +304,7 @@ curl -X PATCH $BASE/queue/$QUEUE_ID_1/assign-table \
 ## STEP 17 — Mark Second Guest as No-Show
 
 ```bash
+login_host
 curl -X PATCH $BASE/queue/$QUEUE_ID_2/no-show \
   -H "Authorization: Bearer $HOST_TOKEN"
 ```
@@ -295,6 +323,7 @@ curl -X POST $BASE/queue/join \
 
 # Save: export QUEUE_ID_3="<id>"
 
+login_manager
 curl -X DELETE $BASE/queue/$QUEUE_ID_3 \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -308,6 +337,7 @@ curl -X DELETE $BASE/queue/$QUEUE_ID_3 \
 ## STEP 19 — Geo Arrival Check (Customer Near Restaurant)
 
 ```bash
+login_customer
 curl -X POST $BASE/geo/arrival-check \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -326,18 +356,21 @@ curl -X POST $BASE/geo/arrival-check \
 
 ```bash
 # Booking in the past → 400
+login_customer
 curl -X POST $BASE/bookings \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"branch_id":"'$BRANCH_ID'","booking_date":"2020-01-01","booking_time":"19:00","party_size":2}'
 
 # Party size 0 → 400
+login_customer
 curl -X POST $BASE/bookings \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"branch_id":"'$BRANCH_ID'","booking_date":"2026-06-01","booking_time":"19:00","party_size":0}'
 
 # Cancel already-cancelled booking → 400
+login_customer
 curl -X PATCH $BASE/bookings/$BOOKING_ID_2/cancel \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -349,6 +382,7 @@ curl -X POST $BASE/queue/join \
   -d '{"branch_id":"'$BRANCH_ID'","party_size":0,"name":"Zero","phone":"+919876540099"}'
 
 # Waiter assigning table from queue → 403
+login_waiter
 curl -X PATCH $BASE/queue/$QUEUE_ID_1/assign-table \
   -H "Authorization: Bearer $WAITER_TOKEN" \
   -H "Content-Type: application/json" \

@@ -10,9 +10,19 @@
 
 ```bash
 BASE="http://localhost:5001/api/v1"
-export OWNER_TOKEN="<owner accessToken>"
-export MANAGER_TOKEN="<manager accessToken>"
 export BRANCH_ID="<branch UUID>"
+
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
+
+login_manager() { export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988"); }
+login_waiter()  { export WAITER_TOKEN=$(login "ravi.waiter@spicegarden.com" "20081999"); }
 ```
 
 ---
@@ -20,6 +30,7 @@ export BRANCH_ID="<branch UUID>"
 ## STEP 1 — Get Inventory for Branch
 
 ```bash
+login_manager
 curl $BASE/inventory/branch/$BRANCH_ID \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -31,6 +42,7 @@ curl $BASE/inventory/branch/$BRANCH_ID \
 ## STEP 2 — Create Inventory Items
 
 ```bash
+login_manager
 # Paneer (Dairy)
 curl -X POST $BASE/inventory \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
@@ -138,6 +150,7 @@ export INV_OIL="<cooking oil inventory id>"
 ## STEP 3 — Update Inventory Item (Restock)
 
 ```bash
+login_manager
 curl -X PATCH $BASE/inventory/$INV_PANEER \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -156,6 +169,7 @@ curl -X PATCH $BASE/inventory/$INV_PANEER \
 ## STEP 4 — Deduct Inventory (After Orders)
 
 ```bash
+login_manager
 curl -X POST $BASE/inventory/deduct \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -176,6 +190,7 @@ curl -X POST $BASE/inventory/deduct \
 ## STEP 5 — Log Waste
 
 ```bash
+login_manager
 curl -X POST $BASE/inventory/waste-log \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -194,6 +209,7 @@ curl -X POST $BASE/inventory/waste-log \
 ## STEP 6 — Log Another Waste Entry
 
 ```bash
+login_manager
 curl -X POST $BASE/inventory/waste-log \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -209,6 +225,7 @@ curl -X POST $BASE/inventory/waste-log \
 ## STEP 7 — Get Inventory Alerts (Low Stock)
 
 ```bash
+login_manager
 curl $BASE/inventory/branch/$BRANCH_ID/alerts \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -221,6 +238,7 @@ curl $BASE/inventory/branch/$BRANCH_ID/alerts \
 
 ```bash
 # Deplete butter below threshold
+login_manager
 curl -X POST $BASE/inventory/deduct \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -235,6 +253,7 @@ curl -X POST $BASE/inventory/deduct \
 ### Check alerts again — should now include flour
 
 ```bash
+login_manager
 curl $BASE/inventory/branch/$BRANCH_ID/alerts \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -246,6 +265,7 @@ curl $BASE/inventory/branch/$BRANCH_ID/alerts \
 ## STEP 9 — Restock Low Item (Alert Should Clear)
 
 ```bash
+login_manager
 curl -X PATCH $BASE/inventory/$INV_OIL \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -255,6 +275,7 @@ curl -X PATCH $BASE/inventory/$INV_OIL \
 ### Re-check alerts
 
 ```bash
+login_manager
 curl $BASE/inventory/branch/$BRANCH_ID/alerts \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -266,6 +287,7 @@ curl $BASE/inventory/branch/$BRANCH_ID/alerts \
 ## STEP 10 — Get Full Inventory List Again (Verify Numbers)
 
 ```bash
+login_manager
 curl $BASE/inventory/branch/$BRANCH_ID \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -278,22 +300,26 @@ curl $BASE/inventory/branch/$BRANCH_ID \
 
 ```bash
 # Deduct more than available → 400
+login_manager
 curl -X POST $BASE/inventory/deduct \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"items":[{"inventory_id":"'$INV_PANEER'","quantity":9999}],"reason":"Impossible deduction"}'
 
 # Create inventory with negative quantity → 400
+login_manager
 curl -X POST $BASE/inventory \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"branch_id":"'$BRANCH_ID'","name":"Negative Item","unit":"kg","quantity":-5,"min_threshold":1,"cost_per_unit":100,"category":"dairy"}'
 
 # Waiter accessing inventory → 403
+login_waiter
 curl $BASE/inventory/branch/$BRANCH_ID \
   -H "Authorization: Bearer $WAITER_TOKEN"
 
 # Log waste for non-existent inventory → 404
+login_manager
 curl -X POST $BASE/inventory/waste-log \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \

@@ -10,94 +10,29 @@
 
 ```bash
 BASE="http://localhost:5001/api/v1"
-export OWNER_TOKEN="<owner accessToken>"
 export BRANCH_ID="<branch UUID>"
 export RESTAURANT_ID="<restaurant UUID>"
+
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
+
+login_owner()   { export OWNER_TOKEN=$(login "priya.mehta1@restaurant.com" "Owner@1234"); }
+login_manager() { export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988"); }
+login_waiter()  { export WAITER_TOKEN=$(login "ravi.waiter@spicegarden.com" "20081999"); }
 ```
-
-
-BASE="http://localhost:5001/api/v1"
-
-## OWNER
-```bash
-export OWNER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"priya.mehta1@restaurant.com","password":"Owner@1234"}' \
-  | jq -r '.data.accessToken')
-echo "OWNER: $OWNER_TOKEN"
-```
-## MANAGER
-
-```bash
-export MANAGER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"arjun.manager@spicegarden.com","password":"15051988"}' \
-  | jq -r '.data.accessToken')
-echo "MANAGER: $MANAGER_TOKEN"
-```
-
-## WAITER
-
-```bash
-export WAITER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"ravi.waiter@spicegarden.com","password":"20081999"}' \
-  | jq -r '.data.accessToken')
-echo "WAITER: $WAITER_TOKEN"
-```
-## CHEF
-```bash
-export CHEF_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sanjay.chef@spicegarden.com","password":"10031985"}' \
-  | jq -r '.data.accessToken')
-echo "CHEF: $CHEF_TOKEN"
-```
-
-## CASHIER
-
-```bash
-export CASHIER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sneha.cashier@spicegarden.com","password":"25111995"}' \
-  | jq -r '.data.accessToken')
-echo "CASHIER: $CASHIER_TOKEN"
-```
-## HOST
-```bash
-export HOST_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"pooja.host@spicegarden.com","password":"04072000"}' \
-  | jq -r '.data.accessToken')
-echo "HOST: $HOST_TOKEN"
-```
-
-## CUSTOMER
-```bash
-export CUSTOMER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"rahul.sharma@gmail.com","password":"Customer@123"}' \
-  | jq -r '.data.accessToken')
-echo "CUSTOMER: $CUSTOMER_TOKEN"
-```
-## ADMIN
-```bash
-export ADMIN_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"admin@platform.com","password":"Admin@Secure123"}' \
-  | jq -r '.data.accessToken')
-echo "ADMIN: $ADMIN_TOKEN"
-```
-
-
-
----
 
 ## ── STAFF MANAGEMENT ──────────────────────────────────────────────
 
 ## STEP 1 — Create Manager(WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -123,6 +58,7 @@ curl -X POST $BASE/staff/create \
 ## STEP 2 — Create Waiter(WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -146,6 +82,7 @@ curl -X POST $BASE/staff/create \
 ## STEP 3 — Create Chef(WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -168,6 +105,7 @@ curl -X POST $BASE/staff/create \
 ## STEP 4 — Create Cashier(WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -190,6 +128,7 @@ curl -X POST $BASE/staff/create \
 ## STEP 5 — Create Host(WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -212,6 +151,7 @@ curl -X POST $BASE/staff/create \
 ## STEP 6 — Get All Staff for Branch(WORKING)
 
 ```bash
+login_owner
 curl $BASE/staff/branch/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -223,6 +163,7 @@ curl $BASE/staff/branch/$BRANCH_ID \
 ## STEP 7 — Get Single Staff Member(WORKING)
 
 ```bash
+login_owner
 curl $BASE/staff/$MANAGER_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -234,6 +175,7 @@ curl $BASE/staff/$MANAGER_ID \
 ## STEP 8 — Update Staff Info(WORKING)
 
 ```bash
+login_owner
 curl -X PATCH $BASE/staff/$MANAGER_ID \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -251,6 +193,7 @@ curl -X PATCH $BASE/staff/$MANAGER_ID \
 ## STEP 9 — Toggle Staff Access (Disable)(WORKING)
 
 ```bash
+login_owner
 curl -X PATCH $BASE/staff/$WAITER_ID/toggle-access \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -260,6 +203,7 @@ curl -X PATCH $BASE/staff/$WAITER_ID/toggle-access \
 ### Re-enable
 
 ```bash
+login_owner
 curl -X PATCH $BASE/staff/$WAITER_ID/toggle-access \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -271,6 +215,7 @@ curl -X PATCH $BASE/staff/$WAITER_ID/toggle-access \
 ## STEP 10 — Login as Disabled Staff (Should Fail)(WORKING)
 ```bash
 # First disable the waiter
+login_owner
 curl -X PATCH $BASE/staff/$WAITER_ID/toggle-access \
   -H "Authorization: Bearer $OWNER_TOKEN"
 
@@ -287,6 +232,7 @@ curl -X POST $BASE/auth/login \
 ## STEP 11 — Get Staff Performance
 
 ```bash
+login_owner
 curl $BASE/staff/$MANAGER_ID/performance \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -298,10 +244,7 @@ curl $BASE/staff/$MANAGER_ID/performance \
 ## STEP 12 — Manager Creates Staff (Manager Token)(WORKING)
 
 ```bash
-export MANAGER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"arjun.manager@spicegarden.com","password":"15051988"}' \
-  | jq -r '.data.accessToken')
+login_manager
 
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
@@ -337,6 +280,7 @@ curl $BASE/restaurants/$RESTAURANT_ID/branding
 ## STEP 14 — Update Branding (Owner Only)(WORKING)
 
 ```bash
+login_owner
 curl -X PATCH $BASE/restaurants/$RESTAURANT_ID/branding \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -358,6 +302,7 @@ curl -X PATCH $BASE/restaurants/$RESTAURANT_ID/branding \
 ## STEP 15 — Get Presigned Upload URL for Logo (WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/restaurants/$RESTAURANT_ID/branding/upload-url \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -374,6 +319,7 @@ curl -X POST $BASE/restaurants/$RESTAURANT_ID/branding/upload-url \
 ## STEP 16 — Get Presigned Upload URL for Banner (WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/restaurants/$RESTAURANT_ID/branding/upload-url \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -389,24 +335,28 @@ curl -X POST $BASE/restaurants/$RESTAURANT_ID/branding/upload-url \
 
 ```bash
 # Create staff with underage DOB → 400
+login_owner
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"first_name":"Teen","last_name":"Staff","email":"teen@test.com","phone":"9876543218","dob":"2015-01-01","gender":"male","role":"waiter","branch_id":"'$BRANCH_ID'"}'
 
 # Create staff with invalid role → 400
+login_owner
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"first_name":"Bad","last_name":"Role","email":"bad@test.com","phone":"9876543218","dob":"1995-01-01","gender":"male","role":"admin","branch_id":"'$BRANCH_ID'"}'
 
 # Waiter trying to create staff → 403
+login_waiter
 curl -X POST $BASE/staff/create \
   -H "Authorization: Bearer $WAITER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"first_name":"X","last_name":"Y","email":"x@test.com","phone":"9876543218","dob":"1995-01-01","gender":"male","role":"waiter","branch_id":"'$BRANCH_ID'"}'
 
 # Invalid hex color in branding → 400
+login_owner
 curl -X PATCH $BASE/restaurants/$RESTAURANT_ID/branding \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \

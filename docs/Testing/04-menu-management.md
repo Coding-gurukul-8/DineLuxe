@@ -2,88 +2,21 @@
 
 > **Base:** `http://localhost:5001/api/v1`
 > **Who runs this:** Owner + Manager (write), Public (read)
-> **Purpose:** Create categories, items, addons, bulk updates, availability windows
-
 ---
 
-## Prerequisites
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
 
-```bash
-BASE="http://localhost:5001/api/v1"
-export OWNER_TOKEN="<owner accessToken>"
-export MANAGER_TOKEN="<manager accessToken>"
-export BRANCH_ID="<branch UUID>"
-```
+login_owner()   { export OWNER_TOKEN=$(login "priya.mehta1@restaurant.com" "Owner@1234"); }
+login_manager() { export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988"); }
+login_waiter()  { export WAITER_TOKEN=$(login "ravi.waiter@spicegarden.com" "20081999"); }
 
-
-BASE="http://localhost:5001/api/v1"
-
-## OWNER
-```bash
-export OWNER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"priya.mehta1@restaurant.com","password":"Owner@1234"}' \
-  | jq -r '.data.accessToken')
-echo "OWNER: $OWNER_TOKEN"
-```
-## MANAGER
-
-```bash
-export MANAGER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"arjun.manager@spicegarden.com","password":"15051988"}' \
-  | jq -r '.data.accessToken')
-echo "MANAGER: $MANAGER_TOKEN"
-```
-
-## WAITER
-
-```bash
-export WAITER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"ravi.waiter@spicegarden.com","password":"20081999"}' \
-  | jq -r '.data.accessToken')
-echo "WAITER: $WAITER_TOKEN"
-```
-## CHEF
-```bash
-export CHEF_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sanjay.chef@spicegarden.com","password":"10031985"}' \
-  | jq -r '.data.accessToken')
-echo "CHEF: $CHEF_TOKEN"
-```
-
-## CASHIER
-
-```bash
-export CASHIER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sneha.cashier@spicegarden.com","password":"25111995"}' \
-  | jq -r '.data.accessToken')
-echo "CASHIER: $CASHIER_TOKEN"
-```
-## HOST
-```bash
-export HOST_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"pooja.host@spicegarden.com","password":"04072000"}' \
-  | jq -r '.data.accessToken')
-echo "HOST: $HOST_TOKEN"
-```
-
-## CUSTOMER
-```bash
-export CUSTOMER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"rahul.sharma@gmail.com","password":"Customer@123"}' \
-  | jq -r '.data.accessToken')
-echo "CUSTOMER: $CUSTOMER_TOKEN"
-```
-## ADMIN
-```bash
-export ADMIN_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
   -d '{"emailOrUsername":"admin@platform.com","password":"Admin@Secure123"}' \
   | jq -r '.data.accessToken')
 echo "ADMIN: $ADMIN_TOKEN"
@@ -98,6 +31,7 @@ echo "ADMIN: $ADMIN_TOKEN"
 ## STEP 1 — Create Categories
 
 ```bash
+login_owner
 # Starters
 curl -X POST $BASE/menu/categories \
   -H "Authorization: Bearer $OWNER_TOKEN" \
@@ -168,6 +102,7 @@ export CAT_BEVERAGES="<beverages id>"
 ## STEP 2 — Get All Categories (Manager View)
 
 ```bash
+login_manager
 curl $BASE/menu/branch/$BRANCH_ID/categories \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -179,6 +114,7 @@ curl $BASE/menu/branch/$BRANCH_ID/categories \
 ## STEP 3 — Update a Category
 
 ```bash
+login_owner
 curl -X PATCH $BASE/menu/categories/$CAT_STARTERS \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -195,6 +131,7 @@ curl -X PATCH $BASE/menu/categories/$CAT_STARTERS \
 ## STEP 4 — Reorder Categories
 
 ```bash
+login_owner
 curl -X PATCH $BASE/menu/categories/reorder \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -218,6 +155,7 @@ curl -X PATCH $BASE/menu/categories/reorder \
 ## STEP 5 — Create Menu Items
 
 ```bash
+login_owner
 # Paneer Tikka (Starter, Veg)
 curl -X POST $BASE/menu/items \
   -H "Authorization: Bearer $OWNER_TOKEN" \
@@ -384,6 +322,7 @@ curl $BASE/menu/items/$ITEM_PANEER_TIKKA
 ## STEP 8 — Update a Menu Item
 
 ```bash
+login_manager
 curl -X PATCH $BASE/menu/items/$ITEM_PANEER_TIKKA \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -401,6 +340,7 @@ curl -X PATCH $BASE/menu/items/$ITEM_PANEER_TIKKA \
 ## STEP 9 — Mark Item as Sold Out
 
 ```bash
+login_manager
 curl -X PATCH $BASE/menu/items/$ITEM_DAL_MAKHANI/status \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -422,6 +362,7 @@ curl $BASE/menu/branch/$BRANCH_ID | jq '.data.categories[].items[] | select(.nam
 ## STEP 10 — Mark Item as Hidden
 
 ```bash
+login_manager
 curl -X PATCH $BASE/menu/items/$ITEM_BUTTER_CHICKEN/status \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -433,6 +374,7 @@ curl -X PATCH $BASE/menu/items/$ITEM_BUTTER_CHICKEN/status \
 ### Restore to available
 
 ```bash
+login_manager
 curl -X PATCH $BASE/menu/items/$ITEM_BUTTER_CHICKEN/status \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -444,6 +386,7 @@ curl -X PATCH $BASE/menu/items/$ITEM_BUTTER_CHICKEN/status \
 ## STEP 11 — Bulk Price Update (Percentage Increase)
 
 ```bash
+login_owner
 curl -X PATCH $BASE/menu/items/bulk-price-update \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -465,6 +408,7 @@ curl -X PATCH $BASE/menu/items/bulk-price-update \
 ## STEP 12 — Bulk Price Update (Fixed Decrease)
 
 ```bash
+login_owner
 curl -X PATCH $BASE/menu/items/bulk-price-update \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -483,6 +427,7 @@ curl -X PATCH $BASE/menu/items/bulk-price-update \
 
 ```bash
 # First delete items from the category or use an empty category
+login_owner
 curl -X DELETE $BASE/menu/categories/$CAT_DESSERTS \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -494,6 +439,7 @@ curl -X DELETE $BASE/menu/categories/$CAT_DESSERTS \
 ## STEP 14 — Delete a Menu Item
 
 ```bash
+login_owner
 curl -X DELETE $BASE/menu/items/$ITEM_GARLIC_NAAN \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -506,18 +452,21 @@ curl -X DELETE $BASE/menu/items/$ITEM_GARLIC_NAAN \
 
 ```bash
 # Create item with negative price → 400
+login_owner
 curl -X POST $BASE/menu/items \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"category_id":"'$CAT_STARTERS'","name":"Bad Item","price":-10,"is_veg":true}'
 
 # Reorder with invalid UUID → 400
+login_owner
 curl -X PATCH $BASE/menu/categories/reorder \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"ordered_ids":["not-a-uuid"]}'
 
 # Waiter updating item → 403
+login_waiter
 curl -X PATCH $BASE/menu/items/$ITEM_PANEER_TIKKA \
   -H "Authorization: Bearer $WAITER_TOKEN" \
   -H "Content-Type: application/json" \

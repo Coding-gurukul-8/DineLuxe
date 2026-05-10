@@ -10,86 +10,23 @@
 
 ```bash
 BASE="http://localhost:5001/api/v1"
-export OWNER_TOKEN="<owner accessToken>"
-export MANAGER_TOKEN="<manager accessToken>"
-export HOST_TOKEN="<host accessToken>"
-export WAITER_TOKEN="<waiter accessToken>"
 export BRANCH_ID="<branch UUID>"
-```
 
-BASE="http://localhost:5001/api/v1"
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
 
-## OWNER
-```bash
-export OWNER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"priya.mehta1@restaurant.com","password":"Owner@1234"}' \
-  | jq -r '.data.accessToken')
-echo "OWNER: $OWNER_TOKEN"
+login_owner()   { export OWNER_TOKEN=$(login "priya.mehta1@restaurant.com" "Owner@1234"); }
+login_manager() { export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988"); }
+login_waiter()  { export WAITER_TOKEN=$(login "ravi.waiter@spicegarden.com" "20081999"); }
+login_host()    { export HOST_TOKEN=$(login "pooja.host@spicegarden.com" "04072000"); }
+login_cashier() { export CASHIER_TOKEN=$(login "sneha.cashier@spicegarden.com" "25111995"); }
 ```
-## MANAGER
-
-```bash
-export MANAGER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"arjun.manager@spicegarden.com","password":"15051988"}' \
-  | jq -r '.data.accessToken')
-echo "MANAGER: $MANAGER_TOKEN"
-```
-
-## WAITER
-
-```bash
-export WAITER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"ravi.waiter@spicegarden.com","password":"20081999"}' \
-  | jq -r '.data.accessToken')
-echo "WAITER: $WAITER_TOKEN"
-```
-## CHEF
-```bash
-export CHEF_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sanjay.chef@spicegarden.com","password":"10031985"}' \
-  | jq -r '.data.accessToken')
-echo "CHEF: $CHEF_TOKEN"
-```
-
-## CASHIER
-
-```bash
-export CASHIER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sneha.cashier@spicegarden.com","password":"25111995"}' \
-  | jq -r '.data.accessToken')
-echo "CASHIER: $CASHIER_TOKEN"
-```
-## HOST
-```bash
-export HOST_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"pooja.host@spicegarden.com","password":"04072000"}' \
-  | jq -r '.data.accessToken')
-echo "HOST: $HOST_TOKEN"
-```
-
-## CUSTOMER
-```bash
-export CUSTOMER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"rahul.sharma@gmail.com","password":"Customer@123"}' \
-  | jq -r '.data.accessToken')
-echo "CUSTOMER: $CUSTOMER_TOKEN"
-```
-## ADMIN
-```bash
-export ADMIN_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"admin@platform.com","password":"Admin@Secure123"}' \
-  | jq -r '.data.accessToken')
-echo "ADMIN: $ADMIN_TOKEN"
-```
-
 ---
 
 ## ── TABLES ────────────────────────────────────────────────────────
@@ -97,6 +34,7 @@ echo "ADMIN: $ADMIN_TOKEN"
 ## STEP 1 — Create Tables (Owner/Manager)(WORKING)
 
 ```bash
+login_owner
 # Table T1
 curl -X POST $BASE/tables \
   -H "Authorization: Bearer $OWNER_TOKEN" \
@@ -165,6 +103,7 @@ export TABLE_4_ID="<T4 id>"
 ## STEP 2 — Get All Tables for Branch(WORKING)
 
 ```bash
+login_owner
 curl $BASE/tables/branch/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -176,6 +115,8 @@ curl $BASE/tables/branch/$BRANCH_ID \
 ## STEP 3 — Table Status Transitions (Valid Flow)(WORKING)
 
 ```bash
+login_host
+login_waiter
 # free → reserved (host seating a booking)
 curl -X PATCH $BASE/tables/$TABLE_1_ID/status \
   -H "Authorization: Bearer $HOST_TOKEN" \
@@ -208,6 +149,8 @@ curl -X PATCH $BASE/tables/$TABLE_1_ID/status \
 ## STEP 4 — Manager Override: occupied → free (Emergency Clear)(WORKING)
 
 ```bash
+login_host
+login_manager
 # Put table in occupied state
 curl -X PATCH $BASE/tables/$TABLE_2_ID/status \
   -H "Authorization: Bearer $HOST_TOKEN" \
@@ -228,6 +171,7 @@ curl -X PATCH $BASE/tables/$TABLE_2_ID/status \
 ## STEP 5 — Put Table into Maintenance(WORKING)
 
 ```bash
+login_manager
 curl -X PATCH $BASE/tables/$TABLE_3_ID/status \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -239,6 +183,7 @@ curl -X PATCH $BASE/tables/$TABLE_3_ID/status \
 ### Bring back to free
 
 ```bash
+login_manager
 curl -X PATCH $BASE/tables/$TABLE_3_ID/status \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -250,6 +195,7 @@ curl -X PATCH $BASE/tables/$TABLE_3_ID/status \
 ## STEP 6 — Merge Two Tables (Host/Manager/Owner)(NOT WORKING)
 
 ```bash
+login_host
 curl -X POST $BASE/tables/merge \
   -H "Authorization: Bearer $HOST_TOKEN" \
   -H "Content-Type: application/json" \
@@ -266,6 +212,7 @@ curl -X POST $BASE/tables/merge \
 ## STEP 7 — Delete a Table
 #### (NOT WORKING when Merged)
 ```bash
+login_owner
 curl -X DELETE $BASE/tables/$TABLE_4_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -279,6 +226,7 @@ curl -X DELETE $BASE/tables/$TABLE_4_ID \
 ## STEP 8 — Save Draft Layout(WORKING)
 
 ```bash
+login_owner
 curl -X POST $BASE/floor-layout/branch/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -304,6 +252,7 @@ curl -X POST $BASE/floor-layout/branch/$BRANCH_ID \
 ## STEP 9 — Get Current Layout
 
 ```bash
+login_owner
 curl $BASE/floor-layout/branch/$BRANCH_ID \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -315,6 +264,7 @@ curl $BASE/floor-layout/branch/$BRANCH_ID \
 ## STEP 10 — Publish Layout (Make Live)
 
 ```bash
+login_owner
 curl -X POST $BASE/floor-layout/branch/$BRANCH_ID/publish \
   -H "Authorization: Bearer $OWNER_TOKEN"
 ```
@@ -326,6 +276,7 @@ curl -X POST $BASE/floor-layout/branch/$BRANCH_ID/publish \
 ## STEP 11 — Get Live Layout (Any Staff)
 
 ```bash
+login_waiter
 curl $BASE/floor-layout/branch/$BRANCH_ID/live \
   -H "Authorization: Bearer $WAITER_TOKEN"
 ```
@@ -338,24 +289,28 @@ curl $BASE/floor-layout/branch/$BRANCH_ID/live \
 
 ```bash
 # Invalid table status transition: free → cleaning (not in state machine) → 400
+login_host
 curl -X PATCH $BASE/tables/$TABLE_1_ID/status \
   -H "Authorization: Bearer $HOST_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"new_status":"cleaning"}'
 
 # Merge table with itself → 400
+login_owner
 curl -X POST $BASE/tables/merge \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"table_id_1":"'$TABLE_1_ID'","table_id_2":"'$TABLE_1_ID'"}'
 
 # Cashier trying to create table → 403
+login_cashier
 curl -X POST $BASE/tables \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"branch_id":"'$BRANCH_ID'","label":"T9","capacity":2,"floor_number":0,"shape":"round","zone":"indoor"}'
 
 # Capacity > 20 → 400
+login_owner
 curl -X POST $BASE/tables \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \

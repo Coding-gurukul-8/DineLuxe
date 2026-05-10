@@ -13,166 +13,30 @@
 
 ```bash
 BASE="http://localhost:5001/api/v1"
-export WAITER_TOKEN="<waiter accessToken>"
-export CHEF_TOKEN="<chef accessToken>"
-export MANAGER_TOKEN="<manager accessToken>"
-export OWNER_TOKEN="<owner accessToken>"
-export CASHIER_TOKEN="<cashier accessToken>"
 export TABLE_1_ID="<table UUID>"
 export BRANCH_ID="<branch UUID>"
 export ITEM_PANEER_TIKKA="<menu item UUID>"
 export ITEM_BUTTER_CHICKEN="<menu item UUID>"
 export ITEM_DAL_MAKHANI="<menu item UUID>"
 export ITEM_GARLIC_NAAN="<menu item UUID>"
-```
 
+# Tokens expire fast — use these helpers so every step can refresh its token
+login() {
+  local email="$1" password="$2"
+  curl -s -X POST "$BASE/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"emailOrUsername\":\"$email\",\"password\":\"$password\"}" \
+    | jq -r '.data.accessToken'
+}
 
-BASE="http://localhost:5001/api/v1"
-
-
-## OWNER
-```bash
-export OWNER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"priya.mehta1@restaurant.com","password":"Owner@1234"}' \
-  | jq -r '.data.accessToken')
-echo "OWNER: $OWNER_TOKEN"
-```
-## MANAGER
-
-```bash
-export MANAGER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"arjun.manager@spicegarden.com","password":"15051988"}' \
-  | jq -r '.data.accessToken')
-echo "MANAGER: $MANAGER_TOKEN"
-```
-
-## WAITER
-
-```bash
-export WAITER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"ravi.waiter@spicegarden.com","password":"20081999"}' \
-  | jq -r '.data.accessToken')
-echo "WAITER: $WAITER_TOKEN"
-```
-## CHEF
-```bash
-export CHEF_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sanjay.chef@spicegarden.com","password":"10031985"}' \
-  | jq -r '.data.accessToken')
-echo "CHEF: $CHEF_TOKEN"
-```
-
-## CASHIER
-
-```bash
-export CASHIER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sneha.cashier@spicegarden.com","password":"25111995"}' \
-  | jq -r '.data.accessToken')
-echo "CASHIER: $CASHIER_TOKEN"
-```
-## HOST
-```bash
-export HOST_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"pooja.host@spicegarden.com","password":"04072000"}' \
-  | jq -r '.data.accessToken')
-echo "HOST: $HOST_TOKEN"
-```
-
-## CUSTOMER
-```bash
-export CUSTOMER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"rahul.sharma@gmail.com","password":"Customer@123"}' \
-  | jq -r '.data.accessToken')
-echo "CUSTOMER: $CUSTOMER_TOKEN"
-```
-## ADMIN
-```bash
-export ADMIN_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"admin@platform.com","password":"Admin@Secure123"}' \
-  | jq -r '.data.accessToken')
-echo "ADMIN: $ADMIN_TOKEN"
-```
-
-
-
-
-## OWNER
-```bash
-export OWNER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"priya.mehta1@restaurant.com","password":"Owner@1234"}' \
-  | jq -r '.data.accessToken')
-echo "OWNER: $OWNER_TOKEN"
-```
-## MANAGER
-
-```bash
-export MANAGER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"arjun.manager@spicegarden.com","password":"15051988"}' \
-  | jq -r '.data.accessToken')
-echo "MANAGER: $MANAGER_TOKEN"
-```
-
-## WAITER
-
-```bash
-export WAITER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"ravi.waiter@spicegarden.com","password":"20081999"}' \
-  | jq -r '.data.accessToken')
-echo "WAITER: $WAITER_TOKEN"
-```
-## CHEF
-```bash
-export CHEF_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sanjay.chef@spicegarden.com","password":"10031985"}' \
-  | jq -r '.data.accessToken')
-echo "CHEF: $CHEF_TOKEN"
-```
-
-## CASHIER
-
-```bash
-export CASHIER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"sneha.cashier@spicegarden.com","password":"25111995"}' \
-  | jq -r '.data.accessToken')
-echo "CASHIER: $CASHIER_TOKEN"
-```
-## HOST
-```bash
-export HOST_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"pooja.host@spicegarden.com","password":"04072000"}' \
-  | jq -r '.data.accessToken')
-echo "HOST: $HOST_TOKEN"
-```
-
-## CUSTOMER
-```bash
-export CUSTOMER_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"rahul.sharma@gmail.com","password":"Customer@123"}' \
-  | jq -r '.data.accessToken')
-echo "CUSTOMER: $CUSTOMER_TOKEN"
-```
-## ADMIN
-```bash
-export ADMIN_TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"emailOrUsername":"admin@platform.com","password":"Admin@Secure123"}' \
-  | jq -r '.data.accessToken')
-echo "ADMIN: $ADMIN_TOKEN"
+login_owner()   { export OWNER_TOKEN=$(login "priya.mehta1@restaurant.com" "Owner@1234"); }
+login_manager() { export MANAGER_TOKEN=$(login "arjun.manager@spicegarden.com" "15051988"); }
+login_waiter()  { export WAITER_TOKEN=$(login "ravi.waiter@spicegarden.com" "20081999"); }
+login_chef()    { export CHEF_TOKEN=$(login "sanjay.chef@spicegarden.com" "10031985"); }
+login_cashier() { export CASHIER_TOKEN=$(login "sneha.cashier@spicegarden.com" "25111995"); }
+login_host()    { export HOST_TOKEN=$(login "pooja.host@spicegarden.com" "04072000"); }
+login_customer(){ export CUSTOMER_TOKEN=$(login "rahul.sharma@gmail.com" "Customer@123"); }
+login_admin()   { export ADMIN_TOKEN=$(login "admin@platform.com" "Admin@Secure123"); }
 ```
 
 
@@ -182,10 +46,21 @@ echo "ADMIN: $ADMIN_TOKEN"
 
 ## ── ORDER CREATION ────────────────────────────────────────────────
 
-## STEP 1 — Waiter Creates a Dine-In Order
+## STEP 1 — Waiter Creates a Dine-In Order(WORKING)
+
+### (Optional) Find the correct addon name
+
+Addons are stored on the menu item as JSON and are referenced by **name** when creating an order (there is no `addon_id`).
 
 ```bash
-curl -X POST $BASE/orders \
+# View available addons for Butter Chicken (example)
+login_waiter
+curl -s $BASE/menu/items/$ITEM_BUTTER_CHICKEN | jq '.data.addons'
+```
+
+```bash
+login_waiter
+ORDER_JSON=$(curl -s -X POST $BASE/orders \
   -H "Authorization: Bearer $WAITER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -201,7 +76,7 @@ curl -X POST $BASE/orders \
         "menu_item_id": "'$ITEM_BUTTER_CHICKEN'",
         "quantity": 2,
         "addons": [
-          {"addon_id": "<extra_gravy_addon_id>", "quantity": 1}
+          {"name": "Extra Gravy", "quantity": 1}
         ]
       },
       {
@@ -210,18 +85,23 @@ curl -X POST $BASE/orders \
       }
     ],
     "special_instructions": "Guest is allergic to nuts"
-  }'
+  }')
+
+echo "$ORDER_JSON" | jq
+export ORDER_ID=$(echo "$ORDER_JSON" | jq -r '.data.id')
+echo "ORDER_ID: $ORDER_ID"
 ```
 
-> Save: `export ORDER_ID="<order id>"`
+> `ORDER_ID` is exported automatically above.
 
 **Expected:** `201` — order created with status `pending`, KDS ticket generated
 
 ---
 
-## STEP 2 — Get Order by ID
+## STEP 2 — Get Order by ID(WORKING)
 
 ```bash
+login_waiter
 curl $BASE/orders/$ORDER_ID \
   -H "Authorization: Bearer $WAITER_TOKEN"
 ```
@@ -233,6 +113,7 @@ curl $BASE/orders/$ORDER_ID \
 ## STEP 3 — Get Orders by Table
 
 ```bash
+login_waiter
 curl $BASE/orders/table/$TABLE_1_ID \
   -H "Authorization: Bearer $WAITER_TOKEN"
 ```
@@ -244,6 +125,7 @@ curl $BASE/orders/table/$TABLE_1_ID \
 ## STEP 4 — Get Active Branch Orders (Manager View)
 
 ```bash
+login_manager
 curl $BASE/orders/branch/$BRANCH_ID/active \
   -H "Authorization: Bearer $MANAGER_TOKEN"
 ```
@@ -254,29 +136,35 @@ curl $BASE/orders/branch/$BRANCH_ID/active \
 
 ## ── ORDER ITEMS ───────────────────────────────────────────────────
 
-## STEP 5 — Get Items for the Order
+## STEP 5 — Get Items for the Order(WORKING)
 
 ```bash
-curl $BASE/order-items/order/$ORDER_ID \
+login_waiter
+ORDER_ITEMS_JSON=$(curl -s $BASE/order-items/order/$ORDER_ID \
   -H "Authorization: Bearer $WAITER_TOKEN"
+)
+
+echo "$ORDER_ITEMS_JSON" | jq
+export ORDER_ITEM_1=$(echo "$ORDER_ITEMS_JSON" | jq -r '.data[0].id')
+export ORDER_ITEM_2=$(echo "$ORDER_ITEMS_JSON" | jq -r '.data[1].id')
+export ORDER_ITEM_3=$(echo "$ORDER_ITEMS_JSON" | jq -r '.data[2].id')
+echo "ORDER_ITEM_1: $ORDER_ITEM_1"
+echo "ORDER_ITEM_2: $ORDER_ITEM_2"
+echo "ORDER_ITEM_3: $ORDER_ITEM_3"
 ```
 
 **Expected:** `200` — array of order items, all status `pending`
 
-> Save item IDs:
-```bash
-export ORDER_ITEM_1="<paneer tikka order item id>"
-export ORDER_ITEM_2="<butter chicken order item id>"
-export ORDER_ITEM_3="<garlic naan order item id>"
-```
+> `ORDER_ITEM_1`, `ORDER_ITEM_2`, `ORDER_ITEM_3` are exported automatically above.
 
 ---
 
 ## ── KITCHEN FLOW ──────────────────────────────────────────────────
 
-## STEP 6 — Chef Gets KDS Tickets
+## STEP 6 — Chef Gets KDS Tickets(WORKING)
 
 ```bash
+login_chef
 curl $BASE/kitchen/branch/$BRANCH_ID/tickets \
   -H "Authorization: Bearer $CHEF_TOKEN"
 ```
@@ -285,9 +173,10 @@ curl $BASE/kitchen/branch/$BRANCH_ID/tickets \
 
 ---
 
-## STEP 7 — Chef: Order confirmed → preparing
+## STEP 7 — Chef: Order confirmed → preparing(WORKING)
 
 ```bash
+login_chef
 curl -X PATCH $BASE/kitchen/orders/$ORDER_ID/status \
   -H "Authorization: Bearer $CHEF_TOKEN" \
   -H "Content-Type: application/json" \
@@ -298,9 +187,10 @@ curl -X PATCH $BASE/kitchen/orders/$ORDER_ID/status \
 
 ---
 
-## STEP 8 — Chef: Item-level Status Update (pending → preparing)
+## STEP 8 — Chef: Item-level Status Update (pending → preparing)(WORKING)
 
 ```bash
+login_chef
 curl -X PATCH $BASE/order-items/$ORDER_ITEM_1/status \
   -H "Authorization: Bearer $CHEF_TOKEN" \
   -H "Content-Type: application/json" \
@@ -321,9 +211,10 @@ curl -X PATCH $BASE/order-items/$ORDER_ITEM_3/status \
 
 ---
 
-## STEP 9 — Chef: Items Ready
+## STEP 9 — Chef: Items Ready(WORKING)
 
 ```bash
+login_chef
 curl -X PATCH $BASE/order-items/$ORDER_ITEM_1/status \
   -H "Authorization: Bearer $CHEF_TOKEN" \
   -H "Content-Type: application/json" \
@@ -342,9 +233,10 @@ curl -X PATCH $BASE/order-items/$ORDER_ITEM_3/status \
 
 ---
 
-## STEP 10 — Chef: Order Ready
+## STEP 10 — Chef: Order Ready(WORKING)
 
 ```bash
+login_chef
 curl -X PATCH $BASE/kitchen/orders/$ORDER_ID/status \
   -H "Authorization: Bearer $CHEF_TOKEN" \
   -H "Content-Type: application/json" \
@@ -358,6 +250,7 @@ curl -X PATCH $BASE/kitchen/orders/$ORDER_ID/status \
 ## STEP 11 — Waiter: Serve Individual Items
 
 ```bash
+login_waiter
 curl -X PATCH $BASE/order-items/$ORDER_ITEM_1/serve \
   -H "Authorization: Bearer $WAITER_TOKEN"
 
@@ -375,6 +268,7 @@ curl -X PATCH $BASE/order-items/$ORDER_ITEM_3/serve \
 ## STEP 12 — Check Overdue Orders (Chef/Manager)
 
 ```bash
+login_chef
 curl $BASE/kitchen/branch/$BRANCH_ID/overdue \
   -H "Authorization: Bearer $CHEF_TOKEN"
 ```
@@ -386,7 +280,8 @@ curl $BASE/kitchen/branch/$BRANCH_ID/overdue \
 ## STEP 13 — Create a Takeaway Order
 
 ```bash
-curl -X POST $BASE/orders \
+login_cashier
+TAKEAWAY_JSON=$(curl -s -X POST $BASE/orders \
   -H "Authorization: Bearer $CASHIER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -398,17 +293,22 @@ curl -X POST $BASE/orders \
         "quantity": 1
       }
     ]
-  }'
+  }')
+
+echo "$TAKEAWAY_JSON" | jq
+export TAKEAWAY_ORDER_ID=$(echo "$TAKEAWAY_JSON" | jq -r '.data.id')
+echo "TAKEAWAY_ORDER_ID: $TAKEAWAY_ORDER_ID"
 ```
 
-> Save: `export TAKEAWAY_ORDER_ID="<id>"`
+> `TAKEAWAY_ORDER_ID` is exported automatically above.
 
 ---
 
 ## STEP 14 — Create a Delivery Order
 
 ```bash
-curl -X POST $BASE/orders \
+login_waiter
+DELIVERY_JSON=$(curl -s -X POST $BASE/orders \
   -H "Authorization: Bearer $WAITER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -424,16 +324,21 @@ curl -X POST $BASE/orders \
         "quantity": 4
       }
     ]
-  }'
+  }')
+
+echo "$DELIVERY_JSON" | jq
+export DELIVERY_ORDER_ID=$(echo "$DELIVERY_JSON" | jq -r '.data.id')
+echo "DELIVERY_ORDER_ID: $DELIVERY_ORDER_ID"
 ```
 
-> Save: `export DELIVERY_ORDER_ID="<id>"`
+> `DELIVERY_ORDER_ID` is exported automatically above.
 
 ---
 
 ## STEP 15 — Cancel an Order (Manager)
 
 ```bash
+login_manager
 curl -X PATCH $BASE/orders/$TAKEAWAY_ORDER_ID/cancel \
   -H "Authorization: Bearer $MANAGER_TOKEN" \
   -H "Content-Type: application/json" \
@@ -448,30 +353,35 @@ curl -X PATCH $BASE/orders/$TAKEAWAY_ORDER_ID/cancel \
 
 ```bash
 # Create order with empty items array → 400
+login_waiter
 curl -X POST $BASE/orders \
   -H "Authorization: Bearer $WAITER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"table_id":"'$TABLE_1_ID'","order_type":"dine_in","items":[]}'
 
 # Chef trying to go backwards: ready → preparing → 400
+login_chef
 curl -X PATCH $BASE/kitchen/orders/$ORDER_ID/status \
   -H "Authorization: Bearer $CHEF_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status":"preparing"}'
 
 # Waiter cancelling order (not allowed) → 403
+login_waiter
 curl -X PATCH $BASE/orders/$ORDER_ID/cancel \
   -H "Authorization: Bearer $WAITER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"reason":"test"}'
 
 # Invalid order_type → 400
+login_waiter
 curl -X POST $BASE/orders \
   -H "Authorization: Bearer $WAITER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"table_id":"'$TABLE_1_ID'","order_type":"pickup","items":[{"menu_item_id":"'$ITEM_PANEER_TIKKA'","quantity":1}]}'
 
 # Get order that doesn't exist → 404
+login_waiter
 curl $BASE/orders/00000000-0000-0000-0000-000000000000 \
   -H "Authorization: Bearer $WAITER_TOKEN"
 ```
