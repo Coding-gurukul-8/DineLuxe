@@ -231,30 +231,48 @@ export async function getAlerts(branchId: string) {
 
   if (error) throw error;
 
-  // Client-side filter + ratio sort
-  // Deduplicate alerts to avoid multiple inventory rows for the same ingredient producing repeated alerts.
-  // (Observed behavior: same ingredient_name can appear multiple times in inventory_items.)
-  const lowStock = (data ?? [])
-    .filter((item: any) => Number(item.current_quantity) <= Number(item.reorder_threshold))
-    .map((item: any) => ({
-      ...item,
-      stock_ratio: Number(item.reorder_threshold) > 0
-        ? Number(item.current_quantity) / Number(item.reorder_threshold)
-        : 0,
-    }))
-    // For each ingredient_name keep the row with the lowest stock_ratio
-    .reduce((acc: Record<string, any>, item: any) => {
-      const key = String(item.ingredient_name ?? item.id);
-      const prev = acc[key];
-      if (!prev || item.stock_ratio < prev.stock_ratio) acc[key] = item;
-      return acc;
-    }, {});
+  const items: any[] = data ?? [];
 
-  const withRatio = Object.values(lowStock).sort(
-    (a: any, b: any) => a.stock_ratio - b.stock_ratio
+  // Filter low-stock items first
+  const lowStockCandidates = items
+    .filter((item: any) => Number(item.current_quantity) <= Number(item.reorder_threshold))
+    .map((item: any) => {
+      const current = Number(item.current_quantity);
+      const threshold = Number(item.reorder_threshold);
+      return {
+        ...item,
+        stock_ratio: threshold > 0 ? current / threshold : 0,
+      };
+    });
+
+  // Deduplicate by ingredient_name (normalized). Keep the row with the lowest stock_ratio.
+  const bestByIngredient = new Map<string, any>();
+
+  for (const item of lowStockCandidates) {
+    const key = String(item.ingredient_name ?? item.id).trim().toLowerCase();
+    const prev = bestByIngredient.get(key);
+
+    if (!prev) {
+      bestByIngredient.set(key, item);
+      continue;
+    }
+
+    if (item.stock_ratio < prev.stock_ratio) {
+      bestByIngredient.set(key, item);
+      continue;
+    }
+
+    if (item.stock_ratio === prev.stock_ratio && String(item.id) < String(prev.id)) {
+      bestByIngredient.set(key, item);
+      continue;
+    }
+  }
+
+  const deduped = Array.from(bestByIngredient.values()).sort(
+    (a: any, b: any) => a.stock_ratio - b.stock_ratio || String(a.id).localeCompare(String(b.id))
   );
 
-  return withRatio.map(normalizeInventoryItem);
+  return deduped.map(normalizeInventoryItem);
 }
 
 export async function logWaste(
