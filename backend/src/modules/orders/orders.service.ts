@@ -100,7 +100,7 @@ export async function createOrder(
   if (orderErr || !order) throw orderErr ?? new Error('Failed to create order');
 
   // 7. Insert order items
-  // BUG FIX: added created_at/updated_at — both are NOT NULL in order_items schema.
+  // The live Supabase order_items table has created_at, but not updated_at.
   const orderItemsPayload = items.map((item) => ({
     order_id: order.id,
     menu_item_id: item.menu_item_id,
@@ -110,7 +110,6 @@ export async function createOrder(
     status: 'pending',
     addons: item.addons?.length ? item.addons : null,
     created_at: now,
-    updated_at: now,
   }));
 
   const { error: itemsErr } = await supabaseAdmin.from('order_items').insert(orderItemsPayload);

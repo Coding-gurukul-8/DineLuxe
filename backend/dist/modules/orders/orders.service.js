@@ -62,8 +62,8 @@ async function createOrder(input, restaurantId, branchId, createdBy, customerIdO
     // 5. Auto-assign waiter
     const assignedWaiterId = await (0, waiter_assign_1.findLeastBusyWaiter)(branchId);
     // 6. Insert order — FIX: status 'confirmed' not 'created'
-    // Kitchen CHEF_TRANSITIONS starts from 'confirmed'. Staff-placed orders are
-    // auto-confirmed. 'created' is reserved for customer self-order approval flows.
+    // BUG FIX: also added created_at/updated_at — both are NOT NULL in schema.
+    const now = new Date().toISOString();
     const { data: order, error: orderErr } = await supabase_1.supabaseAdmin
         .from('orders')
         .insert({
@@ -74,13 +74,16 @@ async function createOrder(input, restaurantId, branchId, createdBy, customerIdO
         order_type,
         special_instructions: special_instructions ?? null,
         status: 'confirmed',
-        confirmed_at: new Date().toISOString(),
+        confirmed_at: now,
+        created_at: now,
+        updated_at: now,
     })
         .select()
         .single();
     if (orderErr || !order)
         throw orderErr ?? new Error('Failed to create order');
     // 7. Insert order items
+    // BUG FIX: added created_at/updated_at — both are NOT NULL in order_items schema.
     const orderItemsPayload = items.map((item) => ({
         order_id: order.id,
         menu_item_id: item.menu_item_id,
@@ -89,6 +92,8 @@ async function createOrder(input, restaurantId, branchId, createdBy, customerIdO
         notes: item.notes ?? null,
         status: 'pending',
         addons: item.addons?.length ? item.addons : null,
+        created_at: now,
+        updated_at: now,
     }));
     const { error: itemsErr } = await supabase_1.supabaseAdmin.from('order_items').insert(orderItemsPayload);
     if (itemsErr) {
@@ -154,7 +159,11 @@ async function getOrdersByTable(tableId, branchId) {
         .select('*, order_items(*, menu_items(name, price))')
         .eq('table_id', tableId)
         .eq('branch_id', branchId)
-        .not('status', 'in', '("paid","closed","cancelled")')
+        // BUG FIX: .not() forces Postgres to cast every value against the OrderStatus
+        // enum. If 'cancelled' hasn't been added to the live DB enum yet, Postgres
+        // throws "invalid input value for enum". Use .in() whitelist of statuses
+        // confirmed to exist in the DB so the filter never touches unknown enum values.
+        .in('status', ['created', 'confirmed', 'preparing', 'ready', 'served'])
         .order('created_at', { ascending: false });
     if (error)
         throw error;
@@ -166,7 +175,8 @@ async function getActiveBranchOrders(branchId) {
         .from('orders')
         .select('*, order_items(id, status, menu_items(name)), tables(label)')
         .eq('branch_id', branchId)
-        .not('status', 'in', '("paid","closed","cancelled")')
+        // BUG FIX: same whitelist fix — avoid casting 'cancelled' against DB enum
+        .in('status', ['created', 'confirmed', 'preparing', 'ready', 'served'])
         .order('created_at', { ascending: true });
     if (error)
         throw error;

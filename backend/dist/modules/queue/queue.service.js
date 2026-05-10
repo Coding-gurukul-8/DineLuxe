@@ -213,7 +213,7 @@ async function assignTable(queueId, tableId, hostId) {
     const { data: booking, error: bErr } = await supabase_1.supabaseAdmin
         .from('bookings')
         .insert({
-        user_id: entry.user_id,
+        user_id: entry.user_id ?? hostId,
         branch_id: entry.branch_id,
         table_id: tableId,
         people_count: entry.people_count,

@@ -14,10 +14,10 @@ router.get('/order/:orderId', (0, rbac_middleware_1.requireRole)('waiter', 'cash
 // PATCH /order-items/:id/serve — waiter marks individual item as served
 router.patch('/:id/serve', (0, rbac_middleware_1.requireRole)('waiter', 'manager', 'owner'), order_items_controller_1.handleServeItem);
 // PATCH /order-items/:id/status — internal use (kitchen/system)
-router.patch('/:id/status', (0, rbac_middleware_1.requireRole)('chef', 'manager', 'owner', 'waiter'), (0, validate_middleware_1.validate)({
-    body: zod_1.z.object({
-        status: zod_1.z.enum(['pending', 'preparing', 'ready', 'served', 'cancelled']),
-    }),
-}), order_items_controller_1.handleUpdateItemStatus);
+router.patch('/:id/status', (0, rbac_middleware_1.requireRole)('chef', 'manager', 'owner', 'waiter'), 
+// BUG FIX: same validate({ body: ... }) wrapper bug — pass schema directly
+(0, validate_middleware_1.validate)(zod_1.z.object({
+    status: zod_1.z.enum(['pending', 'preparing', 'ready', 'served', 'cancelled']),
+})), order_items_controller_1.handleUpdateItemStatus);
 exports.default = router;
 //# sourceMappingURL=order-items.routes.js.map

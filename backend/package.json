@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "smoke:test": "node scripts/smoke-test.mjs",
+    "test:group06": "node scripts/group-06-payments.mjs",
     "test:group10": "node scripts/group-10-loyalty-reviews-notifications-support.mjs"
   },
   "dependencies": {

@@ -1,0 +1,27 @@
+{
+  "owner": {
+    "first_name": "Auto",
+    "last_name": "Owner",
+    "email": "owner.test.20260511005916@example.com",
+    "phone": "9876501234",
+    "dob": "1990-01-01",
+    "password": "Owner@1234"
+  },
+  "restaurant": {
+    "name": "Auto Test Restaurant 20260511005916",
+    "cuisine_types": ["Test"],
+    "description": "Automated test",
+    "gst_number": "27AAPFU0939F1ZV",
+    "contact_email": "owner.test.20260511005916@example.com",
+    "contact_phone": "9876501234"
+  },
+  "branch": {
+    "name": "Auto Branch",
+    "address_line1": "123 Test St",
+    "city": "TestCity",
+    "state": "TS",
+    "pincode": "000000",
+    "phone": "9876501234",
+    "seating_capacity": 20
+  }
+}

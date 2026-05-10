@@ -49,7 +49,7 @@ export async function handlePollUPIStatus(req: Request, res: Response, next: Nex
 export async function handleSplitBill(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await splitBill(req.body, req.branchId!, req.restaurantId!);
-    res.status(201).json(success(result, 'Split created'));
+    res.json(success(result, 'Split created'));
   } catch (err) {
     next(err);
   }
@@ -57,7 +57,12 @@ export async function handleSplitBill(req: Request, res: Response, next: NextFun
 
 export async function handleGetReceipt(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await getReceipt(req.params.orderId, req.branchId!);
+    const result = await getReceipt(
+      req.params.orderId,
+      req.branchId ?? req.user?.branch_id ?? '',
+      req.user?.id,
+      req.user?.role
+    );
     res.json(success(result));
   } catch (err) {
     next(err);

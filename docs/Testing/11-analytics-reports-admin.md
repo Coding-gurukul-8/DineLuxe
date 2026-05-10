@@ -40,10 +40,6 @@ login_other_owner() { export OTHER_OWNER_TOKEN=$(login "$OTHER_OWNER_EMAIL" "$OT
 
 ## STEP 1 — Menu Suggestions (AI-based)
 
-```bash
-login_owner
-curl $BASE/analytics/menu-suggestions/$BRANCH_ID \
-  -H "Authorization: Bearer $OWNER_TOKEN"
 ```
 
 **Expected:** `200` — top-performing items, slow-moving items, suggested additions

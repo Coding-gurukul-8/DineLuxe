@@ -12,6 +12,14 @@ import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
 import type { InitiateInput, VerifyInput, SplitInput, UPIQRInput } from './payments.schema';
 
+function toDbPaymentStatus(status: VerifyInput['status']): 'pending' | 'completed' | 'failed' {
+  return status === 'success' ? 'completed' : status;
+}
+
+function toApiPaymentStatus(status: string): 'pending' | 'success' | 'failed' | string {
+  return status === 'completed' ? 'success' : status;
+}
+
 // ─── Compute order total from order_items (orders table has no total_amount) ──
 async function computeOrderTotal(orderId: string): Promise<number> {
   const { data: items } = await supabaseAdmin
@@ -49,7 +57,7 @@ export async function initiatePayment(
   }
 
   if (order.status === 'paid') {
-    throw Object.assign(new Error('Order is already paid'), { statusCode: 422 });
+    throw Object.assign(new Error('Order is already paid'), { statusCode: 409 });
   }
 
   if (order.status === 'cancelled') {
@@ -57,6 +65,16 @@ export async function initiatePayment(
   }
 
   const amount = await computeOrderTotal(order_id);
+
+  const { data: existingPayment } = await supabaseAdmin
+    .from('payments')
+    .select('id')
+    .eq('order_id', order_id)
+    .maybeSingle();
+
+  if (existingPayment?.id) {
+    throw Object.assign(new Error('Payment already exists for this order'), { statusCode: 409 });
+  }
 
   const gatewayOrderId: string | null = null; // TODO: replace with real gateway order ID
 
@@ -89,6 +107,7 @@ export async function initiatePayment(
 // ─── Verify Payment ───────────────────────────────────────────────────────────
 export async function verifyPayment(input: VerifyInput, branchId: string) {
   const { payment_id, status, gateway_payment_id, gateway_signature } = input;
+  const dbStatus = toDbPaymentStatus(status);
 
   const { data: payment, error: fetchErr } = await supabaseAdmin
     .from('payments')
@@ -108,7 +127,7 @@ export async function verifyPayment(input: VerifyInput, branchId: string) {
   const { data: updated, error: updateErr } = await supabaseAdmin
     .from('payments')
     .update({
-      status,
+      status: dbStatus,
       gateway_payment_id: gateway_payment_id ?? null,
       transaction_ref: gateway_signature ?? null,
     })
@@ -124,7 +143,7 @@ export async function verifyPayment(input: VerifyInput, branchId: string) {
     await onPaymentComplete(payment.order_id, ctx.branchId, ctx.restaurantId);
   }
 
-  return updated;
+  return { ...updated, status: toApiPaymentStatus(updated.status) };
 }
 
 // ─── Generate UPI QR ──────────────────────────────────────────────────────────
@@ -167,6 +186,8 @@ export async function generateUPIQR(input: UPIQRInput, branchId: string) {
   });
 
   return {
+    qrCode: qrBase64,
+    upiRef: transactionRef,
     upi_link: upiLink,
     qr_base64: qrBase64,
     amount,
@@ -203,40 +224,87 @@ export async function splitBill(input: SplitInput, branchId: string, restaurantI
     );
   }
 
-  // Create individual payment stubs for each split; store split details in split_details JSON
-  const paymentInserts = splits.map((s) => ({
-    order_id,
-    amount: s.amount,
-    method: s.payment_method,
-    status: 'pending',
-    split_details: { label: s.label, is_split: true, total_parts: splits.length },
-  }));
+  const { data: order, error: orderErr } = await supabaseAdmin
+    .from('orders')
+    .select('id, status, branch_id')
+    .eq('id', order_id)
+    .eq('branch_id', branchId)
+    .single();
 
-  const { data: payments, error: insertErr } = await supabaseAdmin
+  if (orderErr || !order) {
+    throw Object.assign(new Error('Order not found'), { statusCode: 404 });
+  }
+
+  if (order.status === 'paid') {
+    throw Object.assign(new Error('Order is already paid'), { statusCode: 409 });
+  }
+
+  const { data: existingPayment } = await supabaseAdmin
     .from('payments')
-    .insert(paymentInserts)
-    .select();
+    .select('id')
+    .eq('order_id', order_id)
+    .maybeSingle();
+
+  if (existingPayment?.id) {
+    throw Object.assign(new Error('Payment already exists for this order'), { statusCode: 409 });
+  }
+
+  // The live schema has a unique payment per order, so store the split parts as
+  // JSON while returning the three logical split records the API contract expects.
+  const { data: payment, error: insertErr } = await supabaseAdmin
+    .from('payments')
+    .insert({
+      order_id,
+      amount: totalSplit,
+      method: 'split',
+      status: 'pending',
+      split_details: {
+        is_split: true,
+        total_parts: splits.length,
+        splits,
+      },
+    })
+    .select()
+    .single();
 
   if (insertErr) throw insertErr;
 
-  // Cache context for each payment
-  for (const p of payments ?? []) {
-    await redis.setex(`payment_ctx:${p.id}`, 3600, JSON.stringify({ branchId, restaurantId }));
-  }
+  await redis.setex(`payment_ctx:${payment.id}`, 3600, JSON.stringify({ branchId, restaurantId }));
 
-  return payments;
+  return splits.map((split, index) => ({
+    id: `${payment.id}:${index + 1}`,
+    payment_id: payment.id,
+    order_id,
+    amount: split.amount,
+    method: split.payment_method,
+    status: 'pending',
+    split_details: {
+      label: split.label,
+      is_split: true,
+      part: index + 1,
+      total_parts: splits.length,
+    },
+  }));
 }
 
 // ─── Get Receipt ─────────────────────────────────────────────────────────────
 // FIX: orders has no join to restaurants; branches are separate
-export async function getReceipt(orderId: string, branchId: string) {
+export async function getReceipt(orderId: string, branchId: string, userId?: string, role?: string) {
+  const orderQuery = supabaseAdmin
+    .from('orders')
+    .select('*, order_items(*, menu_items(name, price)), tables(label), branches(name, address)')
+    .eq('id', orderId);
+
+  if (branchId) {
+    orderQuery.eq('branch_id', branchId);
+  } else if (role === 'customer' && userId) {
+    orderQuery.eq('customer_id', userId);
+  } else {
+    throw Object.assign(new Error('No branch context found'), { statusCode: 403 });
+  }
+
   const [orderRes, paymentsRes] = await Promise.all([
-    supabaseAdmin
-      .from('orders')
-      .select('*, order_items(*, menu_items(name, price)), tables(label), branches(name, address)')
-      .eq('id', orderId)
-      .eq('branch_id', branchId)
-      .single(),
+    orderQuery.single(),
     supabaseAdmin
       .from('payments')
       .select('id, amount, method, status, transaction_ref, gateway_payment_id, created_at')
@@ -254,7 +322,10 @@ export async function getReceipt(orderId: string, branchId: string) {
     order_id: orderId,
     computed_total: computedTotal,
     data: orderRes.data,
-    payments: paymentsRes.data ?? [],
+    payments: (paymentsRes.data ?? []).map((payment) => ({
+      ...payment,
+      status: toApiPaymentStatus(payment.status),
+    })),
   };
 }
 

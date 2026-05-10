@@ -29,6 +29,15 @@ router.post('/webhook', validate({ body: webhookSchema }), handleGatewayWebhookC
 
 // ─── Protected Payment Routes ─────────────────────────────────────────────────
 
+// GET /payments/receipt/:orderId - customers may not have tenant claims, so
+// the service enforces order ownership/branch access instead of injectTenant.
+router.get(
+  '/receipt/:orderId',
+  authenticate,
+  requireRole('customer', 'cashier', 'manager', 'owner', 'waiter'),
+  handleGetReceipt
+);
+
 router.use(authenticate, injectTenant);
 
 // POST /payments/initiate — cashier or customer
