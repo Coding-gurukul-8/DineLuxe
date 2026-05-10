@@ -32,11 +32,12 @@ router.patch(
 router.patch(
   '/:id/status',
   requireRole('chef', 'manager', 'owner', 'waiter'),
-  validate({
-    body: z.object({
+  // BUG FIX: same validate({ body: ... }) wrapper bug — pass schema directly
+  validate(
+    z.object({
       status: z.enum(['pending', 'preparing', 'ready', 'served', 'cancelled']),
-    }),
-  }),
+    })
+  ),
   handleUpdateItemStatus
 );
 

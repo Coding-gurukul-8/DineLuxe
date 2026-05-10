@@ -21,7 +21,9 @@ router.use(authenticate, injectTenant);
 router.post(
   '/',
   requireRole('waiter', 'customer', 'manager', 'owner', 'cashier'),
-  validate({ body: createOrderSchema }),
+  // BUG FIX: validate({ body: schema }) passes a plain object — middleware calls
+  // schema.safeParse() which doesn't exist on a plain object. Pass schema directly.
+  validate(createOrderSchema),
   handleCreateOrder
 );
 
@@ -46,7 +48,7 @@ router.get('/:id', handleGetOrder);
 router.patch(
   '/:id/cancel',
   requireRole('manager', 'owner'),
-  validate({ body: cancelOrderSchema }),
+  validate(cancelOrderSchema),
   handleCancelOrder
 );
 

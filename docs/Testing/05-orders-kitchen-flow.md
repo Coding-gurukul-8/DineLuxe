@@ -55,7 +55,7 @@ Addons are stored on the menu item as JSON and are referenced by **name** when c
 ```bash
 # View available addons for Butter Chicken (example)
 login_waiter
-curl -s $BASE/menu/items/$ITEM_BUTTER_CHICKEN | jq '.data.addons'
+curl -s $BASE/menu/items/$ITEM_BUTTER_CHICKEN | jq '.data.addons // .data.menu_addons // .data.addon'
 ```
 
 ```bash
@@ -94,7 +94,7 @@ echo "ORDER_ID: $ORDER_ID"
 
 > `ORDER_ID` is exported automatically above.
 
-**Expected:** `201` — order created with status `pending`, KDS ticket generated
+**Expected:** `201` — order created with status `confirmed`, KDS ticket generated
 
 ---
 
@@ -247,7 +247,7 @@ curl -X PATCH $BASE/kitchen/orders/$ORDER_ID/status \
 
 ---
 
-## STEP 11 — Waiter: Serve Individual Items
+## STEP 11 — Waiter: Serve Individual Items(WORKING)
 
 ```bash
 login_waiter
@@ -265,7 +265,7 @@ curl -X PATCH $BASE/order-items/$ORDER_ITEM_3/serve \
 
 ---
 
-## STEP 12 — Check Overdue Orders (Chef/Manager)
+## STEP 12 — Check Overdue Orders (Chef/Manager)(WORKING)
 
 ```bash
 login_chef
