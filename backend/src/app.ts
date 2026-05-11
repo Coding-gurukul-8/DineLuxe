@@ -48,6 +48,15 @@ app.use(hpp());
 // ─── Routes ─────────────────────────────────────────────────────────────────
 const API = '/api/v1';
 
+// Root route
+app.get('/', (_req, res) => {
+  res.status(200).json({
+    message: 'Welcome to DineLuxe API',
+    docs: 'API documentation available at /api/v1/health',
+    frontend: 'http://localhost:3009'
+  });
+});
+
 app.use(`${API}/auth`, authRoutes);
 app.use(`${API}/admin`, adminRoutes);
 app.use(`${API}/analytics`, analyticsRoutes);

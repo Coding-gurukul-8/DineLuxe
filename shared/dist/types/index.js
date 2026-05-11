@@ -1,1 +1,1 @@
-export {};
+export { ApiError } from "./api";

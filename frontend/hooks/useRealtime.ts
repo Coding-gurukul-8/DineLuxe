@@ -5,12 +5,19 @@ import { io, Socket } from "socket.io-client";
 import { useAuth } from "./useAuth";
 import { getBrowserSupabase } from "@/lib/supabase-client";
 
+function isSupabaseConfigured() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  return Boolean(url?.startsWith("https://") && key && key !== "anon-key" && key.length > 40);
+}
+
 export function useRealtime() {
   const { session } = useAuth();
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     const initSocket = async () => {
+      if (!isSupabaseConfigured()) return;
       const supabase = await getBrowserSupabase();
       const { data: { session } } = await supabase.auth.getSession();
       

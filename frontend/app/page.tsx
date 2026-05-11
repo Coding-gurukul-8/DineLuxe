@@ -30,4 +30,5 @@ export default async function RootPage() {
     case "delivery_partner": redirect("/delivery");
     default:              redirect("/auth/login");
   }
+
 }

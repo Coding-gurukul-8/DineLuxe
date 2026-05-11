@@ -1,30 +1,7 @@
 import { getBrowserSupabase } from "./supabase-client";
- 
+import { ApiError, ApiResponse, ApiErrorResponse } from "@repo/shared";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/v1";
- 
-export class ApiError extends Error {
-  constructor(
-    public statusCode: number,
-    public code: string,
-    message: string,
-    public field?: string
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
- 
-interface ApiResponse<T> {
-  success: boolean;
-  data: T;
-  meta?: { page: number; limit: number; total: number; pages: number };
-  message?: string;
-}
- 
-interface ApiErrorResponse {
-  success: false;
-  error: { code: string; message: string; field?: string };
-}
  
 async function getAuthHeaders(): Promise<HeadersInit> {
   const supabase = await getBrowserSupabase();
