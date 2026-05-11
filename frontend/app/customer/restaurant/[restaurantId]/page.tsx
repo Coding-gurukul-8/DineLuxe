@@ -1,5 +1,6 @@
 "use client"
 
+import { use } from "react";
 import RouteShell from '@/components/shared/RouteShell'
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
@@ -7,11 +8,11 @@ import CustomerTableSelector from "@/components/floor/CustomerTableSelector";
 import ThemeToggle from "@/components/ui/ThemeToggle";
 
 interface Props {
-  params: { restaurantId: string };
+  params: Promise<{ restaurantId: string }>;
 }
 
 export default function Page({ params }: Props) {
-  const { restaurantId } = params;
+  const { restaurantId } = use(params);
   const { data, isLoading } = useQuery({
     queryKey: ["restaurant", restaurantId],
     queryFn: () => apiClient.get<any>(`/restaurants/${restaurantId}`),

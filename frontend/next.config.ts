@@ -1,4 +1,6 @@
 import type { NextConfig } from "next";
+
+const backendOrigin = process.env.BACKEND_ORIGIN?.trim() || "http://localhost:4000";
  
 const nextConfig: NextConfig = {
   images: {
@@ -12,7 +14,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/v1/:path*",
-        destination: "http://localhost:4000/api/v1/:path*",
+        destination: `${backendOrigin}/api/v1/:path*`,
       },
     ];
   },
