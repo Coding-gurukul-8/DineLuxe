@@ -31,10 +31,10 @@ export default function ManagerPage() {
   const { on, joinRoom }  = useRealtime();
   const qc                = useQueryClient();
  
-  const { data: tables  = [] } = useQuery({ queryKey:["mgr","tables",  branchId], queryFn:()=>apiClient.get<TableUnit[]>  (`/branch/${branchId}/tables`),  enabled:!!branchId, refetchInterval:30_000 });
-  const { data: orders  = [] } = useQuery({ queryKey:["mgr","orders",  branchId], queryFn:()=>apiClient.get<ActiveOrder[]>(`/branch/${branchId}/orders/active`), enabled:!!branchId, refetchInterval:15_000 });
-  const { data: staff   = [] } = useQuery({ queryKey:["mgr","staff",   branchId], queryFn:()=>apiClient.get<StaffMember[]>(`/branch/${branchId}/staff/active`), enabled:!!branchId, refetchInterval:60_000 });
-  const { data: alerts  = [] } = useQuery({ queryKey:["mgr","alerts",  branchId], queryFn:()=>apiClient.get<Alert[]>      (`/branch/${branchId}/alerts`),        enabled:!!branchId, refetchInterval:10_000 });
+  const { data: tables  = [] } = useQuery({ queryKey:["mgr","tables",  branchId], queryFn:()=>apiClient.get<TableUnit[]>  (`/tables/branch/${branchId}`),        enabled:!!branchId, refetchInterval:30_000 });
+  const { data: orders  = [] } = useQuery({ queryKey:["mgr","orders",  branchId], queryFn:()=>apiClient.get<ActiveOrder[]>(`/orders/branch/${branchId}/active`),  enabled:!!branchId, refetchInterval:15_000 });
+  const { data: staff   = [] } = useQuery({ queryKey:["mgr","staff",   branchId], queryFn:()=>apiClient.get<StaffMember[]>(`/staff/branch/${branchId}`),          enabled:!!branchId, refetchInterval:60_000 });
+  const { data: alerts  = [] } = useQuery({ queryKey:["mgr","alerts",  branchId], queryFn:()=>apiClient.get<Alert[]>      (`/inventory/branch/${branchId}/alerts`), enabled:!!branchId, refetchInterval:10_000 });
  
   useEffect(() => {
     if (!branchId) return;

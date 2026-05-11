@@ -9,6 +9,7 @@ const envSchema = z.object({
 
   // Frontend
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL'),
+  FRONTEND_URLS: z.string().optional(),
 
   // Supabase
   SUPABASE_URL: z.string().url('SUPABASE_URL must be a valid URL'),

@@ -30,7 +30,7 @@ function normalizeBodyKeys(body: unknown) {
 }
 
 function normalizeRequest(method: RequestMethod, path: string, body?: unknown): NormalizedRequest {
-  let normalized: NormalizedRequest = { method, path, body: normalizeBodyKeys(body) };
+  const normalized: NormalizedRequest = { method, path, body: normalizeBodyKeys(body) };
 
   const branchTables = path.match(/^\/branch\/([^/?]+)\/tables(\?.*)?$/);
   if (method === "GET" && branchTables) {

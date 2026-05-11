@@ -5,6 +5,7 @@ import compression from 'compression';
 import morgan from 'morgan';
 import hpp from 'hpp';
 import { corsMiddleware } from './config/cors';
+import { config } from './config/env';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 
 // ─── Route modules ───────────────────────────────────────────────────────────
@@ -53,7 +54,7 @@ app.get('/', (_req, res) => {
   res.status(200).json({
     message: 'Welcome to DineLuxe API',
     docs: 'API documentation available at /api/v1/health',
-    frontend: 'http://localhost:3009'
+    frontend: config.FRONTEND_URL,
   });
 });
 

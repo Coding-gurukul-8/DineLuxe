@@ -32,14 +32,21 @@ export default function CashierPage() {
  
   const { data: queue = [] } = useQuery({
     queryKey: ["cashier","queue", branchId],
-    queryFn:  () => apiClient.get<BillOrder[]>(`/branch/${branchId}/bill-queue`),
+    queryFn:  () => apiClient.get<BillOrder[]>(`/orders/branch/${branchId}/active`),
     enabled: !!branchId,
     refetchInterval: 15_000,
   });
  
   const { mutate: processPayment, isPending } = useMutation({
     mutationFn: ({ orderId, payload }:{ orderId:string; payload:unknown }) =>
-      apiClient.post(`/orders/${orderId}/payment`, payload),
+      apiClient.post(`/payments/initiate`, {
+        order_id: orderId,
+        payment_method: (payload as { method?: string }).method === "upi"
+          ? "upi"
+          : (payload as { method?: string }).method === "card"
+            ? "card"
+            : "cash",
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey:["cashier","queue"] });
       toast.success("Payment processed  receipt sent");

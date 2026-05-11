@@ -20,7 +20,7 @@ export function QueueBoard({ branchId, showFullList = false }: QueueBoardProps) 
  
   const { data: queue = [] } = useQuery({
     queryKey: ["queue","board", branchId],
-    queryFn:  () => apiClient.get<QueueEntry[]>(`/branch/${branchId}/queue`),
+    queryFn:  () => apiClient.get<QueueEntry[]>(`/queue/branch/${branchId}`),
     enabled: !!branchId,
     refetchInterval: 30_000,
   });

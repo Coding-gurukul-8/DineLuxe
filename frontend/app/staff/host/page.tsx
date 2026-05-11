@@ -23,13 +23,15 @@ export default function HostPage() {
   const [seatingId, setSeating] = useState<string|null>(null);
   const [selectedTable, setTable] = useState<string>("");
  
-  const { data: queue    = [] } = useQuery({ queryKey:["host","queue",   branchId], queryFn:()=>apiClient.get<QueueEntry[]>(`/branch/${branchId}/queue`),           enabled:!!branchId, refetchInterval:15_000 });
-  const { data: bookings = [] } = useQuery({ queryKey:["host","bookings",branchId], queryFn:()=>apiClient.get<Booking[]>   (`/branch/${branchId}/bookings/today`),    enabled:!!branchId, refetchInterval:30_000 });
-  const { data: tables   = [] } = useQuery({ queryKey:["host","tables",  branchId], queryFn:()=>apiClient.get<FreeTable[]> (`/branch/${branchId}/tables?status=free`), enabled:!!branchId, refetchInterval:15_000 });
+  const { data: queue    = [] } = useQuery({ queryKey:["host","queue",   branchId], queryFn:()=>apiClient.get<QueueEntry[]>(`/queue/branch/${branchId}`),             enabled:!!branchId, refetchInterval:15_000 });
+  const { data: bookings = [] } = useQuery({ queryKey:["host","bookings",branchId], queryFn:()=>apiClient.get<Booking[]>   (`/bookings/branch/${branchId}`),          enabled:!!branchId, refetchInterval:30_000 });
+  const { data: tables   = [] } = useQuery({ queryKey:["host","tables",  branchId], queryFn:()=>apiClient.get<FreeTable[]> (`/tables/branch/${branchId}?status=free`), enabled:!!branchId, refetchInterval:15_000 });
  
   const { mutate: seatGuest } = useMutation({
     mutationFn: ({ entryId, tableId, type }:{ entryId:string; tableId:string; type:"queue"|"booking" }) =>
-      apiClient.post(`/${type}/${entryId}/seat`, { tableId }),
+      type === "queue"
+        ? apiClient.patch(`/queue/${entryId}/assign-table`, { tableId })
+        : apiClient.patch(`/bookings/${entryId}/seat`, { tableId }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey:["host"] });
       toast.success("Guest seated successfully");

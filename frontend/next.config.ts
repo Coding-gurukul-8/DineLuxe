@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const backendOrigin = process.env.BACKEND_ORIGIN?.trim() || "http://localhost:4000";
+const backendOrigin =
+  process.env.BACKEND_ORIGIN?.trim() ||
+  (process.env.NODE_ENV === "production" ? "" : "http://localhost:4000");
  
 const nextConfig: NextConfig = {
   images: {
@@ -11,6 +13,8 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: ["socket.io-client"],
   async rewrites() {
+    if (!backendOrigin) return [];
+
     return [
       {
         source: "/api/v1/:path*",

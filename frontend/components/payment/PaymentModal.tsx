@@ -39,11 +39,21 @@ export function PaymentModal({ orderId, total, onClose, onSuccess }: PaymentModa
   });
  
   const { mutate: pay, isPending } = useMutation({
-    mutationFn: () => apiClient.post(`/orders/${orderId}/payment`, {
-      method,
-      couponCode: couponApplied ? coupon : undefined,
-      splits: method === "split" ? split : undefined,
-    }),
+    mutationFn: () => method === "split"
+      ? apiClient.post(`/payments/split`, {
+          order_id: orderId,
+          splits: Object.entries(split)
+            .filter(([, amount]) => amount > 0)
+            .map(([paymentMethod, amount]) => ({
+              label: paymentMethod.toUpperCase(),
+              amount,
+              payment_method: paymentMethod,
+            })),
+        })
+      : apiClient.post(`/payments/initiate`, {
+          order_id: orderId,
+          payment_method: method === "upi" ? "upi" : method === "card" ? "card" : "cash",
+        }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey:["orders"] });
       toast.success("Payment successful!");

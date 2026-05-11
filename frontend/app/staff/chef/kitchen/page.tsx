@@ -74,14 +74,14 @@ export default function KDSPage() {
  
   const { data: orders = [] } = useQuery({
     queryKey: ["kds", branchId],
-    queryFn:  () => apiClient.get<KitchenOrder[]>(`/kitchen/branch/${branchId}/orders`),
+    queryFn:  () => apiClient.get<KitchenOrder[]>(`/kitchen/branch/${branchId}/tickets`),
     enabled: !!branchId,
     refetchInterval: 30_000,
   });
  
   const { mutate: updateStatus } = useMutation({
     mutationFn: ({ id, status }:{ id:string; status:string }) =>
-      apiClient.patch(`/orders/${id}/kitchen-status`, { status }),
+      apiClient.patch(`/kitchen/orders/${id}/status`, { status }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["kds"] }),
   });
  

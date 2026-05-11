@@ -40,7 +40,7 @@ export function useTableStatus(branchId?: string) {
 
     try {
       setLoading(true);
-      const data = await apiClient.get<TableStatus[]>(`/branch/${targetBranchId}/live-layout`);
+      const data = await apiClient.get<TableStatus[]>(`/floor-layout/branch/${targetBranchId}/live`);
       setTables(data);
       setError(null);
     } catch (err) {

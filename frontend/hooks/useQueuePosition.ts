@@ -129,8 +129,8 @@ export function useQueuePosition(branchId?: string) {
 
     try {
       const entry = await apiClient.post<QueueEntry>(`/queue/join`, {
-        branchId: targetBranchId,
-        peopleCount: partySize,
+        branch_id: targetBranchId,
+        people_count: partySize,
       });
       setQueue((prev) => [entry, ...prev]);
       return entry;
@@ -141,7 +141,7 @@ export function useQueuePosition(branchId?: string) {
 
   const markArrived = useCallback(async (queueId: string) => {
     try {
-      await apiClient.post(`/queue/${queueId}/mark-arrived`, {});
+      await apiClient.patch(`/queue/${queueId}/arrive`, {});
       setQueue((prev) =>
         prev.map((entry) =>
           entry.queueId === queueId
@@ -156,7 +156,7 @@ export function useQueuePosition(branchId?: string) {
 
   const markNoShow = useCallback(async (queueId: string) => {
     try {
-      await apiClient.post(`/queue/${queueId}/no-show`, {});
+      await apiClient.patch(`/queue/${queueId}/no-show`, {});
       setQueue((prev) => prev.filter((entry) => entry.queueId !== queueId));
     } catch (err) {
       throw err;
