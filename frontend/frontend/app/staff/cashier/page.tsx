@@ -1,178 +1,193 @@
-"use client";
-import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient }   from "@/lib/api-client";
-import { useAuth }     from "@/hooks/useAuth";
-import { useRealtime } from "@/hooks/useRealtime";
-import { formatCurrency } from "@/lib/utils";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import { WS_EVENTS, PAYMENT_METHODS } from "@/lib/constants";
-import { cn } from "@/lib/utils";
-import { CreditCard, Banknote, Smartphone, Split, CheckCircle, Loader2 } from "lucide-react";
-import { toast } from "sonner";
- 
-interface BillOrder {
-  id: string; tableLabel: string;
-  items: { name:string; quantity:number; unitPrice:number; }[];
-  subtotal: number; tax: number; discount: number; total: number;
-  status: string;
-}
- 
-const METHOD_ICONS: Record<string, React.ElementType> = {
-  cash: Banknote, card: CreditCard, upi: Smartphone, split: Split,
-};
- 
-export default function CashierPage() {
-  const { branchId }      = useAuth();
-  const { on, joinRoom }  = useRealtime();
-  const qc                = useQueryClient();
-  const [selected, setSelected]   = useState<BillOrder|null>(null);
-  const [method, setMethod]       = useState<string>("cash");
-  const [splitAmounts, setSplit]  = useState<{ cash:number; card:number; upi:number }>({ cash:0, card:0, upi:0 });
- 
-  const { data: queue = [] } = useQuery({
-    queryKey: ["cashier","queue", branchId],
-    queryFn:  () => apiClient.get<BillOrder[]>(`/orders/branch/${branchId}/active`),
-    enabled: !!branchId,
-    refetchInterval: 15_000,
-  });
- 
-  const { mutate: processPayment, isPending } = useMutation({
-    mutationFn: ({ orderId, payload }:{ orderId:string; payload:unknown }) =>
-      apiClient.post(`/payments/initiate`, {
-        order_id: orderId,
-        payment_method: (payload as { method?: string }).method === "upi"
-          ? "upi"
-          : (payload as { method?: string }).method === "card"
-            ? "card"
-            : "cash",
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey:["cashier","queue"] });
-      toast.success("Payment processed  receipt sent");
-      setSelected(null);
-    },
-    onError: () => toast.error("Payment failed - try again"),
-  });
- 
-  useEffect(() => {
-    if (!branchId) return;
-    joinRoom(`branch:${branchId}:cashier`);
-    const u = on(WS_EVENTS.PAYMENT_CONFIRMED, () => qc.invalidateQueries({ queryKey:["cashier","queue"] }));
-    return () => { u(); };
-  }, [branchId, on, joinRoom, qc]);
+"use client"
 
- 
-  const handlePay = () => {
-    if (!selected) return;
-    const payload = method === "split"
-      ? { method:"split", splits: splitAmounts }
-      : { method };
-    processPayment({ orderId: selected.id, payload });
-  };
- 
+import { useState } from "react"
+import { motion } from "framer-motion"
+import { PageWrapper } from "@/components/layout/PageWrapper"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { 
+  CreditCard, 
+  IndianRupee,
+  Printer,
+  QrCode,
+  Calendar,
+  User,
+  ShoppingCart,
+  Plus,
+  Minus,
+  Check
+} from "lucide-react"
+
+interface OrderItem {
+  id: string
+  name: string
+  price: number
+  quantity: number
+  total: number
+}
+
+interface PaymentMethod {
+  id: string
+  name: string
+  icon: React.ReactNode
+}
+
+export default function CashierPOSPage() {
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([
+    { id: "1", name: "Margherita Pizza", price: 250, quantity: 2, total: 500 },
+    { id: "2", name: "Caesar Salad", price: 180, quantity: 1, total: 180 },
+    { id: "3", name: "Garlic Bread", price: 120, quantity: 1, total: 120 }
+  ])
+  
+  const [paymentMethod, setPaymentMethod] = useState("cash")
+  const [amountReceived, setAmountReceived] = useState("")
+  
+  const paymentMethods: PaymentMethod[] = [
+    { id: "cash", name: "Cash", icon: <IndianRupee size={20} /> },
+    { id: "card", name: "Card", icon: <CreditCard size={20} /> },
+    { id: "upi", name: "UPI", icon: <QrCode size={20} /> }
+  ]
+  
+  const subtotal = orderItems.reduce((sum, item) => sum + item.total, 0)
+  const tax = subtotal * 0.05 // 5% tax
+  const total = subtotal + tax
+  
+  const amountReceivedNum = parseFloat(amountReceived) || 0
+  const change = amountReceivedNum - total
+
+  const printReceipt = () => {
+    // In a real implementation, this would print the receipt
+    console.log("Printing receipt...")
+  }
+
   return (
-    <div className="p-4 max-w-4xl mx-auto">
-      <h1 className="text-xl font-bold text-gray-900 mb-5">Cashier Bill Queue</h1>
- 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Queue List */}
-        <div className="space-y-3">
-          {queue.length === 0 && (
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-10 text-center text-gray-400">
-              No pending bills
+    <PageWrapper title="Cashier POS" subtitle="Process payments and print receipts">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Order Summary */}
+        <div className="lg:col-span-2 bg-white rounded-lg p-6 shadow">
+          <h3 className="font-bold text-lg mb-4">Order #ORD-2023-001</h3>
+          
+          <div className="flex items-center gap-3 mb-6 p-3 bg-gray-50 rounded-lg">
+            <div className="p-2 bg-blue-100 rounded-full">
+              <User className="text-blue-600" size={20} />
             </div>
-          )}
-          {queue.map(o => (
-            <button key={o.id} onClick={() => { setSelected(o); setMethod("cash"); }}
-              className={cn(
-                "w-full text-left bg-white rounded-xl border shadow-sm p-4 hover:border-[#1A3C5E] transition",
-                selected?.id === o.id ? "border-[#1A3C5E] ring-2 ring-[#1A3C5E]/20" : "border-gray-100"
-              )}>
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-gray-900 text-lg">{o.tableLabel}</span>
-                <StatusBadge status={o.status} size="sm"/>
-              </div>
-              <p className="text-2xl font-bold text-[#1A3C5E] mt-1">{formatCurrency(o.total)}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{o.items.length} items</p>
-            </button>
-          ))}
-        </div>
- 
-        {/* Payment Panel */}
-        {selected && (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm flex flex-col">
-            <div className="px-5 py-4 border-b border-gray-100">
-              <h2 className="font-semibold text-gray-900">Process Payment  {selected.tableLabel}</h2>
+            <div>
+              <div className="font-medium">John Smith</div>
+              <div className="text-sm text-gray-500">Table 5</div>
             </div>
- 
-            {/* Bill Breakdown */}
-            <div className="px-5 py-4 space-y-1.5 border-b border-gray-100">
-              {selected.items.map((i,idx) => (
-                <div key={idx} className="flex justify-between text-sm text-gray-600">
-                  <span>{i.quantity} {i.name}</span>
-                  <span>{formatCurrency(i.unitPrice * i.quantity)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between text-sm text-gray-500 pt-2 border-t border-dashed border-gray-200">
-                <span>Subtotal</span><span>{formatCurrency(selected.subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-500">
-                <span>Tax</span><span>{formatCurrency(selected.tax)}</span>
-              </div>
-              {selected.discount > 0 && (
-                <div className="flex justify-between text-sm text-green-600">
-                  <span>Discount</span><span>-{formatCurrency(selected.discount)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-base font-bold text-gray-900 pt-1">
-                <span>Total</span><span>{formatCurrency(selected.total)}</span>
-              </div>
-            </div>
- 
-            {/* Payment Method */}
-            <div className="px-5 py-4 border-b border-gray-100">
-              <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wider">Payment Method</p>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.values(PAYMENT_METHODS).map(m => {
-                  const Icon = METHOD_ICONS[m];
-                  return (
-                    <button key={m} onClick={() => setMethod(m)}
-                      className={cn(
-                        "flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium capitalize transition",
-                        method === m ? "border-[#1A3C5E] bg-[#1A3C5E]/5 text-[#1A3C5E]" : "border-gray-200 text-gray-600 hover:border-gray-300"
-                      )}>
-                      <Icon size={16}/>{m.replace("_"," ")}
-                    </button>
-                  );
-                })}
-              </div>
- 
-              {method === "split" && (
-                <div className="mt-3 space-y-2">
-                  {(["cash","card","upi"] as const).map(k => (
-                    <div key={k} className="flex items-center gap-3">
-                      <span className="text-xs text-gray-500 capitalize w-8">{k}</span>
-                      <input type="number" min={0} placeholder="0"
-                        value={splitAmounts[k] || ""}
-                        onChange={e => setSplit(prev => ({ ...prev, [k]: Number(e.target.value) }))}
-                        className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/30"/>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
- 
-            <div className="px-5 py-4 mt-auto">
-              <button onClick={handlePay} disabled={isPending}
-                className="w-full py-3 bg-[#1A3C5E] hover:bg-[#15304d] text-white rounded-xl font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-60">
-                {isPending ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle size={16}/>}
-                Confirm Payment
-              </button>
+            <div className="ml-auto text-sm text-gray-500">
+              <Calendar className="inline mr-1" size={14} />
+              {new Date().toLocaleDateString()}
             </div>
           </div>
-        )}
+          
+          <div className="space-y-3 mb-6">
+            {orderItems.map((item) => (
+              <div key={item.id} className="flex items-center justify-between p-3 border-b border-gray-100">
+                <div>
+                  <div className="font-medium">{item.name}</div>
+                  <div className="text-sm text-gray-500">Qty: {item.quantity}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-medium">Rs {item.total}</div>
+                  <div className="text-sm text-gray-500">Rs {item.price} each</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <div className="space-y-2 p-4 bg-gray-50 rounded-lg">
+            <div className="flex justify-between">
+              <span className="text-gray-600">Subtotal</span>
+              <span className="font-medium">Rs {subtotal}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Tax (5%)</span>
+              <span className="font-medium">Rs {tax}</span>
+            </div>
+            <div className="flex justify-between border-t border-gray-300 pt-2 mt-2">
+              <span className="font-bold">Total</span>
+              <span className="font-bold text-lg">Rs {total}</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* Payment Section */}
+        <div className="bg-white rounded-lg p-6 shadow">
+          <h3 className="font-bold text-lg mb-4">Payment</h3>
+          
+          <div className="space-y-4">
+            <div>
+              <Label className="block text-sm font-medium text-gray-700 mb-2">
+                Payment Method
+              </Label>
+              <div className="grid grid-cols-3 gap-2">
+                {paymentMethods.map((method) => (
+                  <Button
+                    key={method.id}
+                    variant={paymentMethod === method.id ? "primary" : "outline"}
+                    onClick={() => setPaymentMethod(method.id)}
+                    className="flex flex-col items-center justify-center h-16"
+                  >
+                    {method.icon}
+                    <span className="text-xs mt-1">{method.name}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+            
+            <div>
+              <Label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-2">
+                Amount Received
+              </Label>
+              <Input
+                id="amount"
+                type="number"
+                value={amountReceived}
+                onChange={(e) => setAmountReceived(e.target.value)}
+                className="text-lg"
+                placeholder="0.00"
+              />
+            </div>
+            
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Total</span>
+                <span className="font-medium">Rs {total}</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Received</span>
+                <span className="font-medium">Rs {amountReceived || 0}</span>
+              </div>
+              <div className="flex justify-between font-bold border-t border-gray-300 pt-2 mt-2">
+                <span>Change</span>
+                <span className={change >= 0 ? "text-green-600" : "text-red-600"}>
+                  Rs {change >= 0 ? change : 0}
+                </span>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <Button 
+                variant="outline" 
+                onClick={printReceipt}
+                className="flex items-center justify-center gap-2"
+              >
+                <Printer size={16} />
+                Print Bill
+              </Button>
+              <Button 
+                className="flex items-center justify-center gap-2"
+                disabled={!amountReceived || change < 0}
+              >
+                <Check size={16} />
+                Complete
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    </PageWrapper>
+  )
 }

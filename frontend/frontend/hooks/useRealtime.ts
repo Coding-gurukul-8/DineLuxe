@@ -1,56 +1,14 @@
-"use client";
-
-import { useEffect, useRef, useCallback } from "react";
-import { io, Socket } from "socket.io-client";
-import { useAuth } from "./useAuth";
-import { getBrowserSupabase } from "@/lib/supabase-client";
-
-function isSupabaseConfigured() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  return Boolean(url?.startsWith("https://") && key && key !== "anon-key" && key.length > 40);
-}
+import { useState, useEffect } from "react"
 
 export function useRealtime() {
-  const { session } = useAuth();
-  const socketRef = useRef<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    const initSocket = async () => {
-      if (!isSupabaseConfigured()) return;
-      const supabase = await getBrowserSupabase();
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) return;
-      
-      const socket = io(process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3001", {
-        auth: { token: session.access_token },
-      });
-      
-      socketRef.current = socket;
-    };
-
-    initSocket();
-
-    return () => {
-      socketRef.current?.disconnect();
-    };
-  }, []);
-
-  const joinRoom = useCallback((room: string) => {
-    socketRef.current?.emit("join", room);
-  }, []);
-
-  const on = useCallback((event: string, handler: (data: any) => void) => {
-    socketRef.current?.on(event, handler);
-    return () => {
-      socketRef.current?.off(event, handler);
-    };
-  }, []);
-
-  const emit = useCallback((event: string, data: any) => {
-    socketRef.current?.emit(event, data);
-  }, []);
-
-  return { joinRoom, on, emit };
+  // This is a placeholder for the actual real-time functionality
+  // In a real implementation, this would connect to WebSocket or use server-sent events
+  
+  return {
+    isConnected,
+    error,
+  }
 }

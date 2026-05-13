@@ -5,7 +5,7 @@ import { motion } from "framer-motion"
 import Link from "next/link"
 import { useQuery } from "@tanstack/react-query"
 import { PageWrapper } from "@/components/layout/PageWrapper"
-import { FoodCard } from "@/components/customer/FoodCard"
+import { FoodCard } from "@/components/shared/FoodCard"
 import { StatusBadge } from "@/components/shared/StatusBadge"
 import { useAuth } from "@/hooks/useAuth"
 import { apiClient } from "@/lib/api-client"
@@ -20,6 +20,9 @@ import {
   ChevronRight,
   Flame,
   TrendingUp,
+  Heart,
+  Bell,
+  Gift,
 } from "lucide-react"
 
 const quickActions = [
@@ -58,9 +61,13 @@ export default function CustomerHomePage() {
           <p className="text-sm text-gray-500">Welcome back</p>
           <h1 className="text-xl font-bold text-gray-900">{user?.name ?? "Guest"}</h1>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <MapPin size={16} />
-          <span>Nearby</span>
+        <div className="flex items-center gap-3">
+          <button className="p-2 bg-white rounded-full shadow-sm">
+            <Bell size={20} className="text-gray-600" />
+          </button>
+          <button className="p-2 bg-white rounded-full shadow-sm">
+            <Gift size={20} className="text-gray-600" />
+          </button>
         </div>
       </div>
 
@@ -157,6 +164,9 @@ export default function CustomerHomePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
           className="bg-linear-to-r from-brand-primary to-brand-secondary rounded-md p-5 text-white"
+          style={{
+            background: "linear-gradient(90deg, #1a3c5e 0%, #e8a020 100%)"
+          }}
         >
           <div className="flex items-center justify-between">
             <div>

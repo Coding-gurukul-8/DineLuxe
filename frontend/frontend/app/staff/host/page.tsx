@@ -1,146 +1,107 @@
-"use client";
-import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient }   from "@/lib/api-client";
-import { useAuth }     from "@/hooks/useAuth";
-import { useRealtime } from "@/hooks/useRealtime";
-import { WS_EVENTS }   from "@/lib/constants";
-import { formatTime }  from "@/lib/utils";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import { UserPlus, MapPin, Phone, Users, Clock } from "lucide-react";
-import { toast } from "sonner";
-import { cn } from "@/lib/utils";
- 
-interface QueueEntry { id:string; name:string; phone:string; partySize:number; status:string; notes?:string; estimatedWait:number; createdAt:string; }
-interface Booking    { id:string; name:string; phone:string; partySize:number; status:string; timeSlot:string; tablePreference?:string; notes?:string; }
-interface FreeTable  { id:string; label:string; capacity:number; }
- 
-export default function HostPage() {
-  const { branchId }      = useAuth();
-  const { on, joinRoom }  = useRealtime();
-  const qc                = useQueryClient();
-  const [activeTab, setTab] = useState<"queue"|"bookings">("queue");
-  const [seatingId, setSeating] = useState<string|null>(null);
-  const [selectedTable, setTable] = useState<string>("");
- 
-  const { data: queue    = [] } = useQuery({ queryKey:["host","queue",   branchId], queryFn:()=>apiClient.get<QueueEntry[]>(`/queue/branch/${branchId}`),             enabled:!!branchId, refetchInterval:15_000 });
-  const { data: bookings = [] } = useQuery({ queryKey:["host","bookings",branchId], queryFn:()=>apiClient.get<Booking[]>   (`/bookings/branch/${branchId}`),          enabled:!!branchId, refetchInterval:30_000 });
-  const { data: tables   = [] } = useQuery({ queryKey:["host","tables",  branchId], queryFn:()=>apiClient.get<FreeTable[]> (`/tables/branch/${branchId}?status=free`), enabled:!!branchId, refetchInterval:15_000 });
- 
-  const { mutate: seatGuest } = useMutation({
-    mutationFn: ({ entryId, tableId, type }:{ entryId:string; tableId:string; type:"queue"|"booking" }) =>
-      type === "queue"
-        ? apiClient.patch(`/queue/${entryId}/assign-table`, { tableId })
-        : apiClient.patch(`/bookings/${entryId}/seat`, { tableId }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey:["host"] });
-      toast.success("Guest seated successfully");
-      setSeating(null); setTable("");
-    },
-  });
- 
-  useEffect(() => {
-    if (!branchId) return;
-    joinRoom(`branch:${branchId}:host`);
-    const unsubs = [
-      on(WS_EVENTS.ARRIVAL_DETECTED,   (data:any) => { toast.info(`${data.guestName} has arrived!`); qc.invalidateQueries({ queryKey:["host","queue"] }); }),
-      on(WS_EVENTS.QUEUE_UPDATED,      () => qc.invalidateQueries({ queryKey:["host","queue"] })),
-      on(WS_EVENTS.TABLE_STATUS_CHANGED,() => qc.invalidateQueries({ queryKey:["host","tables"] })),
-    ];
-    return () => unsubs.forEach(u => u());
-  }, [branchId, on, joinRoom, qc]);
- 
-  const list = activeTab === "queue" ? queue : bookings;
- 
+"use client"
+
+import { useState } from "react"
+import { motion } from "framer-motion"
+import { PageWrapper } from "@/components/layout/PageWrapper"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { 
+  Users, 
+  Clock, 
+  UserPlus,
+  Phone,
+  Calendar,
+  Plus,
+  Minus
+} from "lucide-react"
+
+export default function HostInterfacePage() {
+  const [partySize, setPartySize] = useState(2)
+  const [queue, setQueue] = useState<any[]>([
+    { id: 1, name: "John Smith", phone: "+91 9876543210", status: "waiting", time: "7:30 PM" },
+    { id: 2, name: "Sarah Johnson", phone: "+91 9876543211", status: "seated", time: "7:45 PM" },
+    { id: 3, name: "Mike Wilson", phone: "+91 9876543212", status: "waiting", time: "8:00 PM" }
+  ])
+  const [tables, setTables] = useState([
+    { id: 1, number: "1", capacity: 4, status: "free" },
+    { id: 2, number: "2", capacity: 2, status: "occupied" },
+    { id: 3, number: "3", capacity: 6, status: "free" },
+    { id: 4, number: "4", capacity: 4, status: "free" },
+    { id: 5, number: "5", capacity: 2, status: "free" }
+  ])
+
+  const updateQueueStatus = (id: number, status: string) => {
+    // In a real app, this would update the queue status
+    console.log("Updating queue status for:", id, "to:", status)
+  }
+
   return (
-    <div className="p-4 max-w-2xl mx-auto space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Host Station</h1>
-        <div className="flex bg-gray-100 rounded-lg p-0.5">
-          {(["queue","bookings"] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={cn("px-4 py-1.5 rounded-md text-sm font-medium capitalize transition",
-                activeTab === t ? "bg-white shadow text-gray-900" : "text-gray-500 hover:text-gray-700")}>
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
- 
-      {/* Free Tables Summary */}
-      <div className="bg-[#1A3C5E] text-white rounded-xl px-5 py-4 flex items-center justify-between">
-        <div>
-          <p className="text-sm opacity-75">Tables Available</p>
-          <p className="text-3xl font-bold">{tables.length}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-sm opacity-75">In Queue</p>
-          <p className="text-3xl font-bold">{queue.filter(q=>q.status==="waiting").length}</p>
-        </div>
-      </div>
- 
-      {/* Guest List */}
-      <div className="space-y-3">
-        {list.length === 0 && (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-10 text-center text-gray-400">
-            {activeTab === "queue" ? "Queue is empty" : "No bookings today"}
-          </div>
-        )}
-        {list.map((entry:any) => (
-          <div key={entry.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
+    <PageWrapper title="Host Dashboard" subtitle="Manage reservations and table assignments">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Queue Management */}
+        <div className="bg-white rounded-lg p-4 shadow">
+          <h3 className="font-bold text-lg mb-4">Walk-in Queue</h3>
+          <div className="space-y-3">
+            {queue.map((customer) => (
+              <motion.div 
+                key={customer.id}
+                className="flex items-center justify-between p-3 border-b border-gray-100"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+              >
+                <div>
+                  <div className="font-medium">{customer.name}</div>
+                  <div className="text-sm text-gray-500">{customer.phone}</div>
+                </div>
                 <div className="flex items-center gap-2">
-                  <p className="font-semibold text-gray-900">{entry.name}</p>
-                  <StatusBadge status={entry.status} size="sm"/>
+                  <div className={`px-2 py-1 rounded ${
+                    customer.status === 'seated' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                  }`}>
+                    {customer.status}
+                  </div>
+                  <span className="text-sm text-gray-500">{customer.time}</span>
                 </div>
-                <div className="flex items-center gap-4 mt-1.5 text-xs text-gray-500">
-                  <span className="flex items-center gap-1"><Users size={12}/>{entry.partySize} guests</span>
-                  <span className="flex items-center gap-1"><Phone size={12}/>{entry.phone}</span>
-                  {activeTab === "queue" && <span className="flex items-center gap-1"><Clock size={12}/>{entry.estimatedWait}m wait</span>}
-                  {activeTab === "bookings" && <span className="flex items-center gap-1"><Clock size={12}/>{formatTime(entry.timeSlot)}</span>}
-                </div>
-                {entry.notes && <p className="text-xs text-amber-600 mt-1">{entry.notes}</p>}
-              </div>
-              {(entry.status === "waiting" || entry.status === "arrived" || entry.status === "confirmed") && (
-                <button onClick={() => setSeating(entry.id)}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-[#1A3C5E] text-white text-xs font-semibold rounded-lg hover:bg-[#15304d] transition">
-                  <MapPin size={12}/> Seat
-                </button>
-              )}
-            </div>
- 
-            {/* Seat Modal inline */}
-            {seatingId === entry.id && (
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                <p className="text-xs font-medium text-gray-600 mb-2">Select a table:</p>
-                <div className="grid grid-cols-5 gap-2 mb-3">
-                  {tables.map(t => (
-                    <button key={t.id} onClick={() => setTable(t.id)}
-                      className={cn("py-2 rounded-lg border text-xs font-bold transition",
-                        selectedTable === t.id
-                          ? "border-[#1A3C5E] bg-[#1A3C5E] text-white"
-                          : "border-gray-200 text-gray-700 hover:border-[#1A3C5E]")}>
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => { setSeating(null); setTable(""); }}
-                    className="flex-1 py-2 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 transition">
-                    Cancel
-                  </button>
-                  <button disabled={!selectedTable}
-                    onClick={() => seatGuest({ entryId:entry.id, tableId:selectedTable, type:activeTab==="queue"?"queue":"booking" })}
-                    className="flex-1 py-2 bg-[#1A3C5E] text-white rounded-lg text-xs font-semibold disabled:opacity-40 hover:bg-[#15304d] transition">
-                    Confirm Seating
-                  </button>
-                </div>
-              </div>
-            )}
+              </motion.div>
+            ))}
           </div>
-        ))}
+        </div>
+
+        {/* Table Map */}
+        <div className="bg-white rounded-lg p-4 shadow">
+          <h3 className="font-bold text-lg mb-4">Table Map</h3>
+          <div className="grid grid-cols-2 gap-2">
+            {tables.map((table) => (
+              <div 
+                key={table.id}
+                className={`p-3 rounded border text-center cursor-pointer ${
+                  table.status === 'free' ? 'border-green-500' : 'border-red-500'
+                }`}
+                onClick={() => updateTableStatus(table.id, table.status === 'free' ? 'occupied' : 'free')}
+              >
+                <div className="font-bold">Table {table.number}</div>
+                <div className="text-sm text-gray-500">
+                  {table.status === 'free' ? 'Available' : 'Occupied'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Party Management */}
+        <div className="bg-white rounded-lg p-4 shadow">
+          <h3 className="font-bold text-lg mb-4">Party Size</h3>
+          <div className="flex items-center gap-4">
+            <Button onClick={() => setPartySize(Math.max(1, partySize - 1))} disabled={partySize <= 1}>
+              <Minus size={16} />
+            </Button>
+            <span className="text-lg font-bold">{partySize} guests</span>
+            <Button onClick={() => setPartySize(partySize + 1)}>
+              <Plus size={16} />
+            </Button>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    </PageWrapper>
+  )
 }

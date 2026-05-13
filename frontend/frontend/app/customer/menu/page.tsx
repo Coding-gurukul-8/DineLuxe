@@ -64,12 +64,7 @@ export default function CustomerMenuPage() {
           <motion.button
             key={category}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setActiveCategory(category)}
-            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-              activeCategory === category
-                ? "bg-brand-primary text-white"
-                : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-            }`}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors`}
           >
             {category}
           </motion.button>
@@ -98,7 +93,6 @@ export default function CustomerMenuPage() {
                 <FoodCard item={item} />
               </motion.div>
             ))}
-          </motion.div>
         </AnimatePresence>
       )}
 
