@@ -2,85 +2,60 @@
 
 import { useState } from "react"
 import { motion } from "framer-motion"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { PageWrapper } from "@/components/layout/PageWrapper"
 import { StatusBadge } from "@/components/shared/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { Calendar, Clock, Users, Search, Filter, Check, X } from "lucide-react"
 import { toast } from "sonner"
-
-interface Booking {
-  id: string
-  customerName: string
-  phone: string
-  date: string
-  time: string
-  partySize: number
-  tableNumber?: string
-  status: "reserved" | "pending" | "cancelled" | "success"
-  specialRequests?: string
-}
-
-const mockBookings: Booking[] = [
-  {
-    id: "BK-001",
-    customerName: "John Doe",
-    phone: "+91 98765 43210",
-    date: "2024-01-15",
-    time: "7:00 PM",
-    partySize: 4,
-    tableNumber: "T5",
-    status: "reserved",
-    specialRequests: "Birthday celebration",
-  },
-  {
-    id: "BK-002",
-    customerName: "Jane Smith",
-    phone: "+91 98765 43211",
-    date: "2024-01-15",
-    time: "7:30 PM",
-    partySize: 2,
-    status: "pending",
-  },
-  {
-    id: "BK-003",
-    customerName: "Mike Johnson",
-    phone: "+91 98765 43212",
-    date: "2024-01-15",
-    time: "8:00 PM",
-    partySize: 6,
-    tableNumber: "T8",
-    status: "reserved",
-  },
-  {
-    id: "BK-004",
-    customerName: "Sarah Williams",
-    phone: "+91 98765 43213",
-    date: "2024-01-16",
-    time: "12:30 PM",
-    partySize: 3,
-    tableNumber: "T3",
-    status: "success",
-  },
-]
+import { apiClient } from "@/lib/api-client"
+import { useAuth } from "@/hooks/useAuth"
 
 export default function OwnerBookingsPage() {
   const [activeTab, setActiveTab] = useState<"upcoming" | "completed">("upcoming")
   const [searchQuery, setSearchQuery] = useState("")
+  const { branchId } = useAuth()
+  const queryClient = useQueryClient()
 
-const upcomingBookings = mockBookings.filter((b) => b.status !== "success")
-  const completedBookings = mockBookings.filter((b) => b.status === "success")
+  const { data: bookings = [], isLoading } = useQuery({
+    queryKey: ["bookings", "branch", branchId],
+    queryFn: () => apiClient.get<any[]>(`/bookings/branch/${branchId}`),
+    enabled: !!branchId,
+    refetchInterval: 30_000,
+  })
 
-  const handleConfirm = (bookingId: string) => {
-    // Handle confirm logic
-    console.log("Confirm booking:", bookingId)
-  }
+  const confirmMutation = useMutation({
+    mutationFn: (bookingId: string) =>
+      apiClient.patch(`/bookings/${bookingId}/arrived`, {}),
+    onSuccess: () => {
+      toast.success("Booking confirmed")
+      queryClient.invalidateQueries({ queryKey: ["bookings", "branch", branchId] })
+    },
+    onError: () => toast.error("Failed to confirm booking"),
+  })
 
-  const handleCancel = (bookingId: string) => {
-    // Handle cancel logic
-    console.log("Cancel booking:", bookingId)
-  }
+  const cancelMutation = useMutation({
+    mutationFn: (bookingId: string) =>
+      apiClient.patch(`/bookings/${bookingId}/cancel`, { reason: "Cancelled by owner" }),
+    onSuccess: () => {
+      toast.success("Booking cancelled")
+      queryClient.invalidateQueries({ queryKey: ["bookings", "branch", branchId] })
+    },
+    onError: () => toast.error("Failed to cancel booking"),
+  })
 
-  const filteredBookings = activeTab === "upcoming" ? upcomingBookings : completedBookings
+  const UPCOMING_STATUSES = ["pending", "confirmed"]
+  const COMPLETED_STATUSES = ["arrived", "seated", "no_show", "cancelled"]
+
+  const upcomingBookings = bookings.filter((b: any) => UPCOMING_STATUSES.includes(b.status))
+  const completedBookings = bookings.filter((b: any) => COMPLETED_STATUSES.includes(b.status))
+
+  const filteredBookings = (activeTab === "upcoming" ? upcomingBookings : completedBookings).filter(
+    (b: any) =>
+      !searchQuery ||
+      b.customer?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      b.customer?.phone?.includes(searchQuery)
+  )
 
   return (
     <PageWrapper title="Bookings" subtitle="Manage table reservations">
@@ -96,7 +71,7 @@ const upcomingBookings = mockBookings.filter((b) => b.status !== "success")
             className="w-full pl-10 pr-4 py-3 bg-gray-100 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
           />
         </div>
-        <button onClick={() => toast.info("Filters are already visible in this demo")} className="p-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors">
+        <button className="p-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors">
           <Filter size={20} className="text-gray-600" />
         </button>
       </div>
@@ -125,33 +100,38 @@ const upcomingBookings = mockBookings.filter((b) => b.status !== "success")
         </button>
       </div>
 
+      {isLoading && <div className="text-center py-12 text-gray-500">Loading bookings…</div>}
+
       {/* Bookings List */}
       <div className="space-y-4">
-        {filteredBookings.map((booking) => (
+        {!isLoading && filteredBookings.length === 0 && (
+          <p className="text-center py-12 text-gray-500">No bookings found</p>
+        )}
+        {filteredBookings.map((booking: any) => (
           <motion.div
             key={booking.id}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-md border border-gray-100 p-4"
           >
-            {/* Header */}
             <div className="flex items-start justify-between mb-3">
               <div>
-                <h3 className="font-semibold text-gray-900">{booking.customerName}</h3>
-                <p className="text-sm text-gray-500">{booking.phone}</p>
+                <h3 className="font-semibold text-gray-900">
+                  {booking.customer?.name ?? "Guest"}
+                </h3>
+                <p className="text-sm text-gray-500">{booking.customer?.phone ?? ""}</p>
               </div>
               <StatusBadge status={booking.status} />
             </div>
 
-            {/* Details */}
             <div className="flex items-center gap-4 mb-3 text-sm">
               <div className="flex items-center gap-1 text-gray-600">
                 <Calendar size={14} />
-                <span>{booking.date}</span>
+                <span>{new Date(booking.scheduledAt).toLocaleDateString()}</span>
               </div>
               <div className="flex items-center gap-1 text-gray-600">
                 <Clock size={14} />
-                <span>{booking.time}</span>
+                <span>{new Date(booking.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
               </div>
               <div className="flex items-center gap-1 text-gray-600">
                 <Users size={14} />
@@ -159,26 +139,24 @@ const upcomingBookings = mockBookings.filter((b) => b.status !== "success")
               </div>
             </div>
 
-            {/* Table */}
-            {booking.tableNumber && (
+            {booking.table?.label && (
               <div className="text-sm text-gray-600 mb-3">
-                Table: <span className="font-medium">{booking.tableNumber}</span>
+                Table: <span className="font-medium">{booking.table.label}</span>
               </div>
             )}
 
-            {/* Special Requests */}
-            {booking.specialRequests && (
+            {booking.notes && (
               <div className="text-sm text-amber-600 bg-amber-50 p-2 rounded-lg mb-3">
-                {booking.specialRequests}
+                {booking.notes}
               </div>
             )}
 
-            {/* Actions */}
             {booking.status === "pending" && (
               <div className="flex gap-2 mt-3">
                 <Button
                   size="sm"
-                  onClick={() => handleConfirm(booking.id)}
+                  disabled={confirmMutation.isPending}
+                  onClick={() => confirmMutation.mutate(booking.id)}
                   className="flex-1 bg-green-500 hover:bg-green-600"
                 >
                   <Check size={14} className="mr-1" />
@@ -187,7 +165,8 @@ const upcomingBookings = mockBookings.filter((b) => b.status !== "success")
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleCancel(booking.id)}
+                  disabled={cancelMutation.isPending}
+                  onClick={() => cancelMutation.mutate(booking.id)}
                   className="flex-1 text-red-500 hover:bg-red-50"
                 >
                   <X size={14} className="mr-1" />
