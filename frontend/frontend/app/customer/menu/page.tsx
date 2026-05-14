@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery } from "@tanstack/react-query"
-import { PageWrapper } from "@/components/layout/PageWrapper"
+import PageWrapper from "@/components/layout/PageWrapper"
 import { FoodCard } from "@/components/customer/FoodCard"
 import { Search, SlidersHorizontal } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
@@ -93,6 +93,7 @@ export default function CustomerMenuPage() {
                 <FoodCard item={item} />
               </motion.div>
             ))}
+          </motion.div>
         </AnimatePresence>
       )}
 

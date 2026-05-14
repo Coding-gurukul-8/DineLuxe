@@ -50,23 +50,31 @@ interface Order {
   priority?: 'low' | 'medium' | 'high'
 }
 
+interface KPIData {
+  activeTables: number;
+  activeOrders: number;
+  revenue: number;
+  avgWaitTime: number;
+  [key: string]: number;
+}
+
 export default function StaffDashboardPage() {
   const [activeTab, setActiveTab] = useState<"tables" | "orders">("tables")
   const [timeRange, setTimeRange] = useState("today")
 
-  const { data: tables = [] } = useQuery({
+  const { data: tables = [] } = useQuery<Table[]>({
     queryKey: ["staff", "tables"],
     queryFn: () => apiClient.get<Table[]>("/tables")
   })
 
-  const { data: orders = [] } = useQuery({
+  const { data: orders = [] } = useQuery<Order[]>({
     queryKey: ["staff", "orders"],
     queryFn: () => apiClient.get<Order[]>("/orders/staff")
   })
 
-  const { data: kpiData = {} } = useQuery({
+  const { data: kpiData = {} as Partial<KPIData> } = useQuery<Partial<KPIData>>({
     queryKey: ["staff", "kpi", timeRange],
-    queryFn: () => apiClient.get("/analytics/kpi")
+    queryFn: () => apiClient.get<Partial<KPIData>>("/analytics/kpi")
   })
 
   return (

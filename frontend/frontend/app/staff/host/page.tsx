@@ -36,6 +36,14 @@ export default function HostInterfacePage() {
     console.log("Updating queue status for:", id, "to:", status)
   }
 
+  const updateTableStatus = (id: number, status: string) => {
+    // In a real app, this would update the table status
+    console.log("Updating table status for:", id, "to:", status)
+    setTables(tables.map(table => 
+      table.id === id ? { ...table, status } : table
+    ))
+  }
+
   return (
     <PageWrapper title="Host Dashboard" subtitle="Manage reservations and table assignments">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

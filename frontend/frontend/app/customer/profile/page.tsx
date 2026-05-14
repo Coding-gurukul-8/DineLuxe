@@ -22,9 +22,16 @@ import {
   Check
 } from "lucide-react"
 
+interface UserProfile {
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+}
+
 export default function CustomerProfilePage() {
-  const [activeTab, setActiveTab] = "profile"
-  const { data: profile, isLoading } = useQuery({
+  const [activeTab, setActiveTab] = useState("profile")
+  const { data: profile, isLoading } = useQuery<UserProfile>({
     queryKey: ["customer", "profile"],
     queryFn: () => apiClient.get("/profile/me")
   })

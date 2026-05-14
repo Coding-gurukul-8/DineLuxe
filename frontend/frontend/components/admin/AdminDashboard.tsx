@@ -77,52 +77,9 @@ export function AdminDashboard() {
                   {kpi.icon}
                 </div>
               </div>
-            </          </div>
+            </Card>
+          ))}
         </div>
-      </div>
-    </Card>
-  )
-}
-
-export function AdminDashboard() {
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Admin Dashboard</h2>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Platform Overview</h3>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-500">Total Revenue</div>
-                  <div className="text-2xl font-bold text-gray-900">Rs 2,450,000</div>
-                  <div className="text-sm text-gray-500">+12% from last month</div>
-                </div>
-                
-                <div className="bg-green-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-500">Active Restaurants</div>
-                  <div className="text-2xl font-bold text-gray-900">142</div>
-                  <div className="text-sm text-gray-500">+5% from last month</div>
-                </div>
-                
-                <div className="bg-purple-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-500">Registered Users</div>
-                  <div className="text-2xl font-bold text-gray-900">8,742</div>
-                  <div className="text-sm text-gray-500">+8% from last month</div>
-                </div>
-                
-                <div className="bg-orange-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-500">Total Orders</div>
-                  <div className="text-2xl font-bold text-gray-900">12,450</div>
-                  <div className="text-sm text-gray-500">+3% from last month</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
       </div>
     </div>
   )
