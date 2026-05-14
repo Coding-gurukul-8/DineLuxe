@@ -12,6 +12,7 @@ const envSchema = zod_1.z.object({
     NODE_ENV: zod_1.z.enum(['development', 'production', 'test']).default('development'),
     // Frontend
     FRONTEND_URL: zod_1.z.string().url('FRONTEND_URL must be a valid URL'),
+    FRONTEND_URLS: zod_1.z.string().optional(),
     // Supabase
     SUPABASE_URL: zod_1.z.string().url('SUPABASE_URL must be a valid URL'),
     SUPABASE_SERVICE_ROLE_KEY: zod_1.z.string().min(1, 'SUPABASE_SERVICE_ROLE_KEY is required'),

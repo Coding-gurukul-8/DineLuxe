@@ -174,17 +174,38 @@ async function getAlerts(branchId) {
         .order('current_quantity');
     if (error)
         throw error;
-    // Client-side filter + ratio sort
-    const withRatio = (data ?? [])
+    const items = data ?? [];
+    // Filter low-stock items first
+    const lowStockCandidates = items
         .filter((item) => Number(item.current_quantity) <= Number(item.reorder_threshold))
-        .map((item) => ({
-        ...item,
-        stock_ratio: Number(item.reorder_threshold) > 0
-            ? Number(item.current_quantity) / Number(item.reorder_threshold)
-            : 0,
-    }))
-        .sort((a, b) => a.stock_ratio - b.stock_ratio);
-    return withRatio.map(normalizeInventoryItem);
+        .map((item) => {
+        const current = Number(item.current_quantity);
+        const threshold = Number(item.reorder_threshold);
+        return {
+            ...item,
+            stock_ratio: threshold > 0 ? current / threshold : 0,
+        };
+    });
+    // Deduplicate by ingredient_name (normalized). Keep the row with the lowest stock_ratio.
+    const bestByIngredient = new Map();
+    for (const item of lowStockCandidates) {
+        const key = String(item.ingredient_name ?? item.id).trim().toLowerCase();
+        const prev = bestByIngredient.get(key);
+        if (!prev) {
+            bestByIngredient.set(key, item);
+            continue;
+        }
+        if (item.stock_ratio < prev.stock_ratio) {
+            bestByIngredient.set(key, item);
+            continue;
+        }
+        if (item.stock_ratio === prev.stock_ratio && String(item.id) < String(prev.id)) {
+            bestByIngredient.set(key, item);
+            continue;
+        }
+    }
+    const deduped = Array.from(bestByIngredient.values()).sort((a, b) => a.stock_ratio - b.stock_ratio || String(a.id).localeCompare(String(b.id)));
+    return deduped.map(normalizeInventoryItem);
 }
 async function logWaste(inventoryItemId, quantity, reason, userId) {
     const updatedItem = await deductInventoryItem(inventoryItemId, quantity, userId);

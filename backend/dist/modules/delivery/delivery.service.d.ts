@@ -1,4 +1,4 @@
-export declare function assignDelivery(orderId: string, branchId: string, restaurantId: string): Promise<any>;
+export declare function assignDelivery(orderId: string, branchId: string, restaurantId: string, partnerId: string): Promise<any>;
 export declare function getDelivery(deliveryId: string, partnerId: string): Promise<any>;
 export declare function updateDeliveryStatus(deliveryId: string, partnerId: string, newStatus: string): Promise<any>;
 export declare function updatePartnerLocation(partnerId: string, lat: number, lon: number, deliveryId?: string): Promise<{

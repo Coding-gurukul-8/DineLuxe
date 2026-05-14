@@ -13,6 +13,9 @@ const router = (0, express_1.Router)();
 // TODO: Add gateway signature verification middleware before handler
 router.post('/webhook', (0, validate_middleware_1.validate)({ body: payments_schema_1.webhookSchema }), payments_controller_1.handleGatewayWebhookController);
 // ─── Protected Payment Routes ─────────────────────────────────────────────────
+// GET /payments/receipt/:orderId - customers may not have tenant claims, so
+// the service enforces order ownership/branch access instead of injectTenant.
+router.get('/receipt/:orderId', auth_middleware_1.authenticate, (0, rbac_middleware_1.requireRole)('customer', 'cashier', 'manager', 'owner', 'waiter'), payments_controller_1.handleGetReceipt);
 router.use(auth_middleware_1.authenticate, tenant_middleware_1.injectTenant);
 // POST /payments/initiate — cashier or customer
 router.post('/initiate', (0, rbac_middleware_1.requireRole)('cashier', 'customer', 'manager', 'owner'), (0, validate_middleware_1.validate)({ body: payments_schema_1.initiateSchema }), payments_controller_1.handleInitiatePayment);

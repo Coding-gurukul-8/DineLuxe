@@ -22,6 +22,12 @@ exports.handleGatewayWebhook = handleGatewayWebhook;
 const qrcode_1 = __importDefault(require("qrcode"));
 const supabase_1 = require("../../config/supabase");
 const redis_1 = require("../../config/redis");
+function toDbPaymentStatus(status) {
+    return status === 'success' ? 'completed' : status;
+}
+function toApiPaymentStatus(status) {
+    return status === 'completed' ? 'success' : status;
+}
 // ─── Compute order total from order_items (orders table has no total_amount) ──
 async function computeOrderTotal(orderId) {
     const { data: items } = await supabase_1.supabaseAdmin
@@ -48,12 +54,20 @@ async function initiatePayment(input, branchId, restaurantId) {
         throw Object.assign(new Error('Order not found'), { statusCode: 404 });
     }
     if (order.status === 'paid') {
-        throw Object.assign(new Error('Order is already paid'), { statusCode: 422 });
+        throw Object.assign(new Error('Order is already paid'), { statusCode: 409 });
     }
     if (order.status === 'cancelled') {
         throw Object.assign(new Error('Cannot pay for a cancelled order'), { statusCode: 422 });
     }
     const amount = await computeOrderTotal(order_id);
+    const { data: existingPayment } = await supabase_1.supabaseAdmin
+        .from('payments')
+        .select('id')
+        .eq('order_id', order_id)
+        .maybeSingle();
+    if (existingPayment?.id) {
+        throw Object.assign(new Error('Payment already exists for this order'), { statusCode: 409 });
+    }
     const gatewayOrderId = null; // TODO: replace with real gateway order ID
     // FIX: use correct column name 'method' not 'payment_method'; no branch_id/restaurant_id
     const { data: payment, error: payErr } = await supabase_1.supabaseAdmin
@@ -81,6 +95,7 @@ async function initiatePayment(input, branchId, restaurantId) {
 // ─── Verify Payment ───────────────────────────────────────────────────────────
 async function verifyPayment(input, branchId) {
     const { payment_id, status, gateway_payment_id, gateway_signature } = input;
+    const dbStatus = toDbPaymentStatus(status);
     const { data: payment, error: fetchErr } = await supabase_1.supabaseAdmin
         .from('payments')
         .select('*, orders(branch_id)')
@@ -96,7 +111,7 @@ async function verifyPayment(input, branchId) {
     const { data: updated, error: updateErr } = await supabase_1.supabaseAdmin
         .from('payments')
         .update({
-        status,
+        status: dbStatus,
         gateway_payment_id: gateway_payment_id ?? null,
         transaction_ref: gateway_signature ?? null,
     })
@@ -110,7 +125,7 @@ async function verifyPayment(input, branchId) {
         const ctx = ctxRaw ? JSON.parse(ctxRaw) : { branchId, restaurantId: '' };
         await onPaymentComplete(payment.order_id, ctx.branchId, ctx.restaurantId);
     }
-    return updated;
+    return { ...updated, status: toApiPaymentStatus(updated.status) };
 }
 // ─── Generate UPI QR ──────────────────────────────────────────────────────────
 // FIX: orders has no total_amount and no join to restaurants
@@ -144,6 +159,8 @@ async function generateUPIQR(input, branchId) {
         color: { dark: '#000000', light: '#ffffff' },
     });
     return {
+        qrCode: qrBase64,
+        upiRef: transactionRef,
         upi_link: upiLink,
         qr_base64: qrBase64,
         amount,
@@ -170,36 +187,79 @@ async function splitBill(input, branchId, restaurantId) {
     if (Math.abs(totalSplit - orderTotal) > 1) {
         throw Object.assign(new Error(`Split amounts (${totalSplit}) do not match order total (${orderTotal})`), { statusCode: 422 });
     }
-    // Create individual payment stubs for each split; store split details in split_details JSON
-    const paymentInserts = splits.map((s) => ({
-        order_id,
-        amount: s.amount,
-        method: s.payment_method,
-        status: 'pending',
-        split_details: { label: s.label, is_split: true, total_parts: splits.length },
-    }));
-    const { data: payments, error: insertErr } = await supabase_1.supabaseAdmin
+    const { data: order, error: orderErr } = await supabase_1.supabaseAdmin
+        .from('orders')
+        .select('id, status, branch_id')
+        .eq('id', order_id)
+        .eq('branch_id', branchId)
+        .single();
+    if (orderErr || !order) {
+        throw Object.assign(new Error('Order not found'), { statusCode: 404 });
+    }
+    if (order.status === 'paid') {
+        throw Object.assign(new Error('Order is already paid'), { statusCode: 409 });
+    }
+    const { data: existingPayment } = await supabase_1.supabaseAdmin
         .from('payments')
-        .insert(paymentInserts)
-        .select();
+        .select('id')
+        .eq('order_id', order_id)
+        .maybeSingle();
+    if (existingPayment?.id) {
+        throw Object.assign(new Error('Payment already exists for this order'), { statusCode: 409 });
+    }
+    // The live schema has a unique payment per order, so store the split parts as
+    // JSON while returning the three logical split records the API contract expects.
+    const { data: payment, error: insertErr } = await supabase_1.supabaseAdmin
+        .from('payments')
+        .insert({
+        order_id,
+        amount: totalSplit,
+        method: 'split',
+        status: 'pending',
+        split_details: {
+            is_split: true,
+            total_parts: splits.length,
+            splits,
+        },
+    })
+        .select()
+        .single();
     if (insertErr)
         throw insertErr;
-    // Cache context for each payment
-    for (const p of payments ?? []) {
-        await redis_1.redis.setex(`payment_ctx:${p.id}`, 3600, JSON.stringify({ branchId, restaurantId }));
-    }
-    return payments;
+    await redis_1.redis.setex(`payment_ctx:${payment.id}`, 3600, JSON.stringify({ branchId, restaurantId }));
+    return splits.map((split, index) => ({
+        id: `${payment.id}:${index + 1}`,
+        payment_id: payment.id,
+        order_id,
+        amount: split.amount,
+        method: split.payment_method,
+        status: 'pending',
+        split_details: {
+            label: split.label,
+            is_split: true,
+            part: index + 1,
+            total_parts: splits.length,
+        },
+    }));
 }
 // ─── Get Receipt ─────────────────────────────────────────────────────────────
 // FIX: orders has no join to restaurants; branches are separate
-async function getReceipt(orderId, branchId) {
+async function getReceipt(orderId, branchId, userId, role) {
+    const orderQuery = supabase_1.supabaseAdmin
+        .from('orders')
+        .select('*, order_items(*, menu_items(name, price)), tables(label), branches(name, address)')
+        .eq('id', orderId);
+    if (branchId) {
+        orderQuery.eq('branch_id', branchId);
+    }
+    else if (role === 'customer' && userId) {
+        orderQuery.eq('customer_id', userId);
+    }
+    else {
+        throw Object.assign(new Error('No branch context found'), { statusCode: 403 });
+    }
     const [orderRes, paymentsRes] = await Promise.all([
-        supabase_1.supabaseAdmin
-            .from('orders')
-            .select('*, order_items(*, menu_items(name, price)), tables(label), branches(name, address)')
-            .eq('id', orderId)
-            .eq('branch_id', branchId)
-            .single(),
+        orderQuery.single(),
         supabase_1.supabaseAdmin
             .from('payments')
             .select('id, amount, method, status, transaction_ref, gateway_payment_id, created_at')
@@ -214,7 +274,10 @@ async function getReceipt(orderId, branchId) {
         order_id: orderId,
         computed_total: computedTotal,
         data: orderRes.data,
-        payments: paymentsRes.data ?? [],
+        payments: (paymentsRes.data ?? []).map((payment) => ({
+            ...payment,
+            status: toApiPaymentStatus(payment.status),
+        })),
     };
 }
 // ─── On Payment Complete (internal) ──────────────────────────────────────────

@@ -15,6 +15,8 @@ export declare function initiatePayment(input: InitiateInput, branchId: string, 
 }>;
 export declare function verifyPayment(input: VerifyInput, branchId: string): Promise<any>;
 export declare function generateUPIQR(input: UPIQRInput, branchId: string): Promise<{
+    qrCode: string;
+    upiRef: string;
     upi_link: string;
     qr_base64: string;
     amount: number;
@@ -26,17 +28,30 @@ export declare function pollUPIStatus(transactionRef: string, branchId: string):
     ref: string;
     source: string;
 }>;
-export declare function splitBill(input: SplitInput, branchId: string, restaurantId: string): Promise<any[]>;
-export declare function getReceipt(orderId: string, branchId: string): Promise<{
+export declare function splitBill(input: SplitInput, branchId: string, restaurantId: string): Promise<{
+    id: string;
+    payment_id: any;
+    order_id: string;
+    amount: number;
+    method: "upi" | "card" | "cash" | "wallet";
+    status: string;
+    split_details: {
+        label: string;
+        is_split: boolean;
+        part: number;
+        total_parts: number;
+    };
+}[]>;
+export declare function getReceipt(orderId: string, branchId: string, userId?: string, role?: string): Promise<{
     receipt_type: string;
     order_id: string;
     computed_total: number;
     data: any;
     payments: {
+        status: string;
         id: any;
         amount: any;
         method: any;
-        status: any;
         transaction_ref: any;
         gateway_payment_id: any;
         created_at: any;

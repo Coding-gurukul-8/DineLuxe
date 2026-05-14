@@ -11,6 +11,7 @@ export declare const config: {
     BCRYPT_SALT_ROUNDS: number;
     OTP_EXPIRY_SECONDS: number;
     GEO_FENCE_RADIUS_METERS: number;
+    FRONTEND_URLS?: string | undefined;
 };
 export type Config = typeof config;
 //# sourceMappingURL=env.d.ts.map

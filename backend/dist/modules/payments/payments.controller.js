@@ -48,7 +48,7 @@ async function handlePollUPIStatus(req, res, next) {
 async function handleSplitBill(req, res, next) {
     try {
         const result = await (0, payments_service_1.splitBill)(req.body, req.branchId, req.restaurantId);
-        res.status(201).json((0, response_1.success)(result, 'Split created'));
+        res.json((0, response_1.success)(result, 'Split created'));
     }
     catch (err) {
         next(err);
@@ -56,7 +56,7 @@ async function handleSplitBill(req, res, next) {
 }
 async function handleGetReceipt(req, res, next) {
     try {
-        const result = await (0, payments_service_1.getReceipt)(req.params.orderId, req.branchId);
+        const result = await (0, payments_service_1.getReceipt)(req.params.orderId, req.branchId ?? req.user?.branch_id ?? '', req.user?.id, req.user?.role);
         res.json((0, response_1.success)(result));
     }
     catch (err) {

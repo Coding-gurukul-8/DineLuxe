@@ -6,10 +6,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.corsMiddleware = exports.corsOptions = void 0;
 const cors_1 = __importDefault(require("cors"));
 const env_1 = require("./env");
+const allowedOrigins = (env_1.config.FRONTEND_URLS ?? env_1.config.FRONTEND_URL)
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 exports.corsOptions = {
     origin: (origin, callback) => {
         // Allow requests with no origin (e.g. mobile apps, curl in dev)
-        if (!origin || origin === env_1.config.FRONTEND_URL) {
+        if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         }
         else {

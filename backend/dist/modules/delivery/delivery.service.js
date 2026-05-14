@@ -11,7 +11,7 @@ const redis_1 = require("../../config/redis");
 const ACCEPTANCE_TIMEOUT_SECONDS = 30;
 const LOCATION_THROTTLE_SECONDS = 5;
 // ─── Assign Delivery Partner ──────────────────────────────────────────────────
-async function assignDelivery(orderId, branchId, restaurantId) {
+async function assignDelivery(orderId, branchId, restaurantId, partnerId) {
     // Verify order exists and needs delivery
     const { data: order, error: orderErr } = await supabase_1.supabaseAdmin
         .from('orders')
@@ -24,29 +24,23 @@ async function assignDelivery(orderId, branchId, restaurantId) {
     if (order.order_type !== 'delivery') {
         throw Object.assign(new Error('Order is not a delivery order'), { status: 422 });
     }
-    // Find nearest online partner without an active delivery using geo query
-    // Partners must have last_location populated and status = 'online'
-    // FIX: branches table uses 'lat'/'lon' columns, not 'current_lat'/'current_lon'
-    const { data: branch } = await supabase_1.supabaseAdmin
-        .from('branches')
-        .select('lat, lon')
-        .eq('id', branchId)
-        .single();
-    // TODO: Use PostGIS ST_Distance for accurate geo-based sorting
-    // For now: pick first available online partner in the same area
-    const { data: partners, error: partnerErr } = await supabase_1.supabaseAdmin
+    // Validate provided partner is available for this branch and online
+    const { data: partner, error: partnerErr } = await supabase_1.supabaseAdmin
         .from('delivery_partners')
-        .select('id, name')
-        .eq('branch_id', branchId)
-        .eq('is_online', true)
-        .is('active_delivery_id', null)
-        .limit(1);
-    if (partnerErr)
-        throw partnerErr;
-    if (!partners || partners.length === 0) {
-        throw Object.assign(new Error('No available delivery partners'), { status: 503 });
+        .select('id, branch_id, is_online, active_delivery_id')
+        .eq('id', partnerId)
+        .single();
+    if (partnerErr || !partner)
+        throw Object.assign(new Error('Delivery partner not found'), { status: 400 });
+    if (partner.branch_id !== branchId) {
+        throw Object.assign(new Error('Delivery partner does not belong to this branch'), { status: 400 });
     }
-    const partner = partners[0];
+    if (partner.is_online !== true) {
+        throw Object.assign(new Error('Delivery partner is not online'), { status: 400 });
+    }
+    if (partner.active_delivery_id !== null) {
+        throw Object.assign(new Error('Delivery partner already has an active delivery'), { status: 400 });
+    }
     // Create delivery record
     const { data: delivery, error: deliveryErr } = await supabase_1.supabaseAdmin
         .from('deliveries')
@@ -105,7 +99,8 @@ async function updateDeliveryStatus(deliveryId, partnerId, newStatus) {
         throw Object.assign(new Error('Delivery not found'), { status: 404 });
     const allowed = VALID_TRANSITIONS[delivery.status] ?? [];
     if (!allowed.includes(newStatus)) {
-        throw Object.assign(new Error(`Invalid transition: ${delivery.status} → ${newStatus}`), { status: 422 });
+        // docs negative tests expect 400 for invalid/backwards transitions
+        throw Object.assign(new Error(`Invalid transition: ${delivery.status} → ${newStatus}`), { status: 400 });
     }
     const updatePayload = { status: newStatus };
     const now = new Date().toISOString();

@@ -10,6 +10,7 @@ const compression_1 = __importDefault(require("compression"));
 const morgan_1 = __importDefault(require("morgan"));
 const hpp_1 = __importDefault(require("hpp"));
 const cors_1 = require("./config/cors");
+const env_1 = require("./config/env");
 const error_middleware_1 = require("./middleware/error.middleware");
 // ─── Route modules ───────────────────────────────────────────────────────────
 const auth_routes_1 = __importDefault(require("./modules/auth/auth.routes"));
@@ -48,6 +49,14 @@ app.use(express_1.default.urlencoded({ extended: true, limit: '2mb' }));
 app.use((0, hpp_1.default)());
 // ─── Routes ─────────────────────────────────────────────────────────────────
 const API = '/api/v1';
+// Root route
+app.get('/', (_req, res) => {
+    res.status(200).json({
+        message: 'Welcome to DineLuxe API',
+        docs: 'API documentation available at /api/v1/health',
+        frontend: env_1.config.FRONTEND_URL,
+    });
+});
 app.use(`${API}/auth`, auth_routes_1.default);
 app.use(`${API}/admin`, admin_routes_1.default);
 app.use(`${API}/analytics`, analytics_routes_1.default);

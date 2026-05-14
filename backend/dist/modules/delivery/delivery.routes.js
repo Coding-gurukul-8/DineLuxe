@@ -10,7 +10,11 @@ const delivery_controller_1 = require("./delivery.controller");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
 // POST /delivery/orders/:orderId/assign — internal/manager
-router.post('/orders/:orderId/assign', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('manager', 'owner'), delivery_controller_1.handleAssignDelivery);
+router.post('/orders/:orderId/assign', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('manager', 'owner'), (0, validate_middleware_1.validate)({
+    body: zod_1.z.object({
+        partner_id: zod_1.z.string().uuid(),
+    }),
+}), delivery_controller_1.handleAssignDelivery);
 // GET /delivery/partner/active — delivery partner's active delivery
 router.get('/partner/active', (0, rbac_middleware_1.requireRole)('delivery_partner'), delivery_controller_1.handleGetActiveDelivery);
 // GET /delivery/partner/earnings — delivery partner earnings

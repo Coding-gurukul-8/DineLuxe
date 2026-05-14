@@ -10,7 +10,7 @@ const response_1 = require("../../utils/response");
 const delivery_service_1 = require("./delivery.service");
 async function handleAssignDelivery(req, res, next) {
     try {
-        const delivery = await (0, delivery_service_1.assignDelivery)(req.params.orderId, req.branchId, req.restaurantId);
+        const delivery = await (0, delivery_service_1.assignDelivery)(req.params.orderId, req.branchId, req.restaurantId, req.body.partner_id);
         res.status(201).json((0, response_1.success)(delivery, 'Delivery assigned'));
     }
     catch (err) {
