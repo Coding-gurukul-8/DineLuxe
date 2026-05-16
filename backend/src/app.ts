@@ -37,6 +37,14 @@ import usersRoutes from './modules/users/users.routes';
 
 const app: Express = express();
 
+// ─── Trust proxy (must be set before rate-limiters & other middleware) ───────
+// Tells Express to trust the X-Forwarded-For header set by reverse proxies
+// (nginx, Render, Railway, AWS ALB, etc.) so express-rate-limit can identify
+// real client IPs instead of the proxy IP.
+// Use `1` to trust the first hop (direct proxy). For multiple proxy hops,
+// set to the number of trusted hops, or a specific IP/CIDR string.
+app.set('trust proxy', 1);
+
 // ─── Global middleware (ORDER MATTERS) ──────────────────────────────────────
 app.use(helmet());
 app.use(corsMiddleware);

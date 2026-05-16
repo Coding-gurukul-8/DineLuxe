@@ -12,9 +12,16 @@ function makeStore(prefix: string) {
   });
 }
 
-function rateLimitResponse(_req: unknown, _res: unknown, _next: unknown, options: { message: string }) {
-  return {
-    ...error('RATE_LIMIT_EXCEEDED', options.message),
+import type { Request, Response, NextFunction } from 'express';
+
+/**
+ * express-rate-limit `handler` — called when a client exceeds the limit.
+ * Uses the `handler` option (not `message`) so we can send a structured JSON
+ * response with the correct status code and our API error envelope.
+ */
+function makeRateLimitHandler(msg: string) {
+  return (_req: Request, res: Response, _next: NextFunction, options: { statusCode: number }) => {
+    res.status(options.statusCode).json(error('RATE_LIMIT_EXCEEDED', msg));
   };
 }
 
@@ -40,9 +47,7 @@ export const generalLimiter: import('express-rate-limit').RateLimitRequestHandle
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
-  message: rateLimitResponse(null, null, null, {
-    message: 'Too many requests. Please try again in 15 minutes.',
-  }),
+  handler: makeRateLimitHandler('Too many requests. Please try again in 15 minutes.'),
 }, 'rl:general:');
 
 /** 10 requests per 15 minutes – auth routes */
@@ -53,9 +58,7 @@ export const authLimiter: import('express-rate-limit').RateLimitRequestHandler =
   max: authMax,
   standardHeaders: true,
   legacyHeaders: false,
-  message: rateLimitResponse(null, null, null, {
-    message: 'Too many authentication attempts. Please try again in 15 minutes.',
-  }),
+  handler: makeRateLimitHandler('Too many authentication attempts. Please try again in 15 minutes.'),
 }, 'rl:auth:');
 
 /** 20 requests per hour – upload routes */
@@ -64,7 +67,5 @@ export const uploadLimiter: import('express-rate-limit').RateLimitRequestHandler
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: rateLimitResponse(null, null, null, {
-    message: 'Upload limit reached. Please try again in an hour.',
-  }),
+  handler: makeRateLimitHandler('Upload limit reached. Please try again in an hour.'),
 }, 'rl:upload:');
