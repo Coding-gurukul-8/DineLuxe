@@ -10,6 +10,7 @@ import {
   refreshController,
   forgotPasswordController,
   resetPasswordController,
+  changePasswordController,
   checkEmailController,
 } from './auth.controller';
 import {
@@ -17,6 +18,7 @@ import {
   loginSchema,
   otpSchema,
   resetPasswordSchema,
+  changePasswordSchema,
   forgotPasswordSchema,
   refreshTokenSchema,
 } from './auth.schema';
@@ -33,6 +35,7 @@ router.post('/logout', authenticate, logoutController);
 router.post('/refresh', validate(refreshTokenSchema), refreshController);
 router.post('/forgot-password', validate(forgotPasswordSchema), forgotPasswordController);
 router.post('/reset-password', validate(resetPasswordSchema), resetPasswordController);
+router.post('/change-password', authenticate, validate(changePasswordSchema), changePasswordController);
 router.get('/check-email', checkEmailController);
 
 export default router;

@@ -29,6 +29,7 @@ function mapProfileToAuthUser(profile: AuthProfile): AuthUser {
     email: profile.email,
     name: name || undefined,
     role: profile.role,
+    forcePasswordChange: profile.force_password_change ?? false,
     restaurantId: profile.restaurant_id ?? undefined,
     branchId: profile.branch_id ?? undefined,
   }
@@ -82,6 +83,13 @@ export async function resetPassword(email: string, otp: string, newPassword: str
   return apiClient.post<{ message?: string }>("/auth/reset-password", {
     email,
     otp,
+    newPassword,
+  })
+}
+
+export async function changePassword(currentPassword: string, newPassword: string) {
+  return apiClient.post<{ message?: string }>("/auth/change-password", {
+    currentPassword,
     newPassword,
   })
 }

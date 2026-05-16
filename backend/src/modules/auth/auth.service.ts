@@ -10,6 +10,7 @@ import type {
   LoginInput,
   OtpInput,
   ResetPasswordInput,
+  ChangePasswordInput,
   ForgotPasswordInput,
   RefreshTokenInput,
 } from './auth.schema';
@@ -322,6 +323,63 @@ export async function resetPassword(input: ResetPasswordInput): Promise<{ messag
   await deleteOTP(input.email);
 
   return { message: 'Password reset successfully. Please log in again.' };
+}
+
+/** Change password for authenticated users and clear first-login flag. */
+export async function changePassword(userId: string, input: ChangePasswordInput): Promise<{ message: string }> {
+  if (!userId) {
+    const err = new Error('Unauthorized') as Error & { status: number };
+    err.status = 401;
+    throw err;
+  }
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from('users')
+    .select('id, password_hash')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (profileError || !profile) {
+    const err = new Error('User not found') as Error & { status: number };
+    err.status = 404;
+    throw err;
+  }
+
+  if (!profile.password_hash) {
+    const err = new Error('Password not set for this account') as Error & { status: number };
+    err.status = 409;
+    throw err;
+  }
+
+  const passwordMatch = await bcrypt.compare(input.currentPassword, profile.password_hash as string);
+  if (!passwordMatch) {
+    const err = new Error('Current password is incorrect') as Error & { status: number };
+    err.status = 401;
+    throw err;
+  }
+
+  if (input.currentPassword === input.newPassword) {
+    const err = new Error('New password must be different from the current password') as Error & { status: number };
+    err.status = 422;
+    throw err;
+  }
+
+  const hashedPassword = await bcrypt.hash(input.newPassword, config.BCRYPT_SALT_ROUNDS);
+
+  const { error: updateError } = await supabaseAdmin
+    .from('users')
+    .update({
+      password_hash: hashedPassword,
+      force_password_change: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (updateError) {
+    throw new Error(`Password update failed: ${updateError.message}`);
+  }
+
+  return { message: 'Password updated successfully.' };
 }
 
 /** Issue a new access token from a valid refresh token. */

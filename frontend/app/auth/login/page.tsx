@@ -2,8 +2,7 @@
 
 import { motion } from "framer-motion"
 import Link from "next/link"
-import { LoginForm } from "@/components/auth/LoginForm"
-import { Utensils } from "lucide-react"
+import { ShieldCheck, Store, Utensils } from "lucide-react"
 
 export default function LoginPage() {
   return (
@@ -12,10 +11,9 @@ export default function LoginPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-md"
+        className="w-full max-w-3xl"
       >
-        {/* Logo */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-10">
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
@@ -24,29 +22,66 @@ export default function LoginPage() {
           >
             <Utensils size={32} className="text-white" />
           </motion.div>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome Back</h1>
-          <p className="text-sm text-gray-500 mt-1">Sign in to your DineLuxe account</p>
+          <h1 className="text-3xl font-bold text-gray-900">Choose your portal</h1>
+          <p className="text-sm text-gray-500 mt-2">
+            Pick the experience that matches your role.
+          </p>
         </div>
 
-        {/* Form */}
-        <div className="bg-white rounded-md shadow-sm border border-gray-100 p-6">
-          <LoginForm />
-        </div>
-
-        {/* Links */}
-        <div className="mt-6 text-center space-y-3">
+        <div className="grid gap-4 md:grid-cols-3">
           <Link
-            href="/auth/forgot-password"
-            className="text-sm text-brand-primary hover:underline"
+            href="/auth/admin"
+            className="group rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-brand-primary/40 hover:shadow-md"
           >
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-primary/10 text-brand-primary">
+              <ShieldCheck size={22} />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-gray-900">Admin App</h2>
+            <p className="mt-2 text-sm text-gray-500">
+              Platform operations, restaurants, analytics, and system health.
+            </p>
+            <span className="mt-4 inline-flex text-sm font-medium text-brand-primary">
+              Continue as admin
+            </span>
+          </Link>
+
+          <Link
+            href="/auth/restaurant"
+            className="group rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-brand-primary/40 hover:shadow-md"
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-primary/10 text-brand-primary">
+              <Store size={22} />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-gray-900">Restaurant Team</h2>
+            <p className="mt-2 text-sm text-gray-500">
+              Owners, managers, and staff dashboards for day-to-day operations.
+            </p>
+            <span className="mt-4 inline-flex text-sm font-medium text-brand-primary">
+              Continue as restaurant
+            </span>
+          </Link>
+
+          <Link
+            href="/auth/customer"
+            className="group rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-brand-primary/40 hover:shadow-md"
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-primary/10 text-brand-primary">
+              <Utensils size={22} />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-gray-900">Customer</h2>
+            <p className="mt-2 text-sm text-gray-500">
+              Browse restaurants, book tables, and manage your orders.
+            </p>
+            <span className="mt-4 inline-flex text-sm font-medium text-brand-primary">
+              Continue as customer
+            </span>
+          </Link>
+        </div>
+
+        <div className="mt-8 text-center">
+          <Link href="/auth/forgot-password" className="text-sm text-brand-primary hover:underline">
             Forgot your password?
           </Link>
-          <p className="text-sm text-gray-500">
-            Don't have an account?{" "}
-            <Link href="/auth/signup" className="text-brand-primary font-medium hover:underline">
-              Sign up
-            </Link>
-          </p>
         </div>
       </motion.div>
     </div>

@@ -5,6 +5,7 @@ export interface AuthUser {
   email: string
   name?: string
   role: Role
+  forcePasswordChange?: boolean
   restaurantId?: string
   branchId?: string
 }
@@ -19,6 +20,7 @@ export interface AuthProfile {
   name?: string | null
   email: string
   role: Role
+  force_password_change?: boolean
   restaurant_id?: string | null
   branch_id?: string | null
   first_name?: string | null

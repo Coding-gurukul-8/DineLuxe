@@ -51,7 +51,7 @@ export default function VerifyOTPPage() {
     }
   }
 
-  const handleResend = () => {
+  const handleResend = async () => {
     if (countdown > 0) return
     setIsLoading(true)
     setError(null)

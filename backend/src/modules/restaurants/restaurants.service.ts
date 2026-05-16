@@ -111,7 +111,7 @@ export async function register(input: RegisterInput, ipAddress: string) {
       data: {
         name: input.owner.first_name,
         restaurantName: input.restaurant.name,
-        loginUrl: `${process.env.FRONTEND_URL}/login`,
+        loginUrl: `${process.env.FRONTEND_URL}/auth/restaurant`,
       },
     }).catch(console.error);
 

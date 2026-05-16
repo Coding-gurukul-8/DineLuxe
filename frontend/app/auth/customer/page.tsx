@@ -2,10 +2,10 @@
 
 import { motion } from "framer-motion"
 import Link from "next/link"
-import { ForgotPasswordForm } from "@/components/auth/ForgotPasswordForm"
+import { LoginForm } from "@/components/auth/LoginForm"
 import { Utensils } from "lucide-react"
 
-export default function ForgotPasswordPage() {
+export default function CustomerLoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <motion.div
@@ -14,7 +14,6 @@ export default function ForgotPasswordPage() {
         transition={{ duration: 0.5 }}
         className="w-full max-w-md"
       >
-        {/* Logo */}
         <div className="text-center mb-8">
           <motion.div
             initial={{ scale: 0 }}
@@ -24,23 +23,30 @@ export default function ForgotPasswordPage() {
           >
             <Utensils size={32} className="text-white" />
           </motion.div>
-          <h1 className="text-2xl font-bold text-gray-900">Reset Password</h1>
-          <p className="text-sm text-gray-500 mt-1">We'll help you get back in</p>
+          <h1 className="text-2xl font-bold text-gray-900">Welcome Back</h1>
+          <p className="text-sm text-gray-500 mt-1">Sign in to your DineLuxe account</p>
         </div>
 
-        {/* Form */}
         <div className="bg-white rounded-md shadow-sm border border-gray-100 p-6">
-          <ForgotPasswordForm />
+          <LoginForm />
         </div>
 
-        {/* Links */}
-        <div className="mt-6 text-center">
+        <div className="mt-6 text-center space-y-3">
+          <Link
+            href="/auth/forgot-password"
+            className="text-sm text-brand-primary hover:underline"
+          >
+            Forgot your password?
+          </Link>
           <p className="text-sm text-gray-500">
-            Remember your password?{" "}
-            <Link href="/auth/login" className="text-brand-primary font-medium hover:underline">
-              Back to portal
+            Don't have an account?{" "}
+            <Link href="/auth/signup" className="text-brand-primary font-medium hover:underline">
+              Sign up
             </Link>
           </p>
+          <Link href="/auth/login" className="text-sm text-brand-primary hover:underline">
+            Back to portal
+          </Link>
         </div>
       </motion.div>
     </div>

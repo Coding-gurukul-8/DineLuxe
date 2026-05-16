@@ -66,6 +66,15 @@ export async function resetPasswordController(req: Request, res: Response, next:
   }
 }
 
+export async function changePasswordController(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const result = await authService.changePassword(req.user?.id ?? '', req.body);
+    res.status(200).json(success(result));
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function checkEmailController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     // BUG FIX: normalise email before querying so "User@Email.Com" and
