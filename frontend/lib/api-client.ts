@@ -50,7 +50,10 @@ function normalizeRequest(method: RequestMethod, path: string, body?: unknown): 
 
   const branchBookings = path.match(/^\/branch\/([^/?]+)\/bookings\/today$/);
   if (method === "GET" && branchBookings) {
-    return { ...normalized, path: `/bookings/branch/${branchBookings[1]}` };
+    // Backend route is /bookings/branch/:branchId — append ?date=today so the
+    // controller can filter to today's bookings (dropping /today was silently
+    // returning ALL bookings for the branch).
+    return { ...normalized, path: `/bookings/branch/${branchBookings[1]}?date=today` };
   }
 
   const branchActiveOrders = path.match(/^\/branch\/([^/?]+)\/orders\/active$/);

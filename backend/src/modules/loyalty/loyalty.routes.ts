@@ -14,6 +14,9 @@ router.use(authenticate);
 // GET /loyalty/balance — returns balance for the authenticated user (own data only)
 router.get('/balance', getBalance);
 
+// GET /loyalty/me — alias used by customer home page; returns combined balance + summary
+router.get('/me', getBalance);
+
 // POST /loyalty/earn
 router.post('/earn', earnPoints);
 

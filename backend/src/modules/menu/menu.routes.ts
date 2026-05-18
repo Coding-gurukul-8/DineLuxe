@@ -34,6 +34,10 @@ const router: import('express').Router = Router();
 // GET /menu/branch/:branchId — public, cached full menu
 router.get('/branch/:branchId', handleGetPublicMenu);
 
+// GET /menu/branch/:branchId/items — public alias used by frontend with optional ?limit query
+// Returns the same data as /branch/:branchId but scoped as "items" for consistency
+router.get('/branch/:branchId/items', handleGetPublicMenu);
+
 // GET /menu/items/:id — public single item lookup
 // FIX: must be declared BEFORE the protected router.use() block so it stays public
 router.get('/items/:id', handleGetItem);

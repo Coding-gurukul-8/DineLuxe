@@ -4,6 +4,7 @@ import "./globals.css";
 import { QueryProvider }   from "@/components/layout/QueryProvider";
 import { AuthProvider }    from "@/components/layout/AuthProvider";
 import { BrandingProvider } from "@/components/layout/BrandingProvider";
+import { ThemeProvider }   from "@/components/layout/ThemeProvider";
 import { Toaster }         from "@/components/ui/sonner";
 
 if (typeof globalThis.localStorage !== "undefined" && typeof (globalThis as any).localStorage.getItem !== "function") {
@@ -29,8 +30,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <QueryProvider>
           <AuthProvider>
             <BrandingProvider>
-              {children}
-              <Toaster richColors position="top-right" />
+              <ThemeProvider>
+                {children}
+                <Toaster richColors position="top-right" />
+              </ThemeProvider>
             </BrandingProvider>
           </AuthProvider>
         </QueryProvider>

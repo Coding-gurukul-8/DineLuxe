@@ -16,22 +16,18 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedRole = localStorage.getItem("userRole") as Role | null;
-    const storedUser = localStorage.getItem("userData");
-    
-    if (storedRole && Object.values(ROLES).includes(storedRole as Role)) {
-      setRole(storedRole);
-      setIsAuthenticated(true);
-    }
-    
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch {
-        // Invalid user data
-      }
-    }
-    
+    // ISSUE 4 FIX: Do NOT hydrate auth state from localStorage before the API
+    // confirms the token is still valid. Setting role/user/isAuthenticated here
+    // caused a flash of "authenticated" UI on mount when the token was actually
+    // expired — the /users/me call would then 401 and clear state, but the flash
+    // had already rendered protected content/redirects.
+    //
+    // Correct flow:
+    //   1. Check token exists in localStorage (gating call — no state set yet)
+    //   2. Call /users/me with that token
+    //   3. On success → hydrate state from the API response
+    //   4. On failure → clear tokens and set unauthenticated state
+
     const accessToken = getAccessToken();
     if (!accessToken) {
       setLoading(false);
@@ -41,9 +37,11 @@ export function useAuth() {
     apiClient
       .get<AuthProfile>("/users/me")
       .then((profile) => {
+        // Only set state after the API confirms the token is valid
         setUserData(mapProfileToAuthUser(profile));
       })
       .catch(() => {
+        // Token is expired or invalid — clear everything
         clearAuthTokens();
         setUserData(null);
       })

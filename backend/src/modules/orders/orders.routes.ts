@@ -9,6 +9,8 @@ import {
   handleGetOrder,
   handleGetOrdersByTable,
   handleGetActiveBranchOrders,
+  handleGetMyOrders,
+  handleGetStaffOrders,
   handleCancelOrder,
 } from './orders.controller';
 
@@ -25,6 +27,20 @@ router.post(
   // schema.safeParse() which doesn't exist on a plain object. Pass schema directly.
   validate(createOrderSchema),
   handleCreateOrder
+);
+
+// GET /orders/user/me — customer's own active/recent orders (must be BEFORE /:id)
+router.get(
+  '/user/me',
+  requireRole('customer'),
+  handleGetMyOrders
+);
+
+// GET /orders/staff — waiter/cashier view of orders on their branch (must be BEFORE /:id)
+router.get(
+  '/staff',
+  requireRole('waiter', 'cashier', 'manager', 'owner'),
+  handleGetStaffOrders
 );
 
 // GET /orders/table/:tableId — FIX: must be BEFORE /:id (else 'table' parsed as order id)

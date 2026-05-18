@@ -41,7 +41,9 @@ export async function middleware(request: NextRequest) {
   const response = NextResponse.next();
   const { pathname } = request.nextUrl;
 
-  // Quick bypass for local development to avoid edge runtime import issues
+  // DEV NOTE: Auth middleware is skipped in development to avoid edge-runtime
+  // import issues with server-side SDKs. Route protection only enforces in production.
+  // To test auth protection locally, temporarily set NODE_ENV=production in .env.
   if (process.env.NODE_ENV !== 'production') return response;
 
   if (

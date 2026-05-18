@@ -15,6 +15,15 @@ router.get(
   ctrl.getTickets,
 );
 
+// GET /kitchen/orders — branchless alias used by chef KDS page; branch is resolved
+// from the authenticated staff member's assigned branch in the controller
+router.get(
+  '/orders',
+  authenticate,
+  requireRole('chef', 'manager', 'owner'),
+  ctrl.getTickets,
+);
+
 // PATCH /kitchen/orders/:id/status
 // Chef-ONLY forward transitions (confirmed → preparing → ready)
 router.patch(

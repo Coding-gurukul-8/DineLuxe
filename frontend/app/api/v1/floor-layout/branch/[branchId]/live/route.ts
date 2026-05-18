@@ -1,19 +1,45 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET() {
-  const sample = {
-    floors: [
-      {
-        id: 'floor-1',
-        name: 'Main Floor',
-        tables: [
-          { id: 't1', label: 'A1', capacity: 4, shape: 'round', x: 40, y: 60, status: 'free' },
-          { id: 't2', label: 'A2', capacity: 2, shape: 'rectangle', x: 160, y: 60, status: 'occupied' },
-          { id: 't3', label: 'B1', capacity: 6, shape: 'booth', x: 40, y: 180, status: 'free' },
-        ],
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL?.trim() || 'http://localhost:4000/api/v1';
+
+/**
+ * GET /api/v1/floor-layout/branch/[branchId]/live
+ *
+ * Proxies to the backend: GET /floor-layout/branch/:branchId/live
+ * Backend route: floor-layout.routes.ts → router.get('/branch/:branchId/live', authenticate, ctrl.getLiveLayout)
+ *
+ * Previously this returned hardcoded mock data and never called the backend.
+ * Fixed to forward the request with the caller's Authorization header so the
+ * backend can authenticate + return real live table statuses.
+ */
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { branchId: string } }
+) {
+  const { branchId } = params;
+  const backendUrl = `${BACKEND_URL}/floor-layout/branch/${branchId}/live`;
+
+  const authHeader = req.headers.get('authorization');
+
+  try {
+    const backendRes = await fetch(backendUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authHeader ? { Authorization: authHeader } : {}),
       },
-    ],
-  };
+      // Don't cache — this is a live status endpoint
+      cache: 'no-store',
+    });
 
-  return NextResponse.json({ success: true, data: sample });
+    const data = await backendRes.json();
+
+    return NextResponse.json(data, { status: backendRes.status });
+  } catch (err) {
+    console.error('[floor-layout proxy] Failed to reach backend:', err);
+    return NextResponse.json(
+      { success: false, error: { code: 'PROXY_ERROR', message: 'Could not reach backend' } },
+      { status: 502 }
+    );
+  }
 }

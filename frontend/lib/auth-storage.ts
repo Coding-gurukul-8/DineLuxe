@@ -1,3 +1,7 @@
+// COOKIE NAME CONTRACT: The access-token cookie is intentionally named
+// "dineluxe_access_token" — this must match exactly what middleware.ts reads
+// via `request.cookies.get("dineluxe_access_token")`. Do NOT rename either
+// without updating both files simultaneously.
 import type { AuthTokens } from "@/types/auth"
 
 const ACCESS_TOKEN_KEY = "dineluxe_access_token"
