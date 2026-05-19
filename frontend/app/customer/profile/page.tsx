@@ -23,23 +23,35 @@ import {
 } from "lucide-react"
 
 interface UserProfile {
-  name: string;
+  name?: string | null;
   email: string;
-  phone: string;
-  address: string;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  pin_code?: string | null;
+  profile_pic_url?: string | null;
+}
+
+interface LoyaltyBalance {
+  balance: number;
+  total_earned: number;
 }
 
 export default function CustomerProfilePage() {
   const [activeTab, setActiveTab] = useState("profile")
   const { data: profile, isLoading } = useQuery<UserProfile>({
     queryKey: ["customer", "profile"],
-    queryFn: () => apiClient.get("/profile/me")
+    queryFn: () => apiClient.get("/users/me")
   })
 
-  const { data: preferences } = useQuery({
-    queryKey: ["customer", "preferences"],
-    queryFn: () => apiClient.get("/preferences/me")
+  const { data: loyalty } = useQuery<LoyaltyBalance>({
+    queryKey: ["customer", "loyalty"],
+    queryFn: () => apiClient.get("/loyalty/me")
   })
+
+  const displayAddress = [profile?.address, profile?.city, profile?.pin_code]
+    .filter(Boolean)
+    .join(", ")
 
   return (
     <PageWrapper title="Your Profile" subtitle="Manage your account settings">
@@ -62,21 +74,28 @@ export default function CustomerProfilePage() {
                 <Label htmlFor="name" className="block text-sm font-medium text-gray-700">
                   Full Name
                 </Label>
-                <Input id="name" defaultValue={profile?.name || "Customer"} className="mt-1" />
+                <Input id="name" value={profile?.name || "Customer"} className="mt-1" readOnly />
               </div>
               
               <div>
                 <Label htmlFor="email" className="block text-sm font-medium text-gray-700">
                   Email
                 </Label>
-                <Input id="email" defaultValue={profile?.email || "customer@example.com"} className="mt-1" />
+                <Input id="email" value={profile?.email || "customer@example.com"} className="mt-1" readOnly />
               </div>
               
               <div>
                 <Label htmlFor="phone" className="block text-sm font-medium text-gray-700">
                   Phone Number
                 </Label>
-                <Input id="phone" defaultValue="+91 9876543210" className="mt-1" />
+                <Input id="phone" value={profile?.phone || "+91 9876543210"} className="mt-1" readOnly />
+              </div>
+
+              <div>
+                <Label htmlFor="address" className="block text-sm font-medium text-gray-700">
+                  Address
+                </Label>
+                <Input id="address" value={displayAddress || "No address on file"} className="mt-1" readOnly />
               </div>
             </div>
             
@@ -85,10 +104,10 @@ export default function CustomerProfilePage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
                   <Star className="text-yellow-500" />
-                  <span className="ml-2 font-medium">1,250 points</span>
+                  <span className="ml-2 font-medium">{loyalty?.balance ?? 0} points</span>
                 </div>
                 <div className="text-sm text-gray-500">
-                  Next reward in: 50 points
+                  Total earned: {loyalty?.total_earned ?? 0}
                 </div>
               </div>
               <div className="mt-4">

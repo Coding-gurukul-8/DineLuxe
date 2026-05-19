@@ -82,7 +82,11 @@ export default function PaymentSuccessPage() {
   }
 
   const handleViewOrders = () => {
-    router.push("/customer/order/history")
+    if (orderId) {
+      router.push(`/customer/order/${orderId}`)
+    } else {
+      router.push("/customer/order/history")
+    }
   }
 
   const handleReorder = async () => {

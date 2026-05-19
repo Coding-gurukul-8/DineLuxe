@@ -1,6 +1,6 @@
 // <reference path="./types/express.d.ts" />
 import { createServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, type Socket } from 'socket.io';
 import { config } from './config/env';
 import { redis } from './config/redis';
 import app from './app';
@@ -29,7 +29,7 @@ export const io = new SocketIOServer(httpServer, {
 
 // ─── Socket.io connection handler ───────────────────────────────────────────
 
-io.on('connection', (socket) => {
+io.on('connection', (socket: Socket) => {
   console.log(`🔌 Socket connected: ${socket.id}`);
 
   // Allow clients to subscribe to a named room (e.g. "branch:uuid:host")
@@ -42,7 +42,7 @@ io.on('connection', (socket) => {
     socket.leave(room);
   });
 
-  socket.on('disconnect', (reason) => {
+  socket.on('disconnect', (reason: string) => {
     console.log(`🔌 Socket disconnected: ${socket.id} (${reason})`);
   });
 });

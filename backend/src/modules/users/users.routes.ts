@@ -14,6 +14,8 @@ router.get('/check-email', ctrl.checkEmail);
 // Authenticated
 router.get('/me', authenticate, ctrl.getMe);
 router.patch('/me', authenticate, validate(updateProfileSchema), ctrl.updateMe);
+router.put('/me', authenticate, validate(updateProfileSchema), ctrl.updateMe);
+router.delete('/me', authenticate, ctrl.deleteMe);
 
 // Manager / Owner / Admin only
 // BUG FIX: injectTenant added so restaurantId is always on req and the

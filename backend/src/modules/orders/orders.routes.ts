@@ -16,12 +16,13 @@ import {
 
 const router: import('express').Router = Router();
 
-// All order routes require authentication + tenant injection
-router.use(authenticate, injectTenant);
+// All order routes require authentication
+router.use(authenticate);
 
 // POST /orders — waiter or customer via QR
 router.post(
   '/',
+  injectTenant,
   requireRole('waiter', 'customer', 'manager', 'owner', 'cashier'),
   // BUG FIX: validate({ body: schema }) passes a plain object — middleware calls
   // schema.safeParse() which doesn't exist on a plain object. Pass schema directly.
@@ -39,6 +40,7 @@ router.get(
 // GET /orders/staff — waiter/cashier view of orders on their branch (must be BEFORE /:id)
 router.get(
   '/staff',
+  injectTenant,
   requireRole('waiter', 'cashier', 'manager', 'owner'),
   handleGetStaffOrders
 );
@@ -46,6 +48,7 @@ router.get(
 // GET /orders/table/:tableId — FIX: must be BEFORE /:id (else 'table' parsed as order id)
 router.get(
   '/table/:tableId',
+  injectTenant,
   requireRole('waiter', 'cashier', 'manager', 'owner'),
   handleGetOrdersByTable
 );
@@ -53,16 +56,18 @@ router.get(
 // GET /orders/branch/:branchId/active — FIX: must be BEFORE /:id
 router.get(
   '/branch/:branchId/active',
+  injectTenant,
   requireRole('manager', 'owner', 'cashier'),
   handleGetActiveBranchOrders
 );
 
 // GET /orders/:id — any authenticated user
-router.get('/:id', handleGetOrder);
+router.get('/:id', injectTenant, handleGetOrder);
 
 // PATCH /orders/:id/cancel — manager/owner only
 router.patch(
   '/:id/cancel',
+  injectTenant,
   requireRole('manager', 'owner'),
   validate(cancelOrderSchema),
   handleCancelOrder

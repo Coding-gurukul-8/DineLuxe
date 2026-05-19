@@ -5,7 +5,7 @@ import { success, error } from '../../utils/response';
 export async function signupController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const result = await authService.signup(req.body);
-    res.status(202).json(success(result, 'OTP sent. Please verify your email.'));
+    res.status(201).json(success(result, 'Account created. You can verify your email later.'));
   } catch (err) {
     next(err);
   }
@@ -14,7 +14,7 @@ export async function signupController(req: Request, res: Response, next: NextFu
 export async function verifyOtpController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const result = await authService.verifyOtp(req.body);
-    res.status(201).json(success(result, 'Account verified and created successfully.'));
+    res.status(200).json(success(result, 'Email verified successfully.'));
   } catch (err) {
     next(err);
   }
@@ -90,6 +90,14 @@ export async function checkEmailController(req: Request, res: Response, next: Ne
     );
     if (dbError) throw dbError;
     res.status(200).json(success({ available: !data }, data ? 'Email is taken.' : 'Email is available.'));
+  } catch (err) {
+    next(err);
+  }
+}
+export async function sendVerificationOtpController(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const result = await authService.sendVerificationOtp(req.body);
+    res.status(200).json(success(result, 'Verification OTP sent successfully.'));
   } catch (err) {
     next(err);
   }

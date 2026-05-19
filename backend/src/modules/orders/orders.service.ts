@@ -1,7 +1,41 @@
 import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
+import { parsePagination } from '../../utils/pagination';
 import { findLeastBusyWaiter } from '../../utils/waiter-assign';
 import type { CreateOrderInput } from './orders.schema';
+
+const ACTIVE_CUSTOMER_STATUSES = ['created', 'confirmed', 'preparing', 'ready'];
+const PAST_CUSTOMER_STATUSES = ['served', 'paid', 'closed', 'cancelled'];
+const ACTIVE_STAFF_STATUSES = ['created', 'confirmed', 'preparing', 'ready', 'served'];
+
+type OrderItemRow = {
+  id: string;
+  quantity: number;
+  unit_price: number | string | null;
+  notes?: string | null;
+  status?: string | null;
+  menu_items?: { name?: string | null; price?: number | string | null } | null;
+};
+
+function normalizeOrderItems(items: OrderItemRow[] | null | undefined) {
+  const normalized = (items ?? []).map((item) => {
+    const unitPrice = Number(item.unit_price ?? item.menu_items?.price ?? 0);
+    return {
+      id: item.id,
+      quantity: Number(item.quantity ?? 0),
+      unitPrice,
+      price: unitPrice,
+      status: item.status ?? undefined,
+      notes: item.notes ?? undefined,
+      specialRequests: item.notes ?? undefined,
+      name: item.menu_items?.name ?? 'Item',
+      menuItem: item.menu_items ?? undefined,
+    };
+  });
+
+  const total = normalized.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  return { items: normalized, total };
+}
 
 // ─── Create Order ────────────────────────────────────────────────────────────
 export async function createOrder(
@@ -165,13 +199,19 @@ async function deductInventory(branchId: string, items: CreateOrderInput['items'
 }
 
 // ─── Get Order by ID ─────────────────────────────────────────────────────────
-export async function getOrderById(orderId: string, branchId: string) {
-  const { data, error } = await supabaseAdmin
+export async function getOrderById(orderId: string, branchId?: string, userId?: string) {
+  let query = supabaseAdmin
     .from('orders')
     .select('*, order_items(*, menu_items(name, price))')
-    .eq('id', orderId)
-    .eq('branch_id', branchId)
-    .single();
+    .eq('id', orderId);
+
+  if (branchId) {
+    query = query.eq('branch_id', branchId);
+  } else if (userId) {
+    query = query.eq('customer_id', userId);
+  }
+
+  const { data, error } = await query.single();
 
   if (error || !data) {
     throw Object.assign(new Error('Order not found'), { statusCode: 404 });
@@ -195,6 +235,126 @@ export async function getOrdersByTable(tableId: string, branchId: string) {
 
   if (error) throw error;
   return data ?? [];
+}
+
+// ─── Get orders for current customer ─────────────────────────────────────────
+export async function getMyOrders(
+  userId: string,
+  branchId: string | undefined,
+  query: Record<string, string | undefined>
+) {
+  const { page, limit, offset } = parsePagination(query);
+
+  let request = supabaseAdmin
+    .from('orders')
+    .select(
+      '*, tables(label), branches(name), order_items(id, quantity, unit_price, notes, status, menu_items(name, price))',
+      { count: 'exact' }
+    )
+    .eq('customer_id', userId);
+
+  if (branchId) {
+    request = request.eq('branch_id', branchId);
+  }
+
+  const status = query.status;
+  if (status === 'active') {
+    request = request.in('status', ACTIVE_CUSTOMER_STATUSES);
+  } else if (status === 'past') {
+    request = request.in('status', PAST_CUSTOMER_STATUSES);
+  } else if (status) {
+    request = request.eq('status', status);
+  }
+
+  const { data, error, count } = await request
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) throw error;
+
+  const normalized = (data ?? []).map((order: any) => {
+    const { items, total } = normalizeOrderItems(order.order_items);
+    return {
+      ...order,
+      items,
+      total,
+      totalAmount: total,
+      branch: order.branches ?? null,
+      table: order.tables ?? null,
+    };
+  });
+
+  return { data: normalized, total: count ?? 0, page, limit };
+}
+
+// ─── Get staff orders for branch ─────────────────────────────────────────────
+export async function getStaffOrders(
+  branchId: string,
+  query: Record<string, string | undefined>
+) {
+  const { page, limit, offset } = parsePagination(query);
+
+  if (!branchId) {
+    return { data: [], total: 0, page, limit };
+  }
+
+  let request = supabaseAdmin
+    .from('orders')
+    .select(
+      '*, tables(label), order_items(id, quantity, unit_price, notes, status, menu_items(name, price))',
+      { count: 'exact' }
+    )
+    .eq('branch_id', branchId);
+
+  const status = query.status;
+  if (!status || status === 'active') {
+    request = request.in('status', ACTIVE_STAFF_STATUSES);
+  } else if (status === 'past') {
+    request = request.in('status', PAST_CUSTOMER_STATUSES);
+  } else {
+    request = request.eq('status', status);
+  }
+
+  const { data, error, count } = await request
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) throw error;
+
+  const customerIds = Array.from(
+    new Set((data ?? []).map((order: any) => order.customer_id).filter(Boolean))
+  ) as string[];
+
+  let customerNameById: Record<string, string> = {};
+  if (customerIds.length > 0) {
+    const { data: customers } = await supabaseAdmin
+      .from('users')
+      .select('id, name')
+      .in('id', customerIds);
+
+    customerNameById = Object.fromEntries(
+      (customers ?? []).map((user: any) => [user.id, user.name])
+    );
+  }
+
+  const normalized = (data ?? []).map((order: any) => {
+    const { items, total } = normalizeOrderItems(order.order_items);
+    const orderNumber = order.id ? String(order.id).slice(-6).toUpperCase() : '';
+    const customerName = order.customer_id ? customerNameById[order.customer_id] : undefined;
+
+    return {
+      ...order,
+      items,
+      total,
+      totalAmount: total,
+      orderNumber,
+      customerName: customerName ?? 'Guest',
+      tableNumber: order.tables?.label ?? undefined,
+      createdAt: order.created_at,
+    };
+  });
+
+  return { data: normalized, total: count ?? 0, page, limit };
 }
 
 // ─── Get Active Orders for Branch ────────────────────────────────────────────

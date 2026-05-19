@@ -1,5 +1,10 @@
 import { supabaseAdmin } from '../../config/supabase';
+import { redis } from '../../config/redis';
 import { UpdateProfileInput } from './users.schema';
+
+function refreshTokenKey(userId: string): string {
+  return `refresh_token:${userId}`;
+}
 
 function splitName(name?: string | null): { first_name: string; last_name: string } {
   const parts = (name ?? '').trim().split(' ').filter(Boolean);
@@ -93,6 +98,20 @@ export async function updateMe(userId: string, updates: UpdateProfileInput) {
 
   if (error) throw new Error(`Failed to update profile: ${error.message}`);
   return mapUserRow(data);
+}
+
+// ─── Deactivate Account ─────────────────────────────────────────────────────
+export async function deleteMe(userId: string) {
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+
+  if (error) throw new Error(`Failed to deactivate account: ${error.message}`);
+
+  await redis.del(refreshTokenKey(userId));
+
+  return { deleted: true };
 }
 
 // ─── Get User By ID (admin / manager) ──────────────────────────────────────

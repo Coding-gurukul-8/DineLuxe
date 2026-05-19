@@ -7,7 +7,7 @@ import type { AuthUser } from "@/types/auth";
 import type { AuthProfile } from "@/types/auth";
 import { apiClient } from "@/lib/api-client";
 import { clearAuthTokens, getAccessToken } from "@/lib/auth-storage";
-import { mapProfileToAuthUser } from "@/lib/auth-client";
+import { logout as authLogout, mapProfileToAuthUser } from "@/lib/auth-client";
 
 export function useAuth() {
   const [role, setRole] = useState<Role | null>(null);
@@ -16,17 +16,16 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // ISSUE 4 FIX: Do NOT hydrate auth state from localStorage before the API
-    // confirms the token is still valid. Setting role/user/isAuthenticated here
-    // caused a flash of "authenticated" UI on mount when the token was actually
-    // expired — the /users/me call would then 401 and clear state, but the flash
-    // had already rendered protected content/redirects.
+    // Auth hydration flow:
+    //   1. Bail early (unauthenticated) if no token in localStorage — avoids
+    //      an unnecessary network call on every page load for logged-out users.
+    //   2. Call GET /users/me to validate the token and fetch current profile.
+    //   3. On success → hydrate state from the server response.
+    //   4. On failure → clear stale tokens and set unauthenticated state.
     //
-    // Correct flow:
-    //   1. Check token exists in localStorage (gating call — no state set yet)
-    //   2. Call /users/me with that token
-    //   3. On success → hydrate state from the API response
-    //   4. On failure → clear tokens and set unauthenticated state
+    // We deliberately do NOT read user data from localStorage before the API
+    // responds: doing so caused a flash of "authenticated" UI when the token
+    // was expired, because the 401 → clear cycle happened after first render.
 
     const accessToken = getAccessToken();
     if (!accessToken) {
@@ -37,22 +36,29 @@ export function useAuth() {
     apiClient
       .get<AuthProfile>("/users/me")
       .then((profile) => {
-        // Only set state after the API confirms the token is valid
         setUserData(mapProfileToAuthUser(profile));
       })
       .catch(() => {
-        // Token is expired or invalid — clear everything
+        // Token is expired or invalid; api-client will have already attempted
+        // a refresh via /auth/refresh and redirected on failure if needed.
+        // Clearing here handles any residual local state.
         clearAuthTokens();
         setUserData(null);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Internal setter ─────────────────────────────────────────────────────────
+  // Centralises all state updates so role, isAuthenticated, and the optional
+  // localStorage cache are always kept in sync with the user object.
   const setUserData = (userData: AuthUser | null) => {
     setUser(userData);
     if (userData) {
       setRole(userData.role);
       setIsAuthenticated(true);
+      // Mirror to localStorage so other tabs / SSR middleware can read role
+      // without making an API call (NOT used to hydrate auth state on mount —
+      // see the useEffect comment above).
       localStorage.setItem("userData", JSON.stringify(userData));
       localStorage.setItem("userRole", userData.role);
     } else {
@@ -63,32 +69,57 @@ export function useAuth() {
     }
   };
 
-  const logout = () => {
+  // ── logout ──────────────────────────────────────────────────────────────────
+  // 1. Calls POST /auth/logout (authenticated) so the backend can revoke the
+  //    refresh token from Redis / the token store.
+  // 2. Clears all local tokens and cache via auth-client's finally block.
+  // 3. Clears React state.
+  // 4. Hard-navigates to /auth/login via window.location.href to fully reset
+  //    React state and break any ongoing render cycles (same pattern used in
+  //    api-client.ts for automatic 401 redirects).
+  const logout = async () => {
+    // Clear React state first so the UI responds immediately.
     setUser(null);
     setRole(null);
     setIsAuthenticated(false);
     localStorage.removeItem("userData");
     localStorage.removeItem("userRole");
-    clearAuthTokens();
+
+    // authLogout() fires POST /auth/logout and calls clearAuthTokens() in its
+    // finally block — errors are silently swallowed so the client always logs
+    // out even if the backend is unreachable.
+    await authLogout();
+
+    // Hard navigation — not router.push() — so the full page reloads and
+    // any in-memory state from other hooks/providers is completely reset.
+    window.location.href = "/auth/login";
   };
 
-  const signOut = logout;
-
+  // ── Derived values ──────────────────────────────────────────────────────────
   const restaurantId = user?.restaurantId ?? null;
   const branchId = user?.branchId ?? null;
-  const session = null;
 
   return {
-    role,
+    // Core auth state
     user,
+    role,
     isAuthenticated,
-    setRole,
-    setUser: setUserData,
+    loading,
+
+    // Actions
     logout,
-    signOut,
+    /** Hydrate auth state externally (e.g. after OTP verify or login). */
+    setUser: setUserData,
+
+    // Convenience aliases
+    signOut: logout,
     restaurantId,
     branchId,
-    session,
-    loading,
+
+    // Kept for backward-compatibility with components that read role directly.
+    setRole,
+
+    // Null placeholder — Supabase session not used in this auth model.
+    session: null,
   };
 }

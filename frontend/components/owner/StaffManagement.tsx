@@ -1,306 +1,790 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { motion } from "framer-motion"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Mail, Phone, User, Edit, Save, X, Plus, Trash2 } from "lucide-react"
+/**
+ * StaffManagement — owner panel
+ *
+ * Fixes vs. the old implementation
+ * ─────────────────────────────────
+ * 1. Role enum uses "delivery" (API contract) not "delivery_partner".
+ * 2. Bottom-of-file `type RoleBadge` alias removed — it shadowed the imported
+ *    RoleBadge *component* and caused TypeScript to silently infer the wrong
+ *    type for the `role` prop.
+ * 3. Mapping helper `toRoleBadgeRole()` bridges "delivery" → "delivery_partner"
+ *    so the existing RoleBadge component (which only knows delivery_partner)
+ *    still renders correctly.
+ * 4. All API paths match the backend spec:
+ *      GET  /staff/branch/:branchId
+ *      POST /staff/create
+ *      GET  /staff/:id          (edit pre-fetch)
+ *      PATCH /staff/:id
+ *      PATCH /staff/:id/toggle-access
+ */
+
+import { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { toast } from "sonner";
+import {
+  Plus,
+  Pencil,
+  UserX,
+  UserCheck,
+  X,
+  Loader2,
+  Search,
+  Phone,
+  Mail,
+  CalendarDays,
+  Hash,
+} from "lucide-react";
+import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
+import { ApiError } from "@repo/shared";
+import { DataTable, type Column } from "@/components/shared/DataTable";
+import { RoleBadge } from "@/components/shared/RoleBadge";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { maskPhone, formatDate, cn } from "@/lib/utils";
+import { useDebounce } from "@/hooks/useDebounce";
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+/**
+ * Role values match what the backend accepts:
+ *   manager | waiter | cashier | host | chef | delivery
+ *
+ * Note: "delivery" (not "delivery_partner") is the API contract value.
+ * The RoleBadge component uses "delivery_partner" internally; see
+ * `toRoleBadgeRole()` below for the mapping.
+ */
+const STAFF_ROLES = [
+  { value: "manager",  label: "Manager" },
+  { value: "waiter",   label: "Waiter" },
+  { value: "cashier",  label: "Cashier" },
+  { value: "host",     label: "Host" },
+  { value: "chef",     label: "Chef" },
+  { value: "delivery", label: "Delivery" },
+] as const;
+
+type StaffRole = (typeof STAFF_ROLES)[number]["value"];
+
+const ROLE_FILTER_OPTIONS = [
+  { value: "", label: "All Roles" },
+  ...STAFF_ROLES,
+];
+
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface StaffMember {
-  id: string
-  name: string
-  email: string
-  phone: string
-  role: "manager" | "chef" | "server" | "cashier"
-  status: "active" | "inactive"
+  id: string;
+  employee_id?: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string | null;
+  role: StaffRole;
+  is_active: boolean;
+  joined_at?: string | null;
+  branch_id: string;
 }
 
-export function StaffManagement() {
-  const [staff, setStaff] = useState<StaffMember[]>([
-    {
-      id: "1",
-      name: "Ayesha Sharma",
-      email: "ayesha@dineluxe.com",
-      phone: "+91 9876543210",
-      role: "manager",
-      status: "active"
+/** Computed display shape for DataTable (extends Record<string, unknown>). */
+interface StaffRow extends Record<string, unknown> {
+  id: string;
+  employee_id?: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  email: string;
+  phone?: string | null;
+  role: StaffRole;
+  is_active: boolean;
+  joined_at?: string | null;
+  branch_id: string;
+}
+
+// ── RoleBadge compatibility bridge ─────────────────────────────────────────────
+//
+// The shared RoleBadge component uses "delivery_partner" in its props union.
+// The API (and our StaffRole type) uses "delivery".
+// This helper maps between the two so we never pass an unrecognised value.
+
+type RoleBadgeRole =
+  | "super_admin"
+  | "owner"
+  | "manager"
+  | "host"
+  | "waiter"
+  | "chef"
+  | "cashier"
+  | "customer"
+  | "delivery_partner"
+  | "support_agent";
+
+function toRoleBadgeRole(role: StaffRole): RoleBadgeRole {
+  if (role === "delivery") return "delivery_partner";
+  return role as RoleBadgeRole;
+}
+
+// ── Schemas ────────────────────────────────────────────────────────────────────
+
+const API_ROLES = [
+  "manager",
+  "waiter",
+  "cashier",
+  "host",
+  "chef",
+  "delivery",
+] as const;
+
+const createSchema = z.object({
+  first_name: z.string().min(1, "First name is required"),
+  last_name:  z.string().min(1, "Last name is required"),
+  email:      z.string().email("Enter a valid email"),
+  phone:      z.string().optional(),
+  role:       z.enum(API_ROLES, { required_error: "Select a role" }),
+});
+
+const editSchema = z.object({
+  first_name: z.string().min(1, "First name is required"),
+  last_name:  z.string().min(1, "Last name is required"),
+  phone:      z.string().optional(),
+  role:       z.enum(API_ROLES),
+});
+
+type CreateForm = z.infer<typeof createSchema>;
+type EditForm   = z.infer<typeof editSchema>;
+
+// ── Query key ──────────────────────────────────────────────────────────────────
+
+const staffKey = (branchId: string) => ["staff", "branch", branchId] as const;
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Create Staff Modal
+// ══════════════════════════════════════════════════════════════════════════════
+
+function CreateStaffModal({
+  branchId,
+  onClose,
+}: {
+  branchId: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<CreateForm>({ resolver: zodResolver(createSchema) });
+
+  const { mutate: createStaff } = useMutation({
+    mutationFn: (data: CreateForm) =>
+      apiClient.post("/staff/create", {
+        ...data,
+        branch_id: branchId,
+        // omit phone if blank so the backend treats it as optional
+        phone: data.phone?.trim() || undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: staffKey(branchId) });
+      toast.success("Staff invited — login credentials sent via email");
+      onClose();
     },
-    {
-      id: "2",
-      name: "Rohan Patel",
-      email: "rohan@dineluxe.com",
-      phone: "+91 9876543211",
-      role: "chef",
-      status: "active"
-    }
-  ])
-
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState<StaffMember | null>(null)
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [newStaff, setNewStaff] = useState<Omit<StaffMember, "id">>({
-    name: "",
-    email: "",
-    phone: "",
-    role: "server",
-    status: "active"
-  })
-
-  const handleEdit = (member: StaffMember) => {
-    setEditingId(member.id)
-    setEditForm({ ...member })
-  }
-
-  const handleSave = () => {
-    if (!editForm || !editingId) return
-    setStaff(staff.map(member => member.id === editingId ? { ...editForm } : member))
-    setEditingId(null)
-    setEditForm(null)
-  }
-
-  const handleCancelEdit = () => {
-    setEditingId(null)
-    setEditForm(null)
-  }
-
-  const handleDelete = (memberId: string) => {
-    setStaff(staff.filter(member => member.id !== memberId))
-  }
-
-  const handleAdd = () => {
-    const newMember: StaffMember = {
-      ...newStaff,
-      id: `staff-${Date.now()}`
-    }
-    setStaff([...staff, newMember])
-    setShowAddForm(false)
-    setNewStaff({
-      name: "",
-      email: "",
-      phone: "",
-      role: "server",
-      status: "active"
-    })
-  }
+    onError: (err) => {
+      if (err instanceof ApiError && err.statusCode === 409) {
+        // ← 409 Conflict: email already exists
+        setError("email", { message: "Email already exists in the system" });
+      } else {
+        toast.error("Failed to create staff member");
+      }
+    },
+  });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold text-gray-900">Staff Management</h3>
-        <Button onClick={() => setShowAddForm(true)} className="flex items-center gap-2">
-          <Plus size={16} />
-          Add Staff
-        </Button>
+    <SlideOver title="Add Staff Member" onClose={onClose}>
+      <form onSubmit={handleSubmit((d) => createStaff(d))} className="space-y-4">
+        {/* Name row */}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="First Name" error={errors.first_name?.message} required>
+            <input
+              {...register("first_name")}
+              placeholder="Priya"
+              className={inputCls(!!errors.first_name)}
+            />
+          </Field>
+          <Field label="Last Name" error={errors.last_name?.message} required>
+            <input
+              {...register("last_name")}
+              placeholder="Sharma"
+              className={inputCls(!!errors.last_name)}
+            />
+          </Field>
+        </div>
+
+        {/* Email */}
+        <Field label="Email" error={errors.email?.message} required>
+          <input
+            {...register("email")}
+            type="email"
+            placeholder="staff@restaurant.com"
+            className={inputCls(!!errors.email)}
+          />
+        </Field>
+
+        {/* Phone */}
+        <Field label="Phone" error={errors.phone?.message}>
+          <input
+            {...register("phone")}
+            type="tel"
+            placeholder="+91 98765 43210"
+            className={inputCls(!!errors.phone)}
+          />
+        </Field>
+
+        {/* Role */}
+        <Field label="Role" error={errors.role?.message} required>
+          <select {...register("role")} className={inputCls(!!errors.role)}>
+            <option value="">Select a role…</option>
+            {STAFF_ROLES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        {/* Branch info */}
+        <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
+          Staff will be assigned to your current branch automatically.
+        </p>
+
+        <SubmitButton loading={isSubmitting}>Invite Staff Member</SubmitButton>
+      </form>
+    </SlideOver>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Edit Staff Modal
+// ══════════════════════════════════════════════════════════════════════════════
+
+function EditStaffModal({
+  staff,
+  branchId,
+  onClose,
+}: {
+  staff: StaffMember;
+  branchId: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting, isDirty },
+  } = useForm<EditForm>({
+    resolver: zodResolver(editSchema),
+    defaultValues: {
+      first_name: staff.first_name,
+      last_name:  staff.last_name,
+      phone:      staff.phone ?? "",
+      role:       staff.role,
+    },
+  });
+
+  const { mutate: updateStaff } = useMutation({
+    // PATCH /staff/:id  — body: { first_name?, last_name?, role?, phone? }
+    mutationFn: (data: EditForm) =>
+      apiClient.patch(`/staff/${staff.id}`, {
+        first_name: data.first_name,
+        last_name:  data.last_name,
+        phone:      data.phone?.trim() || undefined,
+        role:       data.role,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: staffKey(branchId) });
+      toast.success("Staff member updated");
+      onClose();
+    },
+    onError: () => toast.error("Failed to update staff member"),
+  });
+
+  return (
+    <SlideOver
+      title="Edit Staff Member"
+      subtitle={`${staff.first_name} ${staff.last_name}`}
+      onClose={onClose}
+    >
+      {/* Read-only identity block */}
+      <div className="grid grid-cols-2 gap-3 p-3 bg-gray-50 rounded-xl mb-5">
+        {staff.employee_id && (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Hash size={13} className="text-gray-400 shrink-0" />
+            <span className="font-mono font-medium">{staff.employee_id}</span>
+          </div>
+        )}
+        {staff.joined_at && (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <CalendarDays size={13} className="text-gray-400 shrink-0" />
+            <span>Joined {formatDate(staff.joined_at)}</span>
+          </div>
+        )}
+        <div className="flex items-center gap-2 text-xs text-gray-500 col-span-2">
+          <Mail size={13} className="text-gray-400 shrink-0" />
+          <span className="truncate">{staff.email}</span>
+        </div>
       </div>
 
-      {showAddForm && (
-        <motion.div
-          className="bg-white rounded-lg p-6 shadow border border-gray-200"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <h4 className="font-bold text-md mb-4">Add New Staff Member</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="newName" className="block text-sm font-medium text-gray-700 mb-1">
-                Full Name
-              </Label>
-              <Input
-                id="newName"
-                value={newStaff.name}
-                onChange={(e) => setNewStaff({ ...newStaff, name: e.target.value })}
-                placeholder="Enter full name"
-              />
-            </div>
-            <div>
-              <Label htmlFor="newEmail" className="block text-sm font-medium text-gray-700 mb-1">
-                Email
-              </Label>
-              <Input
-                id="newEmail"
-                type="email"
-                value={newStaff.email}
-                onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
-                placeholder="Enter email"
-              />
-            </div>
-            <div>
-              <Label htmlFor="newPhone" className="block text-sm font-medium text-gray-700 mb-1">
-                Phone
-              </Label>
-              <Input
-                id="newPhone"
-                value={newStaff.phone}
-                onChange={(e) => setNewStaff({ ...newStaff, phone: e.target.value })}
-                placeholder="Enter phone"
-              />
-            </div>
-            <div>
-              <Label className="block text-sm font-medium text-gray-700 mb-1">
-                Role
-              </Label>
-              <select
-                value={newStaff.role}
-                onChange={(e) => setNewStaff({ ...newStaff, role: e.target.value as StaffMember["role"] })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              >
-                <option value="manager">Manager</option>
-                <option value="chef">Chef</option>
-                <option value="server">Server</option>
-                <option value="cashier">Cashier</option>
-              </select>
-            </div>
-          </div>
+      <form onSubmit={handleSubmit((d) => updateStaff(d))} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="First Name" error={errors.first_name?.message} required>
+            <input
+              {...register("first_name")}
+              className={inputCls(!!errors.first_name)}
+            />
+          </Field>
+          <Field label="Last Name" error={errors.last_name?.message} required>
+            <input
+              {...register("last_name")}
+              className={inputCls(!!errors.last_name)}
+            />
+          </Field>
+        </div>
 
-          <div className="flex gap-2 pt-4">
-            <Button onClick={handleAdd} className="flex items-center gap-2">
-              <Save size={16} />
-              Add Staff
-            </Button>
-            <Button variant="outline" onClick={() => setShowAddForm(false)} className="flex items-center gap-2">
-              <X size={16} />
-              Cancel
-            </Button>
-          </div>
-        </motion.div>
+        <Field label="Phone" error={errors.phone?.message}>
+          <input
+            {...register("phone")}
+            type="tel"
+            placeholder="+91 98765 43210"
+            className={inputCls(!!errors.phone)}
+          />
+        </Field>
+
+        <Field label="Role" error={errors.role?.message} required>
+          <select {...register("role")} className={inputCls(!!errors.role)}>
+            {STAFF_ROLES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <SubmitButton loading={isSubmitting} disabled={!isDirty}>
+          Save Changes
+        </SubmitButton>
+      </form>
+    </SlideOver>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Main component
+// ══════════════════════════════════════════════════════════════════════════════
+
+export function StaffManagement() {
+  const { branchId } = useAuth();
+  const qc = useQueryClient();
+
+  const [search, setSearch]             = useState("");
+  const [roleFilter, setRoleFilter]     = useState("");
+  const [showCreate, setShowCreate]     = useState(false);
+  const [editTarget, setEditTarget]     = useState<StaffMember | null>(null);
+  const [toggleTarget, setToggleTarget] = useState<StaffMember | null>(null);
+
+  const debouncedSearch = useDebounce(search, 350);
+  const selectedBranch  = branchId ?? "";
+
+  // ── Fetch staff list ─────────────────────────────────────────────────────
+  // GET /staff/branch/:branchId
+
+  const {
+    data: staff = [],
+    isLoading,
+    isError,
+  } = useQuery<StaffMember[]>({
+    queryKey: staffKey(selectedBranch),
+    queryFn:  () =>
+      apiClient.get<StaffMember[]>(`/staff/branch/${selectedBranch}`),
+    enabled: !!selectedBranch,
+  });
+
+  // ── Toggle access (optimistic) ────────────────────────────────────────────
+  // PATCH /staff/:id/toggle-access
+
+  const { mutate: toggleAccess } = useMutation({
+    mutationFn: (member: StaffMember) =>
+      apiClient.patch(`/staff/${member.id}/toggle-access`, {}),
+
+    // Optimistic update: flip is_active immediately in cache
+    onMutate: async (member) => {
+      await qc.cancelQueries({ queryKey: staffKey(selectedBranch) });
+      const prev = qc.getQueryData<StaffMember[]>(staffKey(selectedBranch));
+      qc.setQueryData<StaffMember[]>(staffKey(selectedBranch), (old) =>
+        old?.map((s) =>
+          s.id === member.id ? { ...s, is_active: !s.is_active } : s
+        ) ?? []
+      );
+      return { prev };
+    },
+
+    // Roll back on error
+    onError: (_err, _member, ctx) => {
+      if (ctx?.prev) qc.setQueryData(staffKey(selectedBranch), ctx.prev);
+      toast.error("Failed to update access");
+    },
+
+    // Success toast — note: member.is_active is the PRE-toggle value here
+    onSuccess: (_data, member) => {
+      toast.success(
+        member.is_active
+          ? `${member.first_name}'s access revoked`
+          : `${member.first_name}'s access restored`
+      );
+    },
+
+    // Always re-sync with server
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: staffKey(selectedBranch) });
+    },
+  });
+
+  // ── Filtered + searched rows ──────────────────────────────────────────────
+
+  const rows = useMemo<StaffRow[]>(() => {
+    const q = debouncedSearch.toLowerCase();
+    return staff
+      .filter((s) => {
+        const matchesSearch =
+          !q ||
+          `${s.first_name} ${s.last_name}`.toLowerCase().includes(q) ||
+          s.email.toLowerCase().includes(q) ||
+          s.role.toLowerCase().includes(q);
+        const matchesRole = !roleFilter || s.role === roleFilter;
+        return matchesSearch && matchesRole;
+      })
+      .map((s) => ({
+        ...s,
+        full_name: `${s.first_name} ${s.last_name}`,
+      }));
+  }, [staff, debouncedSearch, roleFilter]);
+
+  // ── Table columns ─────────────────────────────────────────────────────────
+
+  const columns: Column<StaffRow>[] = [
+    {
+      key: "full_name",
+      label: "Name",
+      sortable: true,
+      render: (row) => (
+        <div>
+          <p className="font-semibold text-gray-900">
+            {row.first_name} {row.last_name}
+          </p>
+          <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
+            <Mail size={11} />
+            {row.email}
+          </p>
+          {row.phone && (
+            <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
+              <Phone size={11} />
+              {maskPhone(row.phone)}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "role",
+      label: "Role",
+      sortable: true,
+      render: (row) => (
+        // toRoleBadgeRole maps "delivery" → "delivery_partner" so the existing
+        // RoleBadge component receives a value it recognises.
+        <RoleBadge role={toRoleBadgeRole(row.role)} size="sm" />
+      ),
+    },
+    {
+      key: "is_active",
+      label: "Status",
+      align: "center",
+      render: (row) => (
+        <StatusBadge status={row.is_active ? "active" : "inactive"} size="sm" />
+      ),
+    },
+    {
+      key: "joined_at",
+      label: "Joined",
+      sortable: true,
+      render: (row) =>
+        row.joined_at ? (
+          <span className="text-xs text-gray-500">
+            {formatDate(row.joined_at as string)}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-300">—</span>
+        ),
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      align: "right",
+      render: (row) => (
+        <div className="flex items-center justify-end gap-1">
+          {/* Edit — opens EditStaffModal */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditTarget(staff.find((s) => s.id === row.id) ?? null);
+            }}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition"
+            title="Edit staff member"
+          >
+            <Pencil size={14} />
+          </button>
+
+          {/* Toggle access — opens ConfirmDialog */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setToggleTarget(staff.find((s) => s.id === row.id) ?? null);
+            }}
+            className={cn(
+              "p-1.5 rounded-lg transition",
+              row.is_active
+                ? "text-gray-400 hover:text-red-500 hover:bg-red-50"
+                : "text-gray-400 hover:text-green-600 hover:bg-green-50"
+            )}
+            title={row.is_active ? "Revoke access" : "Restore access"}
+          >
+            {row.is_active ? <UserX size={14} /> : <UserCheck size={14} />}
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="space-y-5">
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">Staff</h3>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {staff.length} member{staff.length !== 1 ? "s" : ""} in this branch
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-1.5 px-4 py-2 bg-[#1A3C5E] text-white text-sm font-semibold rounded-xl hover:bg-[#15304d] transition"
+        >
+          <Plus size={15} />
+          Add Staff
+        </button>
+      </div>
+
+      {/* ── Filters ── */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Search */}
+        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 w-full max-w-xs">
+          <Search size={15} className="text-gray-400 flex-shrink-0" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, email or role…"
+            className="flex-1 text-sm text-gray-700 bg-transparent focus:outline-none placeholder:text-gray-400"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="text-gray-300 hover:text-gray-500"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {/* Role filter dropdown */}
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value)}
+          className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
+        >
+          {ROLE_FILTER_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+
+        {/* Active / inactive count chips */}
+        <div className="flex items-center gap-2 ml-auto">
+          <span className="text-xs bg-green-50 text-green-700 px-2.5 py-1 rounded-full font-medium">
+            {staff.filter((s) => s.is_active).length} active
+          </span>
+          <span className="text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full font-medium">
+            {staff.filter((s) => !s.is_active).length} inactive
+          </span>
+        </div>
+      </div>
+
+      {/* ── Error state ── */}
+      {isError && (
+        <div className="py-8 text-center text-sm text-red-500">
+          Failed to load staff. Please refresh.
+        </div>
       )}
 
-      <div className="space-y-4">
-        {staff.map((member) => (
-          <motion.div
-            key={member.id}
-            className="bg-white rounded-lg p-6 shadow border border-gray-200"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            {editingId === member.id && editForm ? (
-              <div className="space-y-4">
-                <h4 className="font-bold text-md">Edit Staff Member</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="editName" className="block text-sm font-medium text-gray-700 mb-1">
-                      Full Name
-                    </Label>
-                    <Input
-                      id="editName"
-                      value={editForm.name}
-                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="editEmail" className="block text-sm font-medium text-gray-700 mb-1">
-                      Email
-                    </Label>
-                    <Input
-                      id="editEmail"
-                      type="email"
-                      value={editForm.email}
-                      onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="editPhone" className="block text-sm font-medium text-gray-700 mb-1">
-                      Phone
-                    </Label>
-                    <Input
-                      id="editPhone"
-                      value={editForm.phone}
-                      onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <Label className="block text-sm font-medium text-gray-700 mb-1">
-                      Role
-                    </Label>
-                    <select
-                      value={editForm.role}
-                      onChange={(e) => setEditForm({ ...editForm, role: e.target.value as StaffMember["role"] })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                    >
-                      <option value="manager">Manager</option>
-                      <option value="chef">Chef</option>
-                      <option value="server">Server</option>
-                      <option value="cashier">Cashier</option>
-                    </select>
-                  </div>
-                  <div>
-                    <Label className="block text-sm font-medium text-gray-700 mb-1">
-                      Status
-                    </Label>
-                    <select
-                      value={editForm.status}
-                      onChange={(e) => setEditForm({ ...editForm, status: e.target.value as StaffMember["status"] })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                    >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="flex gap-2 pt-4">
-                  <Button onClick={handleSave} className="flex items-center gap-2">
-                    <Save size={16} />
-                    Save
-                  </Button>
-                  <Button variant="outline" onClick={handleCancelEdit} className="flex items-center gap-2">
-                    <X size={16} />
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-3">
-                    <h4 className="font-bold text-md">{member.name}</h4>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      member.status === "active"
-                        ? "bg-green-100 text-green-800"
-                        : "bg-gray-100 text-gray-800"
-                    }`}>
-                      {member.status}
-                    </span>
-                    <span className="text-xs text-gray-500 capitalize">{member.role}</span>
-                  </div>
-                  <div className="space-y-2 text-sm text-gray-600">
-                    <div className="flex items-center gap-2">
-                      <User size={16} />
-                      <span>{member.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Mail size={16} />
-                      <span>{member.email}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Phone size={16} />
-                      <span>{member.phone}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => handleEdit(member)}
-                    className="flex items-center gap-2"
-                  >
-                    <Edit size={16} />
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleDelete(member.id)}
-                    className="flex items-center gap-2"
-                  >
-                    <Trash2 size={16} />
-                    Remove
-                  </Button>
-                </div>
-              </div>
+      {/* ── DataTable ── */}
+      <DataTable<StaffRow>
+        columns={columns}
+        data={rows}
+        loading={isLoading}
+        pageSize={15}
+        keyField="id"
+        emptyTitle="No staff found"
+        emptyDesc={
+          search || roleFilter
+            ? "Try adjusting your search or filter"
+            : "Add your first staff member to get started"
+        }
+      />
+
+      {/* ── Create modal ── */}
+      {showCreate && (
+        <CreateStaffModal
+          branchId={selectedBranch}
+          onClose={() => setShowCreate(false)}
+        />
+      )}
+
+      {/* ── Edit modal ── */}
+      {editTarget && (
+        <EditStaffModal
+          staff={editTarget}
+          branchId={selectedBranch}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
+
+      {/* ── Toggle access confirm dialog ── */}
+      <ConfirmDialog
+        isOpen={toggleTarget !== null}
+        title={toggleTarget?.is_active ? "Revoke Access?" : "Restore Access?"}
+        message={
+          toggleTarget?.is_active
+            ? `${toggleTarget.first_name} ${toggleTarget.last_name} will lose access to the system immediately.`
+            : `${toggleTarget?.first_name} ${toggleTarget?.last_name} will regain access to the system.`
+        }
+        confirmLabel={toggleTarget?.is_active ? "Revoke" : "Restore"}
+        variant={toggleTarget?.is_active ? "danger" : "info"}
+        onCancel={() => setToggleTarget(null)}
+        onConfirm={() => {
+          if (toggleTarget) toggleAccess(toggleTarget);
+          setToggleTarget(null);
+        }}
+      />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Shared sub-components (local to this file)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function SlideOver({
+  title,
+  subtitle,
+  onClose,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-md shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h2 className="font-bold text-gray-900">{title}</h2>
+            {subtitle && (
+              <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
             )}
-          </motion.div>
-        ))}
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl hover:bg-gray-100 transition text-gray-400"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
       </div>
     </div>
-  )
+  );
+}
+
+function Field({
+  label,
+  error,
+  required,
+  children,
+}: {
+  label: string;
+  error?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+        {label}
+        {required && <span className="text-red-500 ml-0.5">*</span>}
+      </label>
+      {children}
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  );
+}
+
+function SubmitButton({
+  loading,
+  disabled,
+  children,
+}: {
+  loading: boolean;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="submit"
+      disabled={loading || disabled}
+      className="w-full py-3 mt-2 bg-[#1A3C5E] text-white rounded-xl font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#15304d] transition"
+    >
+      {loading && <Loader2 size={15} className="animate-spin" />}
+      {children}
+    </button>
+  );
+}
+
+function inputCls(hasError: boolean) {
+  return cn(
+    "w-full px-3 py-2.5 border rounded-xl text-sm bg-white focus:outline-none focus:ring-2 transition",
+    hasError
+      ? "border-red-300 focus:ring-red-200"
+      : "border-gray-200 focus:ring-[#1A3C5E]/20"
+  );
 }

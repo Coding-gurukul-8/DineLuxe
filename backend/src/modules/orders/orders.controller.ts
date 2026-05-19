@@ -1,9 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { success } from '../../utils/response';
+import { buildPaginationMeta } from '../../utils/pagination';
 import {
   createOrder,
   getOrderById,
   getOrdersByTable,
+  getMyOrders,
+  getStaffOrders,
   getActiveBranchOrders,
   cancelOrder,
 } from './orders.service';
@@ -36,9 +39,34 @@ export async function handleCreateOrder(req: Request, res: Response, next: NextF
   }
 }
 
+export async function handleGetMyOrders(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { data, total, page, limit } = await getMyOrders(
+      req.user!.id,
+      req.branchId,
+      req.query as Record<string, string | undefined>
+    );
+    res.json(success(data, buildPaginationMeta(total, page, limit)));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleGetStaffOrders(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { data, total, page, limit } = await getStaffOrders(
+      req.branchId ?? '',
+      req.query as Record<string, string | undefined>
+    );
+    res.json(success(data, buildPaginationMeta(total, page, limit)));
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function handleGetOrder(req: Request, res: Response, next: NextFunction) {
   try {
-    const order = await getOrderById(req.params.id, req.branchId!);
+    const order = await getOrderById(req.params.id, req.branchId, req.user?.id);
     res.json(success(order));
   } catch (err) {
     next(err);

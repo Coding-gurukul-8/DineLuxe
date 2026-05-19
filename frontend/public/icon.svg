@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DineLuxe">
+  <rect width="512" height="512" fill="#1a3c5e" />
+  <circle cx="256" cy="256" r="176" fill="#e8a020" />
+  <text x="50%" y="54%" text-anchor="middle" font-family="Arial, sans-serif" font-size="120" font-weight="700" fill="#1a3c5e">DL</text>
+</svg>

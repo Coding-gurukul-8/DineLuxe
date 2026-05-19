@@ -30,6 +30,17 @@ export async function updateMe(req: Request, res: Response, next: NextFunction) 
   }
 }
 
+// DELETE /users/me
+export async function deleteMe(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const result = await usersService.deleteMe(authReq.user!.id);
+    res.json(success(result, 'Account deactivated'));
+  } catch (err) {
+    next(err);
+  }
+}
+
 // GET /users/:id  (manager/owner/admin)
 export async function getUserById(req: Request, res: Response, next: NextFunction) {
   try {

@@ -11,14 +11,14 @@ export function injectTenant(req: Request, res: Response, next: NextFunction): v
   const restaurantId = req.user?.restaurant_id;
   const branchId = req.user?.branch_id;
 
-  if (!restaurantId) {
+  if (!restaurantId && req.user?.role !== 'customer') {
     res.status(403).json(
       error('NO_TENANT_CONTEXT', 'No restaurant context found in token. Access denied.'),
     );
     return;
   }
 
-  req.restaurantId = restaurantId;
+  req.restaurantId = restaurantId ?? '';
   req.branchId = branchId ?? '';
 
   next();

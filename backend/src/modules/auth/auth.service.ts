@@ -13,6 +13,7 @@ import type {
   ChangePasswordInput,
   ForgotPasswordInput,
   RefreshTokenInput,
+  RequestOtpInput,
 } from './auth.schema';
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
@@ -33,13 +34,47 @@ function forgotPasswordRateLimitKey(email: string): string {
   return `forgot_rl:${email}`;
 }
 
+function mapOtpError(err: unknown) {
+  if (!(err instanceof Error)) return err;
+
+  const raw = err.message ?? '';
+  const [codePart, ...rest] = raw.split(':');
+  const code = codePart?.trim();
+  if (!code || !code.startsWith('OTP_')) return err;
+
+  const message = rest.join(':').trim() || raw;
+  const mapped = new Error(message) as Error & { status?: number; code?: string };
+  mapped.code = code;
+
+  switch (code) {
+    case 'OTP_INVALID':
+      mapped.status = 400;
+      break;
+    case 'OTP_EXPIRED':
+      mapped.status = 410;
+      break;
+    case 'OTP_LOCKED':
+      mapped.status = 429;
+      break;
+    default:
+      mapped.status = 400;
+      break;
+  }
+
+  return mapped;
+}
+
 // ─── Service methods ──────────────────────────────────────────────────────────
 
 /**
- * Step 1 of signup: validate uniqueness, hash password, send OTP.
- * The Supabase user is NOT created until OTP is verified.
+ * Signup creates the account immediately and sends OTP for optional
+ * email verification.
  */
-export async function signup(input: SignupInput): Promise<{ message: string }> {
+export async function signup(input: SignupInput): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  verification_pending: boolean;
+}> {
   // BUG FIX: normalise firstName/lastName from the flexible schema.
   // Clients may send `name` (e.g. "John Doe") OR firstName + lastName separately.
   let firstName: string;
@@ -55,11 +90,13 @@ export async function signup(input: SignupInput): Promise<{ message: string }> {
     lastName = parts.slice(1).join(' ');
   }
 
-  // Check email uniqueness in Supabase
+  const email = input.email.toLowerCase().trim();
+
+  // Check email uniqueness in profile table
   const { data: existing, error: existingError } = await supabaseAdmin
     .from('users')
     .select('id')
-    .eq('email', input.email)
+    .eq('email', email)
     .maybeSingle();
 
   if (existingError) {
@@ -72,60 +109,18 @@ export async function signup(input: SignupInput): Promise<{ message: string }> {
     throw err;
   }
 
-  // Hash password and store pending registration in Redis
+  // Hash password for local auth table
   const hashedPassword = await bcrypt.hash(input.password, config.BCRYPT_SALT_ROUNDS);
 
-  const pendingData = JSON.stringify({
-    email: input.email,
-    phone: input.phone ?? null,
-    hashedPassword,
-    firstName,
-    lastName,
-  });
-
-  await redis.set(`pending_signup:${input.email}`, pendingData, 'EX', config.OTP_EXPIRY_SECONDS);
-
-  // Generate and send OTP
-  const otp = generateOTP();
-  await storeOTP(input.email, otp, config.OTP_EXPIRY_SECONDS);
-
-  sendEmail({
-    to: input.email,
-    templateName: 'otp-verify',
-    data: { name: firstName, otp, expiryMinutes: Math.floor(config.OTP_EXPIRY_SECONDS / 60) },
-  });
-  console.log(`[DEV] OTP for ${input.email}: ${otp}`);
-
-  return { message: 'OTP sent to your email. Please verify to complete registration.' };
-}
-
-/** Step 2: verify OTP, create Supabase user, return token pair. */
-export async function verifyOtp(input: OtpInput): Promise<{ accessToken: string; refreshToken: string }> {
-  await verifyOTP(input.email, input.otp);
-
-  const raw = await redis.get(`pending_signup:${input.email}`);
-  if (!raw) {
-    const err = new Error('Registration session expired. Please sign up again.') as Error & { status: number };
-    err.status = 410;
-    throw err;
-  }
-
-  const pending = JSON.parse(raw) as {
-    email: string;
-    phone: string | null;
-    hashedPassword: string;
-    firstName: string;
-    lastName: string;
-  };
-
-  // Create the Supabase Auth user
+  // Create Supabase Auth user (unverified by default)
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-    email: pending.email,
-    email_confirm: true,
+    email,
+    password: input.password,
+    email_confirm: false,
     user_metadata: {
-      first_name: pending.firstName,
-      last_name: pending.lastName,
-      phone: pending.phone,
+      first_name: firstName,
+      last_name: lastName,
+      phone: input.phone ?? null,
     },
   });
 
@@ -141,32 +136,31 @@ export async function verifyOtp(input: OtpInput): Promise<{ accessToken: string;
       throw new Error(authError?.message ?? listError.message ?? 'Failed to create user account');
     }
 
-    authUser = usersList?.users?.find((u) => u.email === pending.email) ?? null;
+    authUser = usersList?.users?.find((u) => u.email === email) ?? null;
   }
 
   if (!authUser) {
     throw new Error(authError?.message ?? 'Failed to create user account');
   }
 
-  // Insert profile row
-  const { data: existingUser, error: existingUserError } = await supabaseAdmin
+  const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
     .from('users')
     .select('id')
-    .eq('email', pending.email)
+    .eq('email', email)
     .maybeSingle();
 
-  if (existingUserError) {
-    throw new Error(`User lookup failed: ${existingUserError.message}`);
+  if (existingProfileError) {
+    throw new Error(`User lookup failed: ${existingProfileError.message}`);
   }
 
-  if (!existingUser) {
+  if (!existingProfile) {
     const now = new Date().toISOString();
     const { error: userInsertError } = await supabaseAdmin.from('users').insert({
       id: authUser.id,
-      name: `${pending.firstName} ${pending.lastName}`.trim(),
-      email: pending.email,
-      phone: pending.phone,
-      password_hash: pending.hashedPassword,
+      name: `${firstName} ${lastName}`.trim(),
+      email,
+      phone: input.phone ?? null,
+      password_hash: hashedPassword,
       role: 'customer',
       created_by_restaurant: false,
       is_active: true,
@@ -176,19 +170,165 @@ export async function verifyOtp(input: OtpInput): Promise<{ accessToken: string;
     });
 
     if (userInsertError) {
+      await supabaseAdmin.auth.admin.deleteUser(authUser.id).catch(() => {});
       throw new Error(`User creation failed: ${userInsertError.message}`);
     }
   }
 
-  // Cleanup Redis
-  await deleteOTP(input.email);
-  await redis.del(`pending_signup:${input.email}`);
+  // Send OTP for optional email verification (non-blocking)
+  try {
+    const otp = generateOTP();
+    await storeOTP(email, otp, config.OTP_EXPIRY_SECONDS);
+    sendEmail({
+      to: email,
+      templateName: 'otp-verify',
+      data: { name: firstName, otp, expiryMinutes: Math.floor(config.OTP_EXPIRY_SECONDS / 60) },
+    });
+    console.log(`[DEV] OTP for ${email}: ${otp}`);
+  } catch (otpErr) {
+    console.warn('[auth] failed to send verification OTP:', otpErr);
+  }
 
-  const tokenPayload = { sub: authUser.id, email: pending.email, role: 'customer' };
+  const tokenPayload = { sub: authUser.id, email, role: 'customer' };
   const accessToken = signAccessToken(tokenPayload);
   const refreshToken = signRefreshToken(tokenPayload);
 
   await redis.set(refreshTokenKey(authUser.id), refreshToken, 'EX', 7 * 24 * 60 * 60);
+
+  return { accessToken, refreshToken, verification_pending: true };
+}
+
+/** Verify OTP to mark the email as verified (account already exists). */
+export async function verifyOtp(input: OtpInput): Promise<{ accessToken: string; refreshToken: string }> {
+  const email = input.email.toLowerCase().trim();
+  try {
+    await verifyOTP(email, input.otp);
+  } catch (err) {
+    throw mapOtpError(err);
+  }
+
+  // Legacy fallback: complete pending signup if it exists
+  const raw = await redis.get(`pending_signup:${email}`);
+  if (raw) {
+    const pending = JSON.parse(raw) as {
+      email: string;
+      phone: string | null;
+      hashedPassword: string;
+      firstName: string;
+      lastName: string;
+    };
+
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email: pending.email,
+      email_confirm: true,
+      user_metadata: {
+        first_name: pending.firstName,
+        last_name: pending.lastName,
+        phone: pending.phone,
+      },
+    });
+
+    let authUser = authData?.user ?? null;
+
+    if (authError || !authUser) {
+      const { data: usersList, error: listError } = await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+
+      if (listError) {
+        throw new Error(authError?.message ?? listError.message ?? 'Failed to create user account');
+      }
+
+      authUser = usersList?.users?.find((u) => u.email === pending.email) ?? null;
+    }
+
+    if (!authUser) {
+      throw new Error(authError?.message ?? 'Failed to create user account');
+    }
+
+    const { data: existingUser, error: existingUserError } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('email', pending.email)
+      .maybeSingle();
+
+    if (existingUserError) {
+      throw new Error(`User lookup failed: ${existingUserError.message}`);
+    }
+
+    if (!existingUser) {
+      const now = new Date().toISOString();
+      const { error: userInsertError } = await supabaseAdmin.from('users').insert({
+        id: authUser.id,
+        name: `${pending.firstName} ${pending.lastName}`.trim(),
+        email: pending.email,
+        phone: pending.phone,
+        password_hash: pending.hashedPassword,
+        role: 'customer',
+        created_by_restaurant: false,
+        is_active: true,
+        force_password_change: false,
+        created_at: now,
+        updated_at: now,
+      });
+
+      if (userInsertError) {
+        throw new Error(`User creation failed: ${userInsertError.message}`);
+      }
+    }
+
+    await deleteOTP(email);
+    await redis.del(`pending_signup:${email}`);
+
+    const tokenPayload = { sub: authUser.id, email: pending.email, role: 'customer' };
+    const accessToken = signAccessToken(tokenPayload);
+    const refreshToken = signRefreshToken(tokenPayload);
+
+    await redis.set(refreshTokenKey(authUser.id), refreshToken, 'EX', 7 * 24 * 60 * 60);
+
+    return { accessToken, refreshToken };
+  }
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from('users')
+    .select('id, email, role, restaurant_id, branch_id')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (profileError) {
+    throw new Error(`User lookup failed: ${profileError.message}`);
+  }
+
+  if (!profile) {
+    const err = new Error('Account not found for verification') as Error & { status: number };
+    err.status = 404;
+    throw err;
+  }
+
+  try {
+    await supabaseAdmin.auth.admin.updateUserById(profile.id as string, {
+      email_confirm: true,
+    });
+  } catch (updateErr) {
+    console.warn('[auth] email confirm update failed:', updateErr);
+  }
+
+  await deleteOTP(email);
+
+  const tokenPayload: Record<string, unknown> = {
+    sub: profile.id,
+    email: profile.email,
+    role: profile.role,
+  };
+
+  if (profile.restaurant_id) tokenPayload.restaurant_id = profile.restaurant_id;
+  if (profile.branch_id) tokenPayload.branch_id = profile.branch_id;
+
+  const accessToken = signAccessToken(tokenPayload);
+  const refreshToken = signRefreshToken(tokenPayload);
+
+  await redis.set(refreshTokenKey(profile.id as string), refreshToken, 'EX', 7 * 24 * 60 * 60);
 
   return { accessToken, refreshToken };
 }
@@ -199,6 +339,7 @@ export async function login(input: LoginInput): Promise<{ accessToken: string; r
   // Normalise to a single identifier here.
   const identifier = (input.email ?? input.emailOrUsername ?? '').trim();
   const isEmail = identifier.includes('@');
+  const normalizedIdentifier = isEmail ? identifier.toLowerCase() : identifier;
 
   const query = supabaseAdmin
     .from('users')
@@ -208,8 +349,8 @@ export async function login(input: LoginInput): Promise<{ accessToken: string; r
     .select('id, email, role, password_hash, restaurant_id, branch_id, is_active');
 
   const { data: profile, error: profileError } = isEmail
-    ? await query.eq('email', identifier).maybeSingle()
-    : await query.eq('username', identifier).maybeSingle();
+    ? await query.eq('email', normalizedIdentifier).maybeSingle()
+    : await query.eq('username', normalizedIdentifier).maybeSingle();
 
   if (profileError || !profile) {
     const err = new Error('Invalid credentials') as Error & { status: number };
@@ -291,14 +432,57 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<{ mess
   return { message: 'If that email exists, a reset OTP has been sent.' };
 }
 
+/** Send a verification OTP so users can verify their email later. */
+export async function sendVerificationOtp(input: RequestOtpInput): Promise<{ message: string }> {
+  const email = input.email.toLowerCase().trim();
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from('users')
+    .select('id, name')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (profileError) {
+    throw new Error(`Email lookup failed: ${profileError.message}`);
+  }
+
+  if (!profile) {
+    const err = new Error('Account not found') as Error & { status: number };
+    err.status = 404;
+    throw err;
+  }
+
+  const otp = generateOTP();
+  await storeOTP(email, otp, config.OTP_EXPIRY_SECONDS);
+
+  sendEmail({
+    to: email,
+    templateName: 'otp-verify',
+    data: {
+      name: (profile as any).name ?? 'User',
+      otp,
+      expiryMinutes: Math.floor(config.OTP_EXPIRY_SECONDS / 60),
+    },
+  });
+
+  console.log(`[DEV] Verification OTP for ${email}: ${otp}`);
+
+  return { message: 'Verification OTP sent.' };
+}
+
 /** Verify OTP and set new password, then invalidate all sessions. */
 export async function resetPassword(input: ResetPasswordInput): Promise<{ message: string }> {
-  await verifyOTP(input.email, input.otp);
+  const email = input.email.toLowerCase().trim();
+  try {
+    await verifyOTP(email, input.otp);
+  } catch (err) {
+    throw mapOtpError(err);
+  }
 
   const { data: profile } = await supabaseAdmin
     .from('users')
     .select('id')
-    .eq('email', input.email)
+    .eq('email', email)
     .maybeSingle();
 
   if (!profile) {

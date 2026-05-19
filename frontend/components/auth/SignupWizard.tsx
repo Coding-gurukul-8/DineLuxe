@@ -6,25 +6,39 @@ import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
+import { ApiError } from "@repo/shared"
 import { signup } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter"
-import { Loader2, User, Mail, Phone, MapPin, Lock, ChevronRight, ChevronLeft, Check } from "lucide-react"
+import {
+  Loader2,
+  User,
+  Mail,
+  Phone,
+  Lock,
+  ChevronRight,
+  ChevronLeft,
+  Check,
+} from "lucide-react"
 
-const signupSchema = z.object({
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
-  email: z.string().email("Enter a valid email"),
-  phone: z.string().min(10, "Phone number must be at least 10 digits"),
-  city: z.string().min(1, "City is required"),
-  postalCode: z.string().min(6, "Postal code must be at least 6 digits"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-  confirmPassword: z.string().min(1, "Please confirm your password"),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords do not match",
-  path: ["confirmPassword"],
-})
+// ── Validation schema ─────────────────────────────────────────────────────────
+// city / postalCode are captured in the UI for UX completeness but are NOT
+// sent to the backend (the signup endpoint only accepts firstName, lastName,
+// email, phone, password). They are intentionally excluded from the payload.
+const signupSchema = z
+  .object({
+    firstName: z.string().min(1, "First name is required"),
+    lastName: z.string().min(1, "Last name is required"),
+    email: z.string().email("Enter a valid email"),
+    phone: z.string().min(10, "Phone number must be at least 10 digits"),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    confirmPassword: z.string().min(1, "Please confirm your password"),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  })
 
 type SignupForm = z.infer<typeof signupSchema>
 
@@ -49,43 +63,57 @@ const steps: Step[] = [
     fields: [
       { name: "firstName", label: "First Name", placeholder: "John", icon: <User size={18} /> },
       { name: "lastName", label: "Last Name", placeholder: "Doe", icon: <User size={18} /> },
-      { name: "email", label: "Email", placeholder: "john@example.com", type: "email", icon: <Mail size={18} /> },
+      {
+        name: "email",
+        label: "Email",
+        placeholder: "john@example.com",
+        type: "email",
+        icon: <Mail size={18} />,
+      },
     ],
   },
   {
     title: "Contact Details",
     description: "How can we reach you?",
     fields: [
-      { name: "phone", label: "Phone Number", placeholder: "+91 98765 43210", type: "tel", icon: <Phone size={18} /> },
-      { name: "city", label: "City", placeholder: "Mumbai", icon: <MapPin size={18} /> },
-      { name: "postalCode", label: "Postal Code", placeholder: "400001", icon: <MapPin size={18} /> },
+      {
+        name: "phone",
+        label: "Phone Number",
+        placeholder: "+91 98765 43210",
+        type: "tel",
+        icon: <Phone size={18} />,
+      },
     ],
   },
   {
     title: "Security Setup",
     description: "Create a strong password to protect your account",
     fields: [
-      { name: "password", label: "Password", placeholder: "Create a strong password", type: "password", icon: <Lock size={18} /> },
-      { name: "confirmPassword", label: "Confirm Password", placeholder: "Re-enter your password", type: "password", icon: <Lock size={18} /> },
+      {
+        name: "password",
+        label: "Password",
+        placeholder: "Create a strong password",
+        type: "password",
+        icon: <Lock size={18} />,
+      },
+      {
+        name: "confirmPassword",
+        label: "Confirm Password",
+        placeholder: "Re-enter your password",
+        type: "password",
+        icon: <Lock size={18} />,
+      },
     ],
   },
 ]
 
 const stepVariants = {
-  enter: (direction: number) => ({
-    x: direction > 0 ? 100 : -100,
-    opacity: 0,
-  }),
-  center: {
-    x: 0,
-    opacity: 1,
-  },
-  exit: (direction: number) => ({
-    x: direction < 0 ? 100 : -100,
-    opacity: 0,
-  }),
+  enter: (direction: number) => ({ x: direction > 0 ? 100 : -100, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit: (direction: number) => ({ x: direction < 0 ? 100 : -100, opacity: 0 }),
 }
 
+// ── Component ─────────────────────────────────────────────────────────────────
 export function SignupWizard() {
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState(0)
@@ -94,7 +122,13 @@ export function SignupWizard() {
   const [success, setSuccess] = useState(false)
   const router = useRouter()
 
-  const { register, handleSubmit, trigger, formState: { errors }, watch, setError: setFormError } = useForm<SignupForm>({
+  const {
+    register,
+    handleSubmit,
+    trigger,
+    formState: { errors },
+    watch,
+  } = useForm<SignupForm>({
     resolver: zodResolver(signupSchema),
     mode: "onChange",
   })
@@ -108,7 +142,6 @@ export function SignupWizard() {
   const handleNext = async () => {
     const fieldsToValidate = currentStep.fields.map((f) => f.name) as Array<keyof SignupForm>
     const isValid = await trigger(fieldsToValidate)
-
     if (isValid) {
       setDirection(1)
       setStep((prev) => prev + 1)
@@ -122,12 +155,23 @@ export function SignupWizard() {
     setError(null)
   }
 
+  const getSignupErrorMessage = (err: unknown): string => {
+    if (err instanceof ApiError) {
+      // 409 = email already registered
+      if (err.statusCode === 409) return "An account with this email already exists."
+      return err.message || "Something went wrong. Please try again."
+    }
+    if (err instanceof Error) return err.message
+    return "Something went wrong. Please try again."
+  }
+
   const onSubmit = async (data: SignupForm) => {
     setIsSubmitting(true)
     setError(null)
 
     try {
-      await signup({
+      // POST /auth/signup — backend returns { accessToken, refreshToken, verification_pending }
+      const result = await signup({
         email: data.email,
         password: data.password,
         firstName: data.firstName,
@@ -136,17 +180,27 @@ export function SignupWizard() {
       })
 
       setSuccess(true)
-      setTimeout(() => {
-        router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}`)
-      }, 2000)
+
+      // Route based on whether the backend requires OTP email verification:
+      //   verification_pending === true  → OTP verification page
+      //   verification_pending === false → customer home (auto-verified accounts)
+      if (result.verification_pending) {
+        setTimeout(() => {
+          router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}`)
+        }, 1500)
+      } else {
+        setTimeout(() => {
+          router.push("/customer/home")
+        }, 1500)
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Something went wrong"
-      setError(message)
+      setError(getSignupErrorMessage(err))
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  // ── Success state ───────────────────────────────────────────────────────────
   if (success) {
     return (
       <motion.div
@@ -163,23 +217,22 @@ export function SignupWizard() {
           <Check size={32} className="text-green-600" />
         </motion.div>
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Account Created!</h3>
-        <p className="text-sm text-gray-500">Redirecting to verification...</p>
+        <p className="text-sm text-gray-500">Redirecting you now…</p>
       </motion.div>
     )
   }
 
+  // ── Wizard UI ───────────────────────────────────────────────────────────────
   return (
     <div className="w-full max-w-md mx-auto">
-      {/* Progress bar */}
+      {/* Progress indicators */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">
           {steps.map((s, index) => (
             <div key={s.title} className="flex items-center">
               <motion.div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  index <= step
-                    ? "bg-brand-primary text-white"
-                    : "bg-gray-100 text-gray-400"
+                  index <= step ? "bg-brand-primary text-white" : "bg-gray-100 text-gray-400"
                 }`}
                 animate={{
                   scale: index === step ? 1.1 : 1,
@@ -203,13 +256,15 @@ export function SignupWizard() {
           ))}
         </div>
         <div className="text-center">
-          <p className="text-xs text-gray-400 uppercase tracking-wider">Step {step + 1} of {steps.length}</p>
+          <p className="text-xs text-gray-400 uppercase tracking-wider">
+            Step {step + 1} of {steps.length}
+          </p>
           <h2 className="text-lg font-semibold text-gray-900 mt-1">{currentStep.title}</h2>
           <p className="text-sm text-gray-500">{currentStep.description}</p>
         </div>
       </div>
 
-      {/* Form */}
+      {/* Step form */}
       <form onSubmit={handleSubmit(onSubmit)}>
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
@@ -242,6 +297,7 @@ export function SignupWizard() {
                     initial={{ opacity: 0, y: -5 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="text-xs text-red-500"
+                    role="alert"
                   >
                     {errors[field.name]?.message}
                   </motion.p>
@@ -249,7 +305,7 @@ export function SignupWizard() {
               </div>
             ))}
 
-            {/* Password strength meter */}
+            {/* Password strength meter — shown only on security step */}
             {step === 2 && password && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
@@ -260,24 +316,24 @@ export function SignupWizard() {
               </motion.div>
             )}
 
-            {/* Password match indicator */}
             {step === 2 && confirmPassword && (
-              <motion.div
+              <motion.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className={`text-xs ${
                   password === confirmPassword ? "text-green-600" : "text-red-500"
                 }`}
               >
-                {password === confirmPassword ? " Passwords match" : " Passwords do not match"}
-              </motion.div>
+                {password === confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
+              </motion.p>
             )}
           </motion.div>
         </AnimatePresence>
 
-        {/* Error message */}
+        {/* API error banner */}
         {error && (
           <motion.div
+            role="alert"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             className="mt-4 bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-lg"
@@ -286,7 +342,7 @@ export function SignupWizard() {
           </motion.div>
         )}
 
-        {/* Navigation buttons */}
+        {/* Navigation */}
         <div className="flex items-center justify-between mt-6">
           <Button
             type="button"
@@ -308,7 +364,7 @@ export function SignupWizard() {
               {isSubmitting ? (
                 <>
                   <Loader2 className="animate-spin mr-2" size={18} />
-                  Creating...
+                  Creating…
                 </>
               ) : (
                 <>

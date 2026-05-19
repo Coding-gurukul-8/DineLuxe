@@ -12,6 +12,7 @@ import {
   resetPasswordController,
   changePasswordController,
   checkEmailController,
+  sendVerificationOtpController,
 } from './auth.controller';
 import {
   signupSchema,
@@ -21,6 +22,7 @@ import {
   changePasswordSchema,
   forgotPasswordSchema,
   refreshTokenSchema,
+  requestOtpSchema,
 } from './auth.schema';
 
 const router: import('express').Router = Router();
@@ -36,6 +38,7 @@ router.post('/refresh', validate(refreshTokenSchema), refreshController);
 router.post('/forgot-password', validate(forgotPasswordSchema), forgotPasswordController);
 router.post('/reset-password', validate(resetPasswordSchema), resetPasswordController);
 router.post('/change-password', authenticate, validate(changePasswordSchema), changePasswordController);
+router.post('/send-otp', validate(requestOtpSchema), sendVerificationOtpController);
 router.get('/check-email', checkEmailController);
 
 export default router;

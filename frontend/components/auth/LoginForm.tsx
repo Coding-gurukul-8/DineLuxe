@@ -30,7 +30,11 @@ export function LoginForm() {
   const searchParams = useSearchParams()
   const { setUser } = useAuth()
 
-  const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   })
 
@@ -38,21 +42,24 @@ export function LoginForm() {
     if (error) setError(null)
   }
 
-  const handleInvalid = () => {
+  const triggerShake = () => {
     setShake(true)
     setTimeout(() => setShake(false), 400)
   }
 
-  const getLoginErrorMessage = (err: unknown) => {
+  // Maps ApiError status codes and network errors to human-readable messages.
+  // ApiError.message is used as the fallback so backend-provided messages
+  // (e.g. "Account suspended until 2026-06-01") surface without extra mapping.
+  const getLoginErrorMessage = (err: unknown): string => {
     if (err instanceof ApiError) {
-      if (err.statusCode === 401) return "Invalid username or password"
+      if (err.statusCode === 401) return "Invalid email or password."
       if (err.statusCode === 403) return "Account is disabled. Please contact your manager."
       if (err.statusCode === 429) return "Too many attempts. Try again in 15 minutes."
       return err.message || "Unable to sign in. Please try again."
     }
     if (err instanceof Error) {
       return err.message === "Failed to fetch"
-        ? "Unable to reach the auth service. Check backend connectivity."
+        ? "Unable to reach the server. Check your connection and try again."
         : err.message
     }
     return "Unable to sign in. Please try again."
@@ -63,19 +70,43 @@ export function LoginForm() {
     setError(null)
 
     try {
+      // login() calls POST /auth/login, stores tokens via setAuthTokens,
+      // then calls GET /users/me to return the hydrated AuthUser.
       const user = await login({ identifier: data.identifier, password: data.password })
+
+      // Hydrate the global auth state immediately so downstream hooks/layouts
+      // see the user without waiting for a /users/me refetch on the next render.
       setUser(user)
+
+      // Staff who must change their password on first login are sent to a
+      // dedicated page before they can access their dashboard.
       if (user.forcePasswordChange) {
         router.push("/auth/first-login")
         return
       }
+
+      // Role-based dashboard routing:
+      //   super_admin      → /admin/dashboard
+      //   owner            → /owner/dashboard
+      //   manager          → /staff/manager/dashboard
+      //   host             → /staff/host
+      //   waiter           → /staff/waiter
+      //   chef             → /staff/chef/kitchen
+      //   cashier          → /staff/cashier
+      //   customer         → /customer/home
+      //   delivery_partner → /delivery
+      //
+      // If the URL contains a ?redirect= param and that path is permitted for
+      // the user's role, we honour it (e.g. deep-link after session expiry).
       const redirect = searchParams.get("redirect")?.trim()
-      const role = user.role
-      const fallback = getRoleDashboard(role)
-      router.push(redirect && isAllowedRedirect(redirect, role) ? redirect : fallback)
+      const destination =
+        redirect && isAllowedRedirect(redirect, user.role)
+          ? redirect
+          : getRoleDashboard(user.role)
+
+      router.push(destination)
     } catch (err) {
-      setShake(true)
-      setTimeout(() => setShake(false), 400)
+      triggerShake()
       setError(getLoginErrorMessage(err))
     } finally {
       setIsLoading(false)
@@ -84,7 +115,7 @@ export function LoginForm() {
 
   return (
     <motion.form
-      onSubmit={handleSubmit(onSubmit, handleInvalid)}
+      onSubmit={handleSubmit(onSubmit, triggerShake)}
       className={shake ? "animate-shake" : ""}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
@@ -92,9 +123,11 @@ export function LoginForm() {
       aria-busy={isLoading}
     >
       <div className="space-y-4">
-        {/* Email field */}
+        {/* ── Email / username ── */}
         <div className="space-y-2">
-          <label htmlFor="login-identifier" className="text-sm font-medium text-gray-700">Username or email</label>
+          <label htmlFor="login-identifier" className="text-sm font-medium text-gray-700">
+            Email or username
+          </label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <Input
@@ -111,20 +144,22 @@ export function LoginForm() {
           </div>
           {errors.identifier && (
             <motion.p
+              id="login-identifier-error"
+              role="alert"
               initial={{ opacity: 0, y: -5 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-xs text-red-500"
-              id="login-identifier-error"
-              role="alert"
             >
               {errors.identifier.message}
             </motion.p>
           )}
         </div>
 
-        {/* Password field */}
+        {/* ── Password ── */}
         <div className="space-y-2">
-          <label htmlFor="login-password" className="text-sm font-medium text-gray-700">Password</label>
+          <label htmlFor="login-password" className="text-sm font-medium text-gray-700">
+            Password
+          </label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <Input
@@ -140,9 +175,10 @@ export function LoginForm() {
             />
             <button
               type="button"
-              onClick={() => setShowPassword(!showPassword)}
+              onClick={() => setShowPassword((v) => !v)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
               aria-label={showPassword ? "Hide password" : "Show password"}
+              tabIndex={-1}
               disabled={isLoading}
             >
               {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -150,31 +186,31 @@ export function LoginForm() {
           </div>
           {errors.password && (
             <motion.p
+              id="login-password-error"
+              role="alert"
               initial={{ opacity: 0, y: -5 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-xs text-red-500"
-              id="login-password-error"
-              role="alert"
             >
               {errors.password.message}
             </motion.p>
           )}
         </div>
 
-        {/* Error message */}
+        {/* ── Server / API error banner ── */}
         {error && (
           <motion.div
+            role="alert"
+            aria-live="polite"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-lg"
-            role="alert"
-            aria-live="polite"
           >
             {error}
           </motion.div>
         )}
 
-        {/* Submit button */}
+        {/* ── Submit ── */}
         <Button
           type="submit"
           disabled={isLoading}
@@ -183,7 +219,7 @@ export function LoginForm() {
           {isLoading ? (
             <>
               <Loader2 className="animate-spin mr-2" size={18} />
-              Signing in...
+              Signing in…
             </>
           ) : (
             "Sign In"
