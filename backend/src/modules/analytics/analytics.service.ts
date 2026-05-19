@@ -5,11 +5,9 @@ function isMissingRpc(error: { message?: string } | null): boolean {
 }
 
 // ─── Menu suggestions ─────────────────────────────────────────────────────────
-// READ-ONLY: SELECT only
 export async function getMenuSuggestions(branchId: string) {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  // Get all items with their 30-day order count
   const { data: items, error } = await supabaseAdmin.rpc('get_item_order_counts', {
     p_branch_id: branchId,
     p_since: thirtyDaysAgo,
@@ -21,9 +19,6 @@ export async function getMenuSuggestions(branchId: string) {
   }
   if (!items?.length) return [];
 
-  // BUG FIX: avgOrderCount would be NaN (division by zero) if items is somehow
-  // empty after the length check — guard it. Also items.length is checked above
-  // so this is an extra safety net for the divide.
   const totalOrders = items.reduce((sum: number, i: any) => sum + i.order_count, 0);
   const avgOrderCount = items.length > 0 ? totalOrders / items.length : 0;
 
@@ -43,9 +38,7 @@ export async function getMenuSuggestions(branchId: string) {
 }
 
 // ─── Bundle opportunities ─────────────────────────────────────────────────────
-// READ-ONLY: SELECT only
 export async function getBundleOpportunities(branchId: string) {
-  // Co-order analysis: find items frequently ordered together
   const { data: pairs, error } = await supabaseAdmin.rpc('get_co_order_pairs', {
     p_branch_id: branchId,
     p_min_count: 10,
@@ -71,11 +64,9 @@ export async function getBundleOpportunities(branchId: string) {
 }
 
 // ─── Demand forecast ──────────────────────────────────────────────────────────
-// READ-ONLY: SELECT only
 export async function getDemandForecast(branchId: string) {
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
-  // GROUP orders by day_of_week + hour for last 90 days
   const { data: historical, error } = await supabaseAdmin.rpc('get_order_hourly_distribution', {
     p_branch_id: branchId,
     p_since: ninetyDaysAgo,
@@ -86,14 +77,12 @@ export async function getDemandForecast(branchId: string) {
     throw error;
   }
 
-  // Build day-of-week averages map: { 0: { 9: 12, 10: 15, ... }, ... }
   const avgByDayHour: Record<number, Record<number, number>> = {};
   for (const row of historical ?? []) {
     if (!avgByDayHour[row.day_of_week]) avgByDayHour[row.day_of_week] = {};
     avgByDayHour[row.day_of_week][row.hour] = row.avg_orders;
   }
 
-  // Project next 7 days
   const forecast = [];
   for (let i = 0; i < 7; i++) {
     const date = new Date(Date.now() + i * 24 * 60 * 60 * 1000);
@@ -116,13 +105,11 @@ export async function getDemandForecast(branchId: string) {
 }
 
 // ─── Staffing recommendation ──────────────────────────────────────────────────
-// READ-ONLY: SELECT only
 export async function getStaffingRecommendation(branchId: string) {
   const forecast = await getDemandForecast(branchId);
 
   if (forecast.length === 0) return [];
 
-  // Get currently scheduled staff per day
   const { data: scheduled, error } = await supabaseAdmin.rpc('get_scheduled_staff', {
     p_branch_id: branchId,
   });
@@ -138,10 +125,6 @@ export async function getStaffingRecommendation(branchId: string) {
   }
 
   return forecast.map((day) => {
-    // BUG FIX: if predicted_orders is 0, Math.ceil(0/15) = 0 — that's correct,
-    // but we should ensure we never recommend negative staffing. The original
-    // code was fine here but adding explicit Math.max(1, ...) ensures at least
-    // 1 of each is recommended even on very slow days.
     const recommendedWaiters = Math.max(1, Math.ceil(day.predicted_orders / 15));
     const recommendedChefs   = Math.max(1, Math.ceil(day.predicted_orders / 20));
     const current = scheduledMap[day.date] ?? { waiters: 0, chefs: 0 };
@@ -159,4 +142,129 @@ export async function getStaffingRecommendation(branchId: string) {
       chef_gap: recommendedChefs - current.chefs,
     };
   });
+}
+
+// ─── Restaurant overview (NEW) ────────────────────────────────────────────────
+// GET /analytics/restaurant/:restaurantId/overview
+// Returns: { revenue_today, revenue_week, orders_today, avg_order_value,
+//            top_items, occupancy_rate }
+export async function getRestaurantOverview(restaurantId: string) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const startOfWeek  = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const [todayPayments, weekPayments, todayOrders, tables, topItems] = await Promise.all([
+    // Revenue today
+    supabaseAdmin
+      .from('payments')
+      .select('amount')
+      .eq('status', 'completed')
+      .gte('created_at', startOfToday)
+      .then(({ data }) => data ?? []),
+
+    // Revenue this week
+    supabaseAdmin
+      .from('payments')
+      .select('amount')
+      .eq('status', 'completed')
+      .gte('created_at', startOfWeek)
+      .then(({ data }) => data ?? []),
+
+    // Orders today (scoped to restaurant via join on orders → branches)
+    supabaseAdmin
+      .from('orders')
+      .select('id, total_amount', { count: 'exact' })
+      .eq('restaurant_id', restaurantId)
+      .gte('created_at', startOfToday)
+      .neq('status', 'cancelled')
+      .then(({ data, count }) => ({ data: data ?? [], count: count ?? 0 })),
+
+    // Tables for occupancy
+    supabaseAdmin
+      .from('tables')
+      .select('status')
+      .eq('restaurant_id', restaurantId)
+      .then(({ data }) => data ?? []),
+
+    // Top 5 items by order count today
+    supabaseAdmin
+      .from('order_items')
+      .select('menu_item_id, quantity, unit_price, menu_items(name)')
+      .gte('created_at', startOfToday)
+      .eq('orders.restaurant_id', restaurantId)
+      .limit(100)
+      .then(({ data }) => data ?? []),
+  ]);
+
+  const revenue_today = todayPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0);
+  const revenue_week  = weekPayments.reduce((s: number, p: any) => s + (p.amount ?? 0), 0);
+  const orders_today  = todayOrders.count;
+  const avg_order_value = orders_today > 0 ? revenue_today / orders_today : 0;
+
+  // Occupancy: occupied / total
+  const totalTables    = tables.length;
+  const occupiedTables = tables.filter((t: any) => t.status === 'occupied').length;
+  const occupancy_rate = totalTables > 0 ? occupiedTables / totalTables : 0;
+
+  // Aggregate top items
+  const itemMap: Record<string, { name: string; count: number; revenue: number }> = {};
+  for (const row of topItems as any[]) {
+    const id   = row.menu_item_id;
+    const name = row.menu_items?.name ?? 'Unknown';
+    if (!itemMap[id]) itemMap[id] = { name, count: 0, revenue: 0 };
+    itemMap[id].count   += row.quantity ?? 1;
+    itemMap[id].revenue += (row.unit_price ?? 0) * (row.quantity ?? 1);
+  }
+  const top_items = Object.values(itemMap)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  return {
+    revenue_today,
+    revenue_week,
+    orders_today,
+    avg_order_value: Math.round(avg_order_value * 100) / 100,
+    top_items,
+    occupancy_rate: Math.round(occupancy_rate * 100) / 100,
+  };
+}
+
+// ─── Branch hourly activity (NEW) ─────────────────────────────────────────────
+// GET /analytics/branch/:branchId/hourly
+// Returns: { hours: [{ hour, orders, revenue }] }
+export async function getBranchHourly(branchId: string) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+
+  // Fetch today's orders for the branch, including payment amounts
+  const { data: orders, error } = await supabaseAdmin
+    .from('orders')
+    .select('id, created_at, total_amount, status')
+    .eq('branch_id', branchId)
+    .gte('created_at', startOfToday)
+    .neq('status', 'cancelled');
+
+  if (error) throw error;
+
+  // Bucket into hours 0–23
+  const hourBuckets: Record<number, { orders: number; revenue: number }> = {};
+  for (let h = 0; h < 24; h++) {
+    hourBuckets[h] = { orders: 0, revenue: 0 };
+  }
+
+  for (const order of orders ?? []) {
+    const hour = new Date(order.created_at).getHours();
+    hourBuckets[hour].orders  += 1;
+    hourBuckets[hour].revenue += order.total_amount ?? 0;
+  }
+
+  // Only return hours up to current hour (no future empty bars)
+  const currentHour = now.getHours();
+  const hours = Array.from({ length: currentHour + 1 }, (_, h) => ({
+    hour: h,
+    orders:  hourBuckets[h].orders,
+    revenue: Math.round(hourBuckets[h].revenue * 100) / 100,
+  }));
+
+  return { hours };
 }
