@@ -1,104 +1,100 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { io, Socket } from "socket.io-client";
+/**
+ * hooks/useRealtime.ts
+ *
+ * Core real-time hook. Accepts the branch and role so it can join the correct
+ * server-side room ("branch:{branchId}:{role}") automatically on mount.
+ *
+ * Fixes vs. old version:
+ * - Socket creation/management moved to lib/socket.ts (singleton)
+ * - Accepts { branchId, role } and auto-joins the right room
+ * - URL derived from NEXT_PUBLIC_API_URL (not NEXT_PUBLIC_BACKEND_WS_URL)
+ * - autoConnect: false — socket connects explicitly via getSocket()
+ * - Returns { on, off } as specified; isConnected available as bonus
+ * - Ref-count via incrementRoomCount / decrementRoomCount in socket.ts
+ */
 
-// WebSocket connects directly to the backend — NOT through the Next.js proxy.
-// Next.js rewrites only handle HTTP; WS upgrades are not forwarded by the
-// built-in proxy, so we must point at the backend origin directly.
-const SOCKET_URL =
-  process.env.NEXT_PUBLIC_BACKEND_WS_URL || "http://localhost:4000";
+import { useEffect, useCallback, useState } from "react";
+import {
+  getSocket,
+  incrementRoomCount,
+  decrementRoomCount,
+} from "@/lib/socket";
 
-let sharedSocket: Socket | null = null;
-let refCount = 0;
+export type RealtimeRole = "host" | "kitchen" | "manager" | "waiter";
 
-function getSharedSocket(): Socket {
-  if (!sharedSocket || !sharedSocket.connected) {
-    sharedSocket = io(SOCKET_URL, {
-      transports: ["polling", "websocket"],
-      withCredentials: true,
-      autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
-  }
-  return sharedSocket;
+interface UseRealtimeOptions {
+  branchId: string;
+  role: RealtimeRole;
 }
 
-export function useRealtime() {
-  const socketRef = useRef<Socket | null>(null);
+interface UseRealtimeReturn {
+  /** Subscribe to a socket event. Returns an unsubscribe function. */
+  on: <T>(event: string, handler: (payload: T) => void) => () => void;
+  /** Unsubscribe a previously registered handler. */
+  off: <T>(event: string, handler: (payload: T) => void) => void;
+  /** Whether the socket is currently connected. */
+  isConnected: boolean;
+}
+
+export function useRealtime({
+  branchId,
+  role,
+}: UseRealtimeOptions): UseRealtimeReturn {
   const [isConnected, setIsConnected] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const room = `branch:${branchId}:${role}`;
 
   useEffect(() => {
-    const socket = getSharedSocket();
-    socketRef.current = socket;
-    refCount++;
+    if (!branchId) return;
 
-    // Sync initial state
+    const socket = getSocket();
+    incrementRoomCount();
+
+    // Sync connection state
     setIsConnected(socket.connected);
 
     const onConnect = () => {
       setIsConnected(true);
-      setError(null);
+      // Re-join room after reconnect (socket.io doesn't persist rooms across
+      // disconnects on the server side by default)
+      socket.emit("join_room", room);
     };
     const onDisconnect = () => setIsConnected(false);
-    const onError = (err: Error) => setError(err);
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
-    socket.on("connect_error", onError);
+
+    // Join room immediately if already connected, otherwise wait for connect
+    if (socket.connected) {
+      socket.emit("join_room", room);
+    }
 
     return () => {
+      socket.emit("leave_room", room);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
-      socket.off("connect_error", onError);
-
-      refCount--;
-      // Only disconnect when no hook instance is using the socket
-      if (refCount <= 0 && sharedSocket) {
-        sharedSocket.disconnect();
-        sharedSocket = null;
-        refCount = 0;
-      }
+      decrementRoomCount();
     };
-  }, []);
+  }, [branchId, role, room]);
 
-  /**
-   * Subscribe to a server event. Returns an unsubscribe function.
-   * Safe to call before the socket is connected — Socket.io buffers listeners.
-   */
-  const on = useCallback(<T,>(event: string, callback: (payload: T) => void) => {
-    const socket = socketRef.current ?? getSharedSocket();
-    socket.on(event, callback);
-    return () => socket.off(event, callback);
-  }, []);
+  const on = useCallback(
+    <T,>(event: string, handler: (payload: T) => void) => {
+      const socket = getSocket();
+      socket.on(event, handler as (...args: unknown[]) => void);
+      return () =>
+        socket.off(event, handler as (...args: unknown[]) => void);
+    },
+    []
+  );
 
-  /**
-   * Join a server-side room so the backend can fan-out events to this client.
-   * The backend must handle the "join_room" event and call socket.join(room).
-   */
-  const joinRoom = useCallback((room: string) => {
-    const socket = socketRef.current ?? getSharedSocket();
-    socket.emit("join_room", room);
-  }, []);
+  const off = useCallback(
+    <T,>(event: string, handler: (payload: T) => void) => {
+      const socket = getSocket();
+      socket.off(event, handler as (...args: unknown[]) => void);
+    },
+    []
+  );
 
-  /**
-   * Leave a server-side room.
-   */
-  const leaveRoom = useCallback((room: string) => {
-    const socket = socketRef.current ?? getSharedSocket();
-    socket.emit("leave_room", room);
-  }, []);
-
-  /**
-   * Emit an event to the server.
-   */
-  const emit = useCallback(<T,>(event: string, payload: T) => {
-    const socket = socketRef.current ?? getSharedSocket();
-    socket.emit(event, payload);
-  }, []);
-
-  return { isConnected, error, on, joinRoom, leaveRoom, emit };
+  return { on, off, isConnected };
 }

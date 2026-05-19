@@ -1,203 +1,131 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useRealtime } from "./useRealtime";
-import { useAuth } from "./useAuth";
-import { apiClient } from "@/lib/api-client";
-import { WS_EVENTS } from "@/lib/constants";
+/**
+ * hooks/useQueuePosition.ts
+ *
+ * Returns the current user's own queue entry for a branch:
+ *   { position, estimatedWait, entry }
+ *
+ * Fixes vs. old version:
+ * - Event name: "queue:update"  (was WS_EVENTS.QUEUE_UPDATED = "queue_updated")
+ * - API endpoint: GET /queue/me?branch_id=:branchId  (was /queue/branch/:branchId)
+ * - Returns { position, estimatedWait, entry } for the current user's entry
+ *   (was the entire branch queue array + unrelated helpers)
+ * - No joinQueue / markArrived / markNoShow / removeFromQueue — out of scope
+ *
+ * The backend "queue:update" event payload contains the full queue array;
+ * we find the user's own entry by matching against the entry returned by
+ * GET /queue/me (or by userId if available).
+ */
 
-export type QueueStatus = "waiting" | "arrived" | "seated" | "no_show" | "cancelled";
+import { useState, useEffect, useCallback } from "react";
+import { useRealtime } from "@/hooks/useRealtime";
+import { apiClient } from "@/lib/api-client";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+export type QueueStatus =
+  | "waiting"
+  | "arrived"
+  | "seated"
+  | "no_show"
+  | "cancelled";
 
 export interface QueueEntry {
   id: string;
-  queueId: string;
-  userId?: string;
-  userName?: string;
-  phone?: string;
-  partySize: number;
   position: number;
   status: QueueStatus;
-  source: "walk_in" | "pre_booked" | "digital";
   estimatedWaitMinutes: number;
-  arrivedAt?: string;
-  seatedAt?: string;
+  partySize: number;
+  arrivedAt?: string | null;
+  seatedAt?: string | null;
   createdAt: string;
 }
 
-interface QueueUpdate {
-  queueId: string;
-  position: number;
-  estimatedWait: number;
+interface QueueUpdateEvent {
+  queue: QueueEntry[];
 }
 
-interface ArrivalEvent {
-  queueId: string;
-  customerName: string;
-  partySize: number;
-  bookingId?: string;
+interface UseQueuePositionReturn {
+  /** The current user's 1-based position in the queue, or null if not found */
+  position: number | null;
+  /** Estimated wait in minutes, or null */
+  estimatedWait: number | null;
+  /** The full QueueEntry for the current user, or null */
+  entry: QueueEntry | null;
+  isLoading: boolean;
+  error: string | null;
+  refetch: () => Promise<void>;
 }
 
-export function useQueuePosition(branchId?: string) {
-  const { branchId: authBranchId } = useAuth();
-  const { on, joinRoom, emit } = useRealtime();
-  const [queue, setQueue] = useState<QueueEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+// ── Hook ───────────────────────────────────────────────────────────────────────
 
-  const targetBranchId = branchId || authBranchId;
+export function useQueuePosition(branchId: string): UseQueuePositionReturn {
+  const { on, off } = useRealtime({ branchId, role: "host" });
 
-  const fetchQueue = useCallback(async () => {
-    if (!targetBranchId) return;
+  const [entry, setEntry]             = useState<QueueEntry | null>(null);
+  const [isLoading, setIsLoading]     = useState(false);
+  const [error, setError]             = useState<string | null>(null);
 
+  // ── Initial fetch ────────────────────────────────────────────────────────────
+
+  const fetchMyEntry = useCallback(async () => {
+    if (!branchId) return;
     try {
-      setLoading(true);
-      const data = await apiClient.get<QueueEntry[]>(`/queue/branch/${targetBranchId}`);
-      setQueue(data);
+      setIsLoading(true);
+      // GET /queue/me?branch_id=:branchId — returns the current user's entry
+      const data = await apiClient.get<QueueEntry>(
+        `/queue/me?branch_id=${branchId}`
+      );
+      setEntry(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch queue");
+      // 404 means not in queue — treat as null, not an error
+      if ((err as { statusCode?: number })?.statusCode === 404) {
+        setEntry(null);
+        setError(null);
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to fetch queue position");
+      }
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  }, [targetBranchId]);
+  }, [branchId]);
 
   useEffect(() => {
-    if (!targetBranchId) return;
+    if (!branchId) return;
+    fetchMyEntry();
+  }, [branchId, fetchMyEntry]);
 
-    fetchQueue();
-    joinRoom(`branch:${targetBranchId}:host`);
+  // ── Socket subscription ──────────────────────────────────────────────────────
 
-    // Listen for queue updates
-    const unsubscribe = on(
-      WS_EVENTS.QUEUE_UPDATED,
-      (payload: QueueUpdate) => {
-        setQueue((prev) =>
-          prev.map((entry) =>
-            entry.queueId === payload.queueId
-              ? {
-                  ...entry,
-                  position: payload.position,
-                  estimatedWaitMinutes: payload.estimatedWait,
-                }
-              : entry
-          )
-        );
-      }
-    );
+  useEffect(() => {
+    if (!branchId) return;
 
-    // Listen for arrival detection
-    const unsubscribeArrival = on(
-      WS_EVENTS.ARRIVAL_DETECTED,
-      (payload: ArrivalEvent) => {
-        setQueue((prev) =>
-          prev.map((entry) =>
-            entry.queueId === payload.queueId
-              ? { ...entry, status: "arrived", arrivedAt: new Date().toISOString() }
-              : entry
-          )
-        );
-      }
-    );
+    const handler = (payload: QueueUpdateEvent) => {
+      // The backend sends the full branch queue array.
+      // Find the current user's entry by matching the entry id we fetched.
+      setEntry((prev) => {
+        if (!prev) return prev;
+        const updated = payload.queue.find((e) => e.id === prev.id);
+        return updated ?? prev;
+      });
+    };
 
-    // Listen for position updates
-    const unsubscribePosition = on(
-      WS_EVENTS.QUEUE_POSITION_UPDATE,
-      (payload: QueueUpdate) => {
-        setQueue((prev) =>
-          prev.map((entry) =>
-            entry.queueId === payload.queueId
-              ? {
-                  ...entry,
-                  position: payload.position,
-                  estimatedWaitMinutes: payload.estimatedWait,
-                }
-              : entry
-          )
-        );
-      }
-    );
+    // Backend emits "queue:update"
+    on<QueueUpdateEvent>("queue:update", handler);
 
     return () => {
-      unsubscribe();
-      unsubscribeArrival();
-      unsubscribePosition();
+      off<QueueUpdateEvent>("queue:update", handler);
     };
-  }, [targetBranchId, fetchQueue, joinRoom, on]);
-
-  const joinQueue = useCallback(async (partySize: number) => {
-    if (!targetBranchId) return;
-
-    try {
-      const entry = await apiClient.post<QueueEntry>(`/queue/join`, {
-        branch_id: targetBranchId,
-        people_count: partySize,
-      });
-      setQueue((prev) => [entry, ...prev]);
-      return entry;
-    } catch (err) {
-      throw err;
-    }
-  }, [targetBranchId]);
-
-  const markArrived = useCallback(async (queueId: string) => {
-    try {
-      await apiClient.patch(`/queue/${queueId}/arrive`, {});
-      setQueue((prev) =>
-        prev.map((entry) =>
-          entry.queueId === queueId
-            ? { ...entry, status: "arrived" as QueueStatus, arrivedAt: new Date().toISOString() }
-            : entry
-        )
-      );
-    } catch (err) {
-      throw err;
-    }
-  }, []);
-
-  const markNoShow = useCallback(async (queueId: string) => {
-    try {
-      await apiClient.patch(`/queue/${queueId}/no-show`, {});
-      setQueue((prev) => prev.filter((entry) => entry.queueId !== queueId));
-    } catch (err) {
-      throw err;
-    }
-  }, []);
-
-  const removeFromQueue = useCallback(async (queueId: string) => {
-    try {
-      await apiClient.delete(`/queue/${queueId}`);
-      setQueue((prev) => prev.filter((entry) => entry.queueId !== queueId));
-    } catch (err) {
-      throw err;
-    }
-  }, []);
-
-  const getMyPosition = useCallback((): QueueEntry | undefined => {
-    return queue.find((entry) => entry.status === "waiting" || entry.status === "arrived");
-  }, [queue]);
-
-  const getWaitTime = useCallback((): number => {
-    const myEntry = getMyPosition();
-    return myEntry?.estimatedWaitMinutes || 0;
-  }, [getMyPosition]);
-
-  const isFirstInQueue = useCallback((): boolean => {
-    const myEntry = getMyPosition();
-    if (!myEntry) return false;
-    return myEntry.position === 1;
-  }, [getMyPosition]);
+  }, [branchId, on, off]);
 
   return {
-    queue,
-    loading,
+    position:      entry?.position       ?? null,
+    estimatedWait: entry?.estimatedWaitMinutes ?? null,
+    entry,
+    isLoading,
     error,
-    refetch: fetchQueue,
-    joinQueue,
-    markArrived,
-    markNoShow,
-    removeFromQueue,
-    getMyPosition,
-    getWaitTime,
-    isFirstInQueue,
+    refetch: fetchMyEntry,
   };
 }

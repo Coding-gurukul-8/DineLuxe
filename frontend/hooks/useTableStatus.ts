@@ -1,56 +1,84 @@
 "use client";
 
+/**
+ * hooks/useTableStatus.ts
+ *
+ * Maintains a live Record<tableId, TableStatus> for all tables in a branch,
+ * updated via real-time "table:status" events.
+ *
+ * Fixes vs. old version:
+ * - Accepts branchId (not tableId) — tracks ALL tables, not one
+ * - Event name: "table:status"  (was WS_EVENTS.TABLE_STATUS_CHANGED = "table_status_changed")
+ * - Return shape: { tableStatuses: Record<string, TableStatus> }
+ *   (was { tableStatus: TableStatus | null } for a single table)
+ * - Joins the branch room via useRealtime; does not try to join "table:${tableId}"
+ */
+
 import { useState, useEffect, useCallback } from "react";
-import { useRealtime } from "./useRealtime";
-import { apiClient } from "@/lib/api-client";
-import { WS_EVENTS, TABLE_STATUS } from "@/lib/constants";
+import { useRealtime, type RealtimeRole } from "@/hooks/useRealtime";
+import { TableStatus } from "@/lib/constants";
 
-export type TableStatus = (typeof TABLE_STATUS)[keyof typeof TABLE_STATUS];
+// ── Types ──────────────────────────────────────────────────────────────────────
 
-export interface TableStatusPayload {
+interface TableStatusEvent {
   tableId: string;
   status: TableStatus;
-  updatedAt: string;
 }
 
-export function useTableStatus(tableId?: string) {
-  const { on, joinRoom } = useRealtime();
-  const [tableStatus, setTableStatus] = useState<TableStatus | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+interface UseTableStatusOptions {
+  branchId: string;
+  /** Which branch room to subscribe as. Defaults to "host". */
+  role?: RealtimeRole;
+}
 
-  const fetchStatus = useCallback(async () => {
-    if (!tableId) return;
-    try {
-      setIsLoading(true);
-      const data = await apiClient.get<{ status: TableStatus }>(`/tables/${tableId}`);
-      setTableStatus(data.status);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch table status");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [tableId]);
+interface UseTableStatusReturn {
+  /** Live map of every table ID → its current status */
+  tableStatuses: Record<string, TableStatus>;
+  /** Update a single table's status locally (for optimistic updates) */
+  setTableStatus: (tableId: string, status: TableStatus) => void;
+  /** Whether the socket is currently connected */
+  isConnected: boolean;
+}
+
+// ── Hook ───────────────────────────────────────────────────────────────────────
+
+export function useTableStatus({
+  branchId,
+  role = "host",
+}: UseTableStatusOptions): UseTableStatusReturn {
+  const { on, off, isConnected } = useRealtime({ branchId, role });
+
+  // Record<tableId, status> — updated whenever a table:status event arrives
+  const [tableStatuses, setTableStatuses] = useState<Record<string, TableStatus>>({});
+
+  // ── Socket subscription ──────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!tableId) return;
+    if (!branchId) return;
 
-    fetchStatus();
-    joinRoom(`table:${tableId}`);
+    const handler = (payload: TableStatusEvent) => {
+      setTableStatuses((prev) => ({
+        ...prev,
+        [payload.tableId]: payload.status,
+      }));
+    };
 
-    const unsubTableStatus = on<TableStatusPayload>(
-      WS_EVENTS.TABLE_STATUS_CHANGED,
-      (payload) => {
-        if (payload.tableId === tableId) {
-          setTableStatus(payload.status);
-        }
-      }
-    );
+    // Backend emits "table:status"
+    on<TableStatusEvent>("table:status", handler);
 
     return () => {
-      unsubTableStatus();
+      off<TableStatusEvent>("table:status", handler);
     };
-  }, [tableId, fetchStatus, joinRoom, on]);
+  }, [branchId, on, off]);
 
-  return { tableStatus, isLoading, error, refetch: fetchStatus };
+  // ── Optimistic local setter ──────────────────────────────────────────────────
+
+  const setTableStatus = useCallback(
+    (tableId: string, status: TableStatus) => {
+      setTableStatuses((prev) => ({ ...prev, [tableId]: status }));
+    },
+    []
+  );
+
+  return { tableStatuses, setTableStatus, isConnected };
 }

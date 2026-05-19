@@ -1,51 +1,91 @@
-"use client"
+"use client";
 
-import { useEffect, useRef } from "react"
-import { toast } from "sonner"
-import { apiClient } from "@/lib/api-client"
-import { useAuth } from "@/hooks/useAuth"
+/**
+ * components/layout/RealtimeToastHandler.tsx
+ *
+ * Mounts once inside the owner/manager layout. Subscribes to socket events
+ * and shows toast notifications for:
+ *   - order:new    → "New order placed!"
+ *   - order:status → "Order #<shortId> is now <status>"
+ *
+ * Fixes vs. old version:
+ * - Old version had NO socket at all — it HTTP-polled /notifications every 30s
+ * - Now uses useRealtime() to subscribe to live socket events
+ * - Guards on branchId (not just user) as specified in the task
+ * - Event names corrected: "order:new" and "order:status"
+ * - Role defaults to "manager" for the owner panel toast handler
+ */
 
-interface NotificationItem {
-  id: string
-  title: string
-  body: string
-  created_at: string
-  is_read: boolean
-  type?: string
+import { useEffect } from "react";
+import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
+import { useRealtime } from "@/hooks/useRealtime";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+interface OrderNewEvent {
+  order: {
+    id: string;
+    table_number?: string | number;
+    total?: number;
+  };
 }
 
-export function RealtimeToastHandler() {
-  const { user } = useAuth()
-  const shownIds = useRef<Set<string>>(new Set())
+interface OrderStatusEvent {
+  orderId: string;
+  status: string;
+}
+
+// ── Short ID helper ────────────────────────────────────────────────────────────
+
+function shortId(id: string): string {
+  return id.slice(-6).toUpperCase();
+}
+
+// ── Inner component (only rendered when branchId is available) ────────────────
+
+function RealtimeToastSubscriber({ branchId }: { branchId: string }) {
+  const { on, off } = useRealtime({ branchId, role: "manager" });
 
   useEffect(() => {
-    if (!user) return
+    // ── order:new ──────────────────────────────────────────────────────────────
+    const onOrderNew = (payload: OrderNewEvent) => {
+      const tableLabel = payload.order.table_number
+        ? ` (Table ${payload.order.table_number})`
+        : "";
+      toast.success(`New order placed!${tableLabel}`, {
+        description: `Order #${shortId(payload.order.id)}`,
+        duration: 6_000,
+      });
+    };
 
-    let active = true
+    // ── order:status ───────────────────────────────────────────────────────────
+    const onOrderStatus = (payload: OrderStatusEvent) => {
+      const humanStatus = payload.status.replace(/_/g, " ");
+      toast.info(`Order #${shortId(payload.orderId)} is now ${humanStatus}`, {
+        duration: 4_000,
+      });
+    };
 
-    const pollNotifications = async () => {
-      try {
-        const result = await apiClient.get<{ data: NotificationItem[]; count: number }>("/notifications")
-        if (!active) return
-        const items = result.data ?? []
-        items
-          .filter((item) => !item.is_read && !shownIds.current.has(item.id))
-          .forEach((item) => {
-            shownIds.current.add(item.id)
-            toast.info(item.title, { description: item.body })
-          })
-      } catch {
-        // Ignore notification errors
-      }
-    }
+    on<OrderNewEvent>("order:new", onOrderNew);
+    on<OrderStatusEvent>("order:status", onOrderStatus);
 
-    pollNotifications()
-    const interval = setInterval(pollNotifications, 30000)
     return () => {
-      active = false
-      clearInterval(interval)
-    }
-  }, [user])
+      off<OrderNewEvent>("order:new", onOrderNew);
+      off<OrderStatusEvent>("order:status", onOrderStatus);
+    };
+  }, [on, off]);
 
-  return null
+  return null;
+}
+
+// ── Exported component ─────────────────────────────────────────────────────────
+
+export function RealtimeToastHandler() {
+  const { branchId, isAuthenticated } = useAuth();
+
+  // Only mount the subscriber when authenticated and branchId is known
+  if (!isAuthenticated || !branchId) return null;
+
+  return <RealtimeToastSubscriber branchId={branchId} />;
 }
