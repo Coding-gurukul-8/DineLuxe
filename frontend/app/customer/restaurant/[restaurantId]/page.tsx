@@ -3,44 +3,52 @@
 /**
  * app/customer/restaurant/[restaurantId]/page.tsx
  *
- * Replaces the old stub (which only showed a CustomerTableSelector and nothing else).
+ * Merged from both versions — every deliberate decision annotated.
  *
- * Features
+ * Data flow
  * ─────────
- * • GET /restaurants/:restaurantId         → restaurant data + branches
- * • GET /restaurants/:restaurantId/live-status  → refetched every 30 s
- * • GET /menu/branch/:branchId             → full categorised menu
- * • Tab bar: Menu | Info | Reviews
- * • "Add to cart" on FoodCard calls useCart.addItem
- * • Cart FAB when cart has items
+ * GET /restaurants/:restaurantId          → restaurant + branches
+ * GET /restaurants/:restaurantId/live-status  → polled every 30 s
+ * GET /menu/branch/:branchId              → categorised menu (enabled on menu tab)
+ * GET /reviews/restaurant/:restaurantId   → reviews list (enabled on reviews tab)
+ * POST /reviews                           → submit new review (customer role only)
+ *
+ * Cart wiring (ground truth from useCart.ts)
+ * ──────────────────────────────────────────
+ * CartItem shape  : { menuItemId, name, price, quantity, photoUrl? }
+ * addItem()       : (CartItem, restaurantId, branchId)
+ * removeItem()    : (menuItemId)                    ← takes menuItemId, not id
+ * updateQuantity(): (menuItemId, quantity)
+ * total()         : () => number                    ← it's a getter function
+ * itemCount()     : () => number                    ← it's a getter function
+ *
+ * FoodCard wiring (ground truth from FoodCard.tsx)
+ * ─────────────────────────────────────────────────
+ * item prop expects camelCase: { id, name, description, price, discountedPrice?,
+ *   photoUrl?, dietaryTags[], allergens[], prepTimeMinutes?, isAvailable, isSoldOut }
+ * API returns snake_case  →  normalizeItem() translates before passing to FoodCard
+ * onAddToCart(itemId, newQuantity): FoodCard passes the NEW quantity (not a delta)
  */
 
 import { use, useState, useCallback } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
 import { useCart } from "@/hooks/useCart";
 import { FoodCard } from "@/components/customer/FoodCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { SkeletonCard } from "@/components/shared/SkeletonCard";
-import { formatCurrency, cn } from "@/lib/utils";
+import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import {
-  Star,
-  Clock,
-  MapPin,
-  Phone,
-  ChevronLeft,
-  ShoppingCart,
-  Utensils,
-  Info,
-  MessageSquare,
-  Users,
-  CheckCircle2,
-  XCircle,
+  Star, Clock, MapPin, Phone, ChevronLeft,
+  Utensils, Info, MessageSquare, Users,
+  CheckCircle2, XCircle, Send,
 } from "lucide-react";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Branch {
   id: string;
@@ -73,6 +81,22 @@ interface LiveStatus {
   wait_minutes: number;
 }
 
+// Raw shape returned by the API (snake_case)
+interface RawMenuItem {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  discounted_price?: number;
+  photo_url?: string;
+  dietary_tags?: string[];
+  allergens?: string[];
+  prep_time_minutes?: number;
+  is_available?: boolean;
+  is_sold_out?: boolean;
+}
+
+// Camelcase shape expected by <FoodCard />
 interface MenuItem {
   id: string;
   name: string;
@@ -90,16 +114,254 @@ interface MenuItem {
 interface MenuCategory {
   id: string;
   name: string;
-  items: MenuItem[];
+  items: RawMenuItem[];   // API delivers raw items inside categories
 }
 
 interface MenuData {
   categories: MenuCategory[];
 }
 
+interface Review {
+  id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+  user: { name: string };
+}
+
 type Tab = "menu" | "info" | "reviews";
 
-// ── Component ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Translates the snake_case API response into the camelCase shape
+ * that <FoodCard /> expects. Without this, photos, dietary tags, etc.
+ * all silently come through as undefined.
+ */
+function normalizeItem(raw: RawMenuItem): MenuItem {
+  return {
+    id: raw.id,
+    name: raw.name,
+    description: raw.description ?? "",
+    price: raw.price,
+    discountedPrice: raw.discounted_price,
+    photoUrl: raw.photo_url,
+    dietaryTags: raw.dietary_tags ?? [],
+    allergens: raw.allergens ?? [],
+    prepTimeMinutes: raw.prep_time_minutes,
+    isAvailable: raw.is_available ?? true,
+    isSoldOut: raw.is_sold_out ?? false,
+  };
+}
+
+// ── Star Picker (write review) ────────────────────────────────────────────────
+
+function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [hovered, setHovered] = useState(0);
+  return (
+    <div className="flex items-center gap-1" role="group" aria-label="Star rating">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <motion.button
+          key={star}
+          type="button"
+          whileTap={{ scale: 0.85 }}
+          onClick={() => onChange(star)}
+          onMouseEnter={() => setHovered(star)}
+          onMouseLeave={() => setHovered(0)}
+          className="focus:outline-none"
+          aria-label={`${star} star${star > 1 ? "s" : ""}`}
+        >
+          <Star
+            size={28}
+            className={cn(
+              "transition-colors",
+              star <= (hovered || value)
+                ? "fill-amber-400 text-amber-400"
+                : "fill-gray-100 text-gray-300"
+            )}
+          />
+        </motion.button>
+      ))}
+    </div>
+  );
+}
+
+// ── Star Display (read reviews) ───────────────────────────────────────────────
+
+function StarDisplay({ rating, size = 14 }: { rating: number; size?: number }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((s) => (
+        <Star
+          key={s}
+          size={size}
+          className={cn(
+            s <= Math.round(rating)
+              ? "fill-amber-400 text-amber-400"
+              : "fill-gray-100 text-gray-200"
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── Reviews Sub-Component ─────────────────────────────────────────────────────
+
+function ReviewsTab({ restaurantId }: { restaurantId: string }) {
+  const qc = useQueryClient();
+  const { isAuthenticated, role } = useAuth();
+  const [showForm, setShowForm] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [ratingError, setRatingError] = useState(false);
+
+  const { data: reviews = [], isLoading } = useQuery<Review[]>({
+    queryKey: ["reviews", "restaurant", restaurantId],
+    queryFn: () => apiClient.get<Review[]>(`/reviews/restaurant/${restaurantId}`),
+    enabled: !!restaurantId,
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: (body: { restaurant_id: string; rating: number; comment?: string }) =>
+      apiClient.post("/reviews", body),
+    onSuccess: () => {
+      // Refetch the reviews list so the new entry appears immediately
+      qc.invalidateQueries({ queryKey: ["reviews", "restaurant", restaurantId] });
+      toast.success("Review submitted!");
+      setShowForm(false);
+      setRating(0);
+      setComment("");
+      setRatingError(false);
+    },
+    onError: () => toast.error("Failed to submit review"),
+  });
+
+  const handleSubmit = () => {
+    if (rating === 0) { setRatingError(true); return; }
+    setRatingError(false);
+    submitMutation.mutate({
+      restaurant_id: restaurantId,
+      rating,
+      comment: comment.trim() || undefined,
+    });
+  };
+
+  // Only logged-in customers see the "Write a Review" button
+  const canReview = isAuthenticated && role === "customer";
+
+  if (isLoading) {
+    return (
+      <div className="px-4 py-4 space-y-3">
+        <SkeletonCard variant="list-item" count={3} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 py-4 space-y-4">
+      {/* Write a review CTA */}
+      {canReview && !showForm && (
+        <motion.button
+          whileTap={{ scale: 0.97 }}
+          onClick={() => setShowForm(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#1A3C5E] text-white text-sm font-medium hover:bg-[#1A3C5E]/90 transition-colors shadow-sm"
+        >
+          <Star size={16} className="fill-white" />
+          Write a Review
+        </motion.button>
+      )}
+
+      {/* Review form */}
+      <AnimatePresence>
+        {showForm && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-4"
+          >
+            <h3 className="font-semibold text-gray-900 text-sm">Your Review</h3>
+
+            <div>
+              <StarPicker value={rating} onChange={(v) => { setRating(v); setRatingError(false); }} />
+              {ratingError && (
+                <p className="text-xs text-red-500 mt-1">Please select a star rating</p>
+              )}
+            </div>
+
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Share your experience (optional)"
+              rows={3}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-[#1A3C5E]/30 resize-none transition"
+            />
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowForm(false); setRating(0); setComment(""); }}
+                className="flex-1 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={submitMutation.isPending}
+                className="flex-1 py-2 rounded-xl bg-[#1A3C5E] text-white text-sm font-medium hover:bg-[#1A3C5E]/90 disabled:opacity-60 transition-colors flex items-center justify-center gap-1.5"
+              >
+                {submitMutation.isPending ? (
+                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Send size={14} />
+                )}
+                Submit
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Reviews list */}
+      {reviews.length === 0 ? (
+        <div className="flex flex-col items-center py-12 text-center">
+          <MessageSquare size={36} className="text-gray-200 mb-3" />
+          <p className="text-gray-500 font-medium text-sm">No reviews yet</p>
+          <p className="text-gray-400 text-xs mt-1">Be the first to share your experience!</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {reviews.map((review) => (
+            <motion.div
+              key={review.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-[#1A3C5E]/10 flex items-center justify-center text-xs font-bold text-[#1A3C5E] uppercase">
+                    {review.user.name?.charAt(0) ?? "?"}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{review.user.name}</p>
+                    <p className="text-xs text-gray-400">{formatDate(review.created_at)}</p>
+                  </div>
+                </div>
+                <StarDisplay rating={review.rating} />
+              </div>
+              {review.comment && (
+                <p className="text-sm text-gray-600 leading-relaxed pl-10">{review.comment}</p>
+              )}
+            </motion.div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 interface Props {
   params: Promise<{ restaurantId: string }>;
@@ -110,21 +372,18 @@ export default function RestaurantDetailPage({ params }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("menu");
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
-  // Cart state
+  // ── Cart selectors ────────────────────────────────────────────────────────
+  // total() and itemCount() are getter functions in CartState, call them with ()
   const cartItems      = useCart((s) => s.items);
   const addItem        = useCart((s) => s.addItem);
   const removeItem     = useCart((s) => s.removeItem);
-  // FIX C: CartState exposes updateQuantity, not updateQty
-  const updateQuantity = useCart((s) => s.updateQuantity);
-  const cartTotal      = useCart((s) => s.total);
-  const cartCount      = useCart((s) => s.itemCount);
+  const updateQuantity = useCart((s) => s.updateQuantity);  // correct method name
+  const cartTotal      = useCart((s) => s.total);           // getter fn, call as cartTotal()
+  const cartCount      = useCart((s) => s.itemCount);       // getter fn, call as cartCount()
 
-  // ── Fetch restaurant ─────────────────────────────────────────────────────────
+  // ── Fetch restaurant ──────────────────────────────────────────────────────
 
-  const {
-    data: restaurant,
-    isLoading: restaurantLoading,
-  } = useQuery<Restaurant>({
+  const { data: restaurant, isLoading: restaurantLoading } = useQuery<Restaurant>({
     queryKey: ["restaurant", restaurantId],
     queryFn: () => apiClient.get<Restaurant>(`/restaurants/${restaurantId}`),
     enabled: !!restaurantId,
@@ -132,73 +391,72 @@ export default function RestaurantDetailPage({ params }: Props) {
 
   // First active branch drives the menu
   const activeBranch =
-    restaurant?.branches?.find((b) => b.is_active) ??
-    restaurant?.branches?.[0];
+    restaurant?.branches?.find((b) => b.is_active) ?? restaurant?.branches?.[0];
 
-  // ── Fetch live status (poll every 30 s) ─────────────────────────────────────
+  // ── Fetch live status (poll every 30 s) ───────────────────────────────────
 
   const { data: liveStatus } = useQuery<LiveStatus>({
     queryKey: ["restaurant", restaurantId, "live-status"],
-    queryFn: () =>
-      apiClient.get<LiveStatus>(`/restaurants/${restaurantId}/live-status`),
+    queryFn: () => apiClient.get<LiveStatus>(`/restaurants/${restaurantId}/live-status`),
     enabled: !!restaurantId,
     refetchInterval: 30_000,
   });
 
-  // ── Fetch menu ───────────────────────────────────────────────────────────────
+  // ── Fetch menu (only when the menu tab is active) ─────────────────────────
 
   const { data: menuData, isLoading: menuLoading } = useQuery<MenuData>({
     queryKey: ["menu", "branch", activeBranch?.id],
-    queryFn: () =>
-      apiClient.get<MenuData>(`/menu/branch/${activeBranch!.id}`),
-    enabled: !!activeBranch?.id,
+    queryFn: () => apiClient.get<MenuData>(`/menu/branch/${activeBranch!.id}`),
+    enabled: !!activeBranch?.id && activeTab === "menu",
   });
 
   const categories = menuData?.categories ?? [];
+  const selectedCat = activeCategoryId ?? categories[0]?.id ?? null;
 
-  // Default the sticky nav to the first category
-  const selectedCat =
-    activeCategoryId ?? categories[0]?.id ?? null;
+  // ── Cart helpers ──────────────────────────────────────────────────────────
 
-  // ── Cart helpers ─────────────────────────────────────────────────────────────
-
-  // FIX D: CartItem key is "menuItemId", not "id"
+  // Returns how many of this item are in the cart (keyed by menuItemId)
   const getItemQty = useCallback(
     (itemId: string) =>
       cartItems.find((ci) => ci.menuItemId === itemId)?.quantity ?? 0,
     [cartItems]
   );
 
+  /**
+   * Called by FoodCard with (itemId, newQuantity).
+   * FoodCard already computes the new qty (current ± 1), so we receive the
+   * target quantity — we do not add a delta here.
+   *
+   * normalizedItem.id === the API item id === CartItem.menuItemId, so using
+   * item.id as the removeItem / updateQuantity key is correct.
+   */
   const handleCartUpdate = useCallback(
     (item: MenuItem, newQty: number) => {
       if (newQty <= 0) {
-        removeItem(item.id);
+        removeItem(item.id);   // removeItem(menuItemId) — item.id is the menuItemId
         return;
       }
-      // FIX D: CartItem key is "menuItemId", not "id"
       const inCart = cartItems.find((ci) => ci.menuItemId === item.id);
       if (!inCart) {
-        // FIX A: CartItem shape is { menuItemId, photoUrl }, not { id, image_url }
         addItem(
           {
             menuItemId: item.id,
             name: item.name,
             price: item.discountedPrice ?? item.price,
-            quantity: 1,
+            quantity: newQty,
             photoUrl: item.photoUrl,
           },
           restaurantId,
           activeBranch?.id ?? null
         );
       } else {
-        // FIX C: method is updateQuantity, not updateQty
         updateQuantity(item.id, newQty);
       }
     },
     [cartItems, addItem, removeItem, updateQuantity, restaurantId, activeBranch]
   );
 
-  // ── Loading state ─────────────────────────────────────────────────────────────
+  // ── Loading state ─────────────────────────────────────────────────────────
 
   if (restaurantLoading) {
     return (
@@ -220,10 +478,11 @@ export default function RestaurantDetailPage({ params }: Props) {
     );
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-gray-50 pb-28">
+
       {/* ── Hero / Banner ── */}
       <div className="relative">
         {restaurant.banner_url ? (
@@ -235,10 +494,7 @@ export default function RestaurantDetailPage({ params }: Props) {
         ) : (
           <div
             className="w-full h-56"
-            style={{
-              background:
-                "linear-gradient(135deg, #1a3c5e 0%, #e8a020 100%)",
-            }}
+            style={{ background: "linear-gradient(135deg, #1a3c5e 0%, #e8a020 100%)" }}
           />
         )}
 
@@ -250,7 +506,7 @@ export default function RestaurantDetailPage({ params }: Props) {
           <ChevronLeft size={20} className="text-gray-700" />
         </Link>
 
-        {/* Live status pill */}
+        {/* Live status pill — CheckCircle2/XCircle from Document version */}
         {liveStatus && (
           <div className="absolute top-4 right-4">
             <span
@@ -261,11 +517,7 @@ export default function RestaurantDetailPage({ params }: Props) {
                   : "bg-red-500/90 text-white"
               )}
             >
-              {liveStatus.is_open ? (
-                <CheckCircle2 size={12} />
-              ) : (
-                <XCircle size={12} />
-              )}
+              {liveStatus.is_open ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
               {liveStatus.is_open ? "Open" : "Closed"}
             </span>
           </div>
@@ -290,9 +542,7 @@ export default function RestaurantDetailPage({ params }: Props) {
           <p className="text-sm text-gray-500 mt-0.5">{restaurant.cuisine_type}</p>
         )}
 
-        {/* Meta row */}
         <div className="flex flex-wrap items-center gap-3 mt-3">
-          {/* Rating */}
           <span className="flex items-center gap-1 text-sm font-semibold text-amber-600">
             <Star size={14} className="fill-amber-400 text-amber-400" />
             {restaurant.avg_rating?.toFixed(1) ?? "—"}
@@ -301,7 +551,6 @@ export default function RestaurantDetailPage({ params }: Props) {
             </span>
           </span>
 
-          {/* Wait time */}
           {liveStatus?.is_open && liveStatus.wait_minutes > 0 && (
             <span className="flex items-center gap-1 text-sm text-gray-500">
               <Clock size={13} />
@@ -309,7 +558,6 @@ export default function RestaurantDetailPage({ params }: Props) {
             </span>
           )}
 
-          {/* Queue */}
           {liveStatus?.is_open && liveStatus.queue_length > 0 && (
             <span className="flex items-center gap-1 text-sm text-gray-500">
               <Users size={13} />
@@ -319,9 +567,7 @@ export default function RestaurantDetailPage({ params }: Props) {
         </div>
 
         {restaurant.description && (
-          <p className="text-sm text-gray-500 mt-2 line-clamp-2">
-            {restaurant.description}
-          </p>
+          <p className="text-sm text-gray-500 mt-2 line-clamp-2">{restaurant.description}</p>
         )}
       </div>
 
@@ -352,6 +598,7 @@ export default function RestaurantDetailPage({ params }: Props) {
 
       {/* ── Tab Content ── */}
       <AnimatePresence mode="wait">
+
         {/* ── MENU TAB ── */}
         {activeTab === "menu" && (
           <motion.div
@@ -370,7 +617,7 @@ export default function RestaurantDetailPage({ params }: Props) {
               </div>
             ) : (
               <>
-                {/* Category horizontal nav */}
+                {/* Category horizontal nav — scrollIntoView from Document version */}
                 <div className="sticky top-[49px] z-20 bg-white border-b border-gray-100 px-4 py-2.5 flex gap-2 overflow-x-auto scrollbar-hide">
                   {categories.map((cat) => (
                     <button
@@ -399,21 +646,28 @@ export default function RestaurantDetailPage({ params }: Props) {
                     <section key={cat.id} id={`cat-${cat.id}`}>
                       <h2 className="text-base font-bold text-gray-900 mb-3">
                         {cat.name}
+                        {/* Item count badge from Document version */}
                         <span className="ml-2 text-xs text-gray-400 font-normal">
                           ({cat.items.length})
                         </span>
                       </h2>
                       <div className="space-y-3">
-                        {cat.items.map((item) => (
-                          <FoodCard
-                            key={item.id}
-                            item={item}
-                            quantity={getItemQty(item.id)}
-                            onAddToCart={(_, newQty) =>
-                              handleCartUpdate(item, newQty)
-                            }
-                          />
-                        ))}
+                        {cat.items.map((rawItem) => {
+                          // normalizeItem() is essential — without it FoodCard
+                          // receives photo_url instead of photoUrl, dietary_tags
+                          // instead of dietaryTags, etc. (all undefined)
+                          const item = normalizeItem(rawItem);
+                          return (
+                            <FoodCard
+                              key={item.id}
+                              item={item}
+                              quantity={getItemQty(item.id)}
+                              onAddToCart={(_itemId, newQty) =>
+                                handleCartUpdate(item, newQty)
+                              }
+                            />
+                          );
+                        })}
                       </div>
                     </section>
                   ))}
@@ -458,12 +712,11 @@ export default function RestaurantDetailPage({ params }: Props) {
                 {branch.opening_time && branch.closing_time && (
                   <div className="flex items-center gap-2 text-sm text-gray-600">
                     <Clock size={15} className="text-gray-400 shrink-0" />
-                    <span>
-                      {branch.opening_time} – {branch.closing_time}
-                    </span>
+                    <span>{branch.opening_time} – {branch.closing_time}</span>
                   </div>
                 )}
 
+                {/* StatusBadge from Document version */}
                 <StatusBadge
                   status={branch.is_active ? "active" : "inactive"}
                   size="sm"
@@ -473,22 +726,18 @@ export default function RestaurantDetailPage({ params }: Props) {
           </motion.div>
         )}
 
-        {/* ── REVIEWS TAB ── */}
+        {/* ── REVIEWS TAB — fully wired, from our version ── */}
         {activeTab === "reviews" && (
           <motion.div
             key="reviews"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            className="px-4 py-12 text-center"
           >
-            <MessageSquare size={40} className="text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 text-sm">Reviews coming soon.</p>
-            <p className="text-xs text-gray-400 mt-1">
-              {restaurant.total_reviews} reviews • avg {restaurant.avg_rating?.toFixed(1)} ★
-            </p>
+            <ReviewsTab restaurantId={restaurantId} />
           </motion.div>
         )}
+
       </AnimatePresence>
 
       {/* ── Cart FAB ── */}
@@ -508,14 +757,14 @@ export default function RestaurantDetailPage({ params }: Props) {
                   </span>
                   <span className="text-sm font-semibold">View Cart</span>
                 </div>
-                <span className="text-sm font-bold">
-                  {formatCurrency(cartTotal())}
-                </span>
+                {/* formatCurrency from Document version — not hardcoded ₹ */}
+                <span className="text-sm font-bold">{formatCurrency(cartTotal())}</span>
               </div>
             </Link>
           </motion.div>
         )}
       </AnimatePresence>
+
     </div>
   );
 }
