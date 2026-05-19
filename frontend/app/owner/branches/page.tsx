@@ -3,28 +3,22 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import {
-  Building2,
-  Plus,
-  Pencil,
-  Eye,
-  ToggleLeft,
-  ToggleRight,
-  MapPin,
-  Phone,
-  Users,
-  ShoppingBag,
-  RefreshCw,
+  Building2, Plus, Pencil, Eye,
+  ToggleLeft, ToggleRight, MapPin, Phone,
+  Users, ShoppingBag, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
+import { handleApiError } from "@/lib/handle-error";
 import PageWrapper from "@/components/layout/PageWrapper";
 import { SkeletonCard } from "@/components/shared/SkeletonCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { cn } from "@/lib/utils";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types (match exact fields from branches.service.ts getAll + getLiveStats) ─
 
-interface Manager {
+interface BranchManager {
   id: string;
   name: string;
 }
@@ -33,24 +27,28 @@ interface Branch {
   id: string;
   name: string;
   address: string;
-  phone: string | null;
+  lat: number | null;
+  lon: number | null;
   is_active: boolean;
-  status: "active" | "closed" | "temporarily_closed";
-  seating_capacity: number | null;
   operating_hours: Record<string, unknown> | null;
-  manager: Manager | null;
+  manager: BranchManager | null;
   created_at: string;
+  updated_at: string;
 }
 
+// Exact shape returned by branches.service.ts → getLiveStats()
 interface LiveStats {
-  tables: Record<string, number>;
+  tables: Record<string, number>;   // { free: N, occupied: N, ... }
   total_tables: number;
   active_orders: number;
   staff_on_duty: number;
   revenue_today: number;
 }
 
-// ── Live Stats Mini-chip ──────────────────────────────────────────────────────
+// toggleStatus body — must match updateBranchStatusSchema
+type BranchStatusInput = "active" | "closed" | "temporarily_closed";
+
+// ── Live stats chip ───────────────────────────────────────────────────────────
 
 function LiveStatChip({ branchId }: { branchId: string }) {
   const { data, isLoading, isError } = useQuery<LiveStats>({
@@ -62,7 +60,7 @@ function LiveStatChip({ branchId }: { branchId: string }) {
 
   if (isLoading) {
     return (
-      <div className="flex gap-3 mt-3 pt-3 border-t border-gray-100">
+      <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
         {[1, 2, 3].map((i) => (
           <div key={i} className="skeleton h-6 w-20 rounded-full" />
         ))}
@@ -70,6 +68,7 @@ function LiveStatChip({ branchId }: { branchId: string }) {
     );
   }
 
+  // Non-critical — just hide if the stats endpoint fails
   if (isError || !data) return null;
 
   const occupied = data.tables?.occupied ?? 0;
@@ -92,35 +91,24 @@ function LiveStatChip({ branchId }: { branchId: string }) {
   );
 }
 
-// ── Branch Card ───────────────────────────────────────────────────────────────
+// ── Branch card ───────────────────────────────────────────────────────────────
 
 function BranchCard({ branch }: { branch: Branch }) {
   const router = useRouter();
   const qc = useQueryClient();
 
   const { mutate: toggleStatus, isPending } = useMutation({
-    mutationFn: (newStatus: "active" | "closed") =>
+    // Body: { status: "active" | "closed" } — matches updateBranchStatusSchema
+    mutationFn: (newStatus: BranchStatusInput) =>
       apiClient.patch(`/branches/${branch.id}/status`, { status: newStatus }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["owner-branches"] });
-      toast.success(
-        branch.is_active ? "Branch deactivated" : "Branch activated"
-      );
+      toast.success(branch.is_active ? "Branch deactivated" : "Branch activated");
     },
-    onError: () => toast.error("Failed to update branch status"),
+    onError: (err) => toast.error(handleApiError(err)),
   });
 
-  const badgeStatus = branch.is_active
-    ? "active"
-    : branch.status === "temporarily_closed"
-      ? "pending"
-      : "inactive";
-
-  const badgeLabel = branch.is_active
-    ? "Active"
-    : branch.status === "temporarily_closed"
-      ? "Temp. Closed"
-      : "Closed";
+  const badgeStatus = branch.is_active ? "active" : "inactive";
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4 hover:shadow-md transition-shadow">
@@ -139,26 +127,18 @@ function BranchCard({ branch }: { branch: Branch }) {
             )}
           </div>
         </div>
-        <StatusBadge status={badgeStatus} size="sm">
-          {badgeLabel}
-        </StatusBadge>
+        <StatusBadge status={badgeStatus} size="sm" />
       </div>
 
       {/* Details */}
-      <div className="space-y-1.5 text-sm text-gray-600">
-        {branch.address && (
+      {branch.address && (
+        <div className="space-y-1.5 text-sm text-gray-600">
           <div className="flex items-start gap-2">
             <MapPin size={13} className="mt-0.5 shrink-0 text-gray-400" />
             <span className="line-clamp-2">{branch.address}</span>
           </div>
-        )}
-        {branch.phone && (
-          <div className="flex items-center gap-2">
-            <Phone size={13} className="shrink-0 text-gray-400" />
-            <span>{branch.phone}</span>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Live stats */}
       <LiveStatChip branchId={branch.id} />
@@ -167,17 +147,15 @@ function BranchCard({ branch }: { branch: Branch }) {
       <div className="flex flex-wrap gap-2 pt-1">
         <button
           onClick={() => router.push(`/owner/branches/${branch.id}`)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#1A3C5E] border border-[#1A3C5E]/30 rounded-lg hover:bg-[#1A3C5E]/5 transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#1A3C5E] border border-[#1A3C5E]/30 rounded-lg hover:bg-[#1A3C5E]/5 transition-colors"
         >
-          <Eye size={13} />
-          View
+          <Eye size={13} /> View
         </button>
         <button
           onClick={() => router.push(`/owner/branches/${branch.id}/edit`)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
         >
-          <Pencil size={13} />
-          Edit
+          <Pencil size={13} /> Edit
         </button>
         <button
           onClick={() =>
@@ -185,18 +163,16 @@ function BranchCard({ branch }: { branch: Branch }) {
           }
           disabled={isPending}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition disabled:opacity-50",
+            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50",
             branch.is_active
               ? "text-red-600 border border-red-200 hover:bg-red-50"
               : "text-green-700 border border-green-200 hover:bg-green-50"
           )}
         >
-          {branch.is_active ? (
-            <ToggleLeft size={13} />
-          ) : (
-            <ToggleRight size={13} />
-          )}
-          {branch.is_active ? "Deactivate" : "Activate"}
+          {branch.is_active
+            ? <><ToggleLeft size={13} /> Deactivate</>
+            : <><ToggleRight size={13} /> Activate</>
+          }
         </button>
       </div>
     </div>
@@ -207,7 +183,6 @@ function BranchCard({ branch }: { branch: Branch }) {
 
 export default function BranchesPage() {
   const router = useRouter();
-  const qc = useQueryClient();
 
   const {
     data: branches,
@@ -230,20 +205,16 @@ export default function BranchesPage() {
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="p-2.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition disabled:opacity-50"
+            className="p-2.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
             aria-label="Refresh branches"
           >
-            <RefreshCw
-              size={15}
-              className={cn(isFetching && "animate-spin")}
-            />
+            <RefreshCw size={15} className={cn(isFetching && "animate-spin")} />
           </button>
           <button
             onClick={() => router.push("/owner/branches/new")}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#1A3C5E] text-white text-sm font-semibold rounded-lg hover:bg-[#15304d] transition"
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#1A3C5E] text-white text-sm font-semibold rounded-lg hover:bg-[#15304d] transition-colors"
           >
-            <Plus size={15} />
-            Add Branch
+            <Plus size={15} /> Add Branch
           </button>
         </div>
       }
@@ -258,10 +229,10 @@ export default function BranchesPage() {
       {/* Error */}
       {isError && !isLoading && (
         <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
-          <p className="text-gray-500 text-sm">Failed to load branches.</p>
+          <p className="text-sm text-gray-500">Failed to load branches.</p>
           <button
             onClick={() => refetch()}
-            className="px-4 py-2 bg-[#1A3C5E] text-white text-sm font-semibold rounded-lg hover:bg-[#15304d] transition"
+            className="px-4 py-2 bg-[#1A3C5E] text-white text-sm font-semibold rounded-lg hover:bg-[#15304d] transition-colors"
           >
             Retry
           </button>
@@ -270,16 +241,15 @@ export default function BranchesPage() {
 
       {/* Empty */}
       {!isLoading && !isError && branches?.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
-          <Building2 size={40} className="text-gray-300" />
-          <p className="text-gray-500 text-sm">No branches yet.</p>
-          <button
-            onClick={() => router.push("/owner/branches/new")}
-            className="px-4 py-2 bg-[#1A3C5E] text-white text-sm font-semibold rounded-lg hover:bg-[#15304d] transition"
-          >
-            Create your first branch
-          </button>
-        </div>
+        <EmptyState
+          icon={<Building2 size={32} />}
+          title="No branches yet"
+          message="Add your first branch to start serving customers."
+          action={{
+            label: "Create your first branch",
+            onClick: () => router.push("/owner/branches/new"),
+          }}
+        />
       )}
 
       {/* Grid */}

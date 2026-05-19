@@ -1,396 +1,327 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, ArrowLeft, Trash2 } from "lucide-react";
-import { apiClient } from "@/lib/api-client";
+import { motion } from "framer-motion";
+import PageWrapper from "@/components/layout/PageWrapper";
+import { QueryBoundary } from "@/components/shared/QueryBoundary";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { DIETARY_TAGS } from "@/lib/constants";
-import { cn } from "@/lib/utils";
+import { apiClient } from "@/lib/api-client";
+import { handleApiError } from "@/lib/handle-error";
+import { formatCurrency } from "@/lib/utils";
+import type { MenuItem, MenuCategory, PublicMenu } from "@/types/api";
+import {
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  ChefHat,
+  Loader2,
+} from "lucide-react";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+type StatusFilter = "all" | "available" | "sold_out" | "hidden";
+type MenuCategoryResponse = MenuCategory & { menu_items?: MenuItem[] };
+type MenuResponse = PublicMenu | MenuCategoryResponse[];
 
-interface MenuItemDetail {
-  id: string;
-  name: string;
-  description: string | null;
-  price: number;
-  image_url: string | null;
-  is_available: boolean;
-  dietary_tags: string[];
-  prep_time_minutes: number | null;
-  category_id: string;
-}
-
-interface Category {
-  id: string;
-  name: string;
-  sort_order: number;
-}
-
-// ── Schema ─────────────────────────────────────────────────────────────────────
-
-const schema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters"),
-  description: z.string().optional(),
-  price: z.coerce.number().min(0, "Price must be ≥ 0"),
-  category_id: z.string().min(1, "Please select a category"),
-  dietary_tags: z.array(z.string()).default([]),
-  prep_time_minutes: z.coerce.number().int().min(0).optional(),
-  image_url: z.string().url("Enter a valid URL").optional().or(z.literal("")),
-  is_available: z.boolean().default(true),
-});
-
-type FormValues = z.infer<typeof schema>;
-
-// ── Page ───────────────────────────────────────────────────────────────────────
-
-export default function EditMenuItemPage() {
+export default function MenuItemsPage() {
   const router = useRouter();
-  const params = useParams();
-  const itemId = params.itemId as string;
-  const { branchId } = useAuth();
   const qc = useQueryClient();
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { branchId } = useAuth();
 
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Fetch full menu (categories + items together)
   const {
-    register,
-    handleSubmit,
-    setValue,
-    watch,
-    reset,
-    formState: { errors, isSubmitting, isDirty },
-  } = useForm<FormValues>({
-    resolver: zodResolver(schema),
-  });
-
-  const watchedTags = watch("dietary_tags") ?? [];
-  const watchedImageUrl = watch("image_url");
-
-  // Fetch item details
-  const {
-    data: item,
+    data: menu,
     isLoading,
     isError,
-  } = useQuery<MenuItemDetail>({
-    queryKey: ["menu", "item", itemId],
-    queryFn: () => apiClient.get<MenuItemDetail>(`/menu/items/${itemId}`),
-    enabled: !!itemId,
-  });
-
-  // Fetch categories for the branch
-  const { data: categories = [] } = useQuery<Category[]>({
-    queryKey: ["menu", "categories", branchId],
-    queryFn: () =>
-      apiClient.get<Category[]>(`/menu/branch/${branchId}/categories`),
+    error,
+    refetch,
+  } = useQuery<MenuResponse>({
+    queryKey: ["owner", "menu", branchId],
+    queryFn: () => apiClient.get<MenuResponse>(`/menu/branch/${branchId}`),
     enabled: !!branchId,
   });
 
-  // Pre-fill form once item loads
-  useEffect(() => {
-    if (!item) return;
-    reset({
-      name: item.name,
-      description: item.description ?? "",
-      price: item.price,
-      category_id: item.category_id,
-      dietary_tags: item.dietary_tags ?? [],
-      prep_time_minutes: item.prep_time_minutes ?? undefined,
-      image_url: item.image_url ?? "",
-      is_available: item.is_available,
-    });
-  }, [item, reset]);
+  const categories: MenuCategoryResponse[] = Array.isArray(menu)
+    ? menu
+    : menu?.categories ?? [];
 
-  // Update item
-  const { mutate: updateItem } = useMutation({
-    mutationFn: (data: FormValues) =>
-      apiClient.patch(`/menu/items/${itemId}`, {
-        name: data.name,
-        description: data.description || undefined,
-        price: data.price,
-        category_id: data.category_id,
-        dietary_tags: data.dietary_tags,
-        prep_time_minutes: data.prep_time_minutes || undefined,
-        image_url: data.image_url || undefined,
-        is_available: data.is_available,
-      }),
+  const allItems: MenuItem[] = categories.flatMap(
+    (c) => c.items ?? c.menu_items ?? []
+  );
+
+  // Client-side filtering
+  const filtered = allItems.filter((item) => {
+    const matchSearch =
+      search.trim() === "" ||
+      item.name.toLowerCase().includes(search.toLowerCase());
+    const matchCat =
+      categoryFilter === "all" || item.category_id === categoryFilter;
+    const matchStatus = statusFilter === "all" || item.status === statusFilter;
+    return matchSearch && matchCat && matchStatus;
+  });
+
+  // Toggle availability
+  const toggleAvailability = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: MenuItem["status"] }) =>
+      apiClient.patch(`/menu/items/${id}/status`, { status }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["menu", "categories", branchId] });
-      qc.invalidateQueries({ queryKey: ["menu", "item", itemId] });
-      toast.success("Item updated");
-      router.push("/owner/menu/items");
+      toast.success("Item status updated.");
+      qc.invalidateQueries({ queryKey: ["owner", "menu", branchId] });
     },
-    onError: () => toast.error("Failed to update item"),
+    onError: (err) => toast.error(handleApiError(err)),
   });
 
   // Delete item
-  const { mutate: deleteItem, isPending: isDeleting } = useMutation({
-    mutationFn: () => apiClient.delete(`/menu/items/${itemId}`),
+  const deleteItem = useMutation({
+    mutationFn: (id: string) => apiClient.delete(`/menu/items/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["menu", "categories", branchId] });
-      toast.success("Item deleted");
-      router.push("/owner/menu/items");
+      toast.success("Item deleted.");
+      setDeletingId(null);
+      qc.invalidateQueries({ queryKey: ["owner", "menu", branchId] });
     },
-    onError: () => toast.error("Failed to delete item"),
+    onError: (err) => {
+      toast.error(handleApiError(err));
+      setDeletingId(null);
+    },
   });
 
-  const toggleTag = (tag: string) => {
-    setValue(
-      "dietary_tags",
-      watchedTags.includes(tag)
-        ? watchedTags.filter((t) => t !== tag)
-        : [...watchedTags, tag],
-      { shouldDirty: true }
-    );
+  const handleDelete = (item: MenuItem) => {
+    if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return;
+    setDeletingId(item.id);
+    deleteItem.mutate(item.id);
   };
 
-  // ── Loading / error states ─────────────────────────────────────────────────
-
-  if (isLoading) {
-    return (
-      <div className="max-w-2xl mx-auto px-4 py-10 flex items-center justify-center gap-2 text-gray-400">
-        <Loader2 size={18} className="animate-spin" />
-        <span className="text-sm">Loading item…</span>
-      </div>
-    );
-  }
-
-  if (isError || !item) {
-    return (
-      <div className="max-w-2xl mx-auto px-4 py-10 text-center">
-        <p className="text-sm text-red-500">Failed to load item.</p>
-        <button
-          onClick={() => router.back()}
-          className="mt-3 text-sm text-[#1A3C5E] underline"
-        >
-          Go back
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.back()}
-            className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 transition"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Edit Item</h1>
-            <p className="text-sm text-gray-400 truncate max-w-[240px]">
-              {item.name}
-            </p>
-          </div>
+    <PageWrapper
+      title="Menu Items"
+      subtitle="Manage all dishes across your menu"
+      action={
+        <Button
+          onClick={() => router.push("/owner/menu/items/new")}
+          className="bg-[#1A3C5E] hover:bg-[#15304d] text-white"
+        >
+          <Plus size={16} className="mr-2" />
+          Add Item
+        </Button>
+      }
+    >
+      {/* Filters bar */}
+      <div className="flex flex-wrap gap-3">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px]">
+          <Search
+            size={16}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            type="text"
+            placeholder="Search items..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-xl focus:border-[#1A3C5E] focus:ring-2 focus:ring-[#1A3C5E]/20 outline-none"
+          />
         </div>
 
-        <button
-          onClick={() => setShowDeleteDialog(true)}
-          disabled={isDeleting}
-          className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-500 border border-red-100 rounded-xl hover:bg-red-50 transition"
+        {/* Category filter */}
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 outline-none cursor-pointer"
         >
-          {isDeleting ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Trash2 size={14} />
-          )}
-          Delete
-        </button>
+          <option value="all">All Categories</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+
+        {/* Status filter */}
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white text-gray-700 outline-none cursor-pointer"
+        >
+          <option value="all">All Statuses</option>
+          <option value="available">Available</option>
+          <option value="sold_out">Sold Out</option>
+          <option value="hidden">Hidden</option>
+        </select>
       </div>
 
-      <form
-        onSubmit={handleSubmit((d) => updateItem(d))}
-        className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-5"
+      {/* Item count */}
+      {!isLoading && !isError && (
+        <p className="text-sm text-gray-500">
+          {filtered.length} item{filtered.length !== 1 ? "s" : ""}
+          {search || categoryFilter !== "all" || statusFilter !== "all"
+            ? " (filtered)"
+            : ""}
+        </p>
+      )}
+
+      {/* Content */}
+      <QueryBoundary
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        refetch={refetch}
+        loadingMessage="Loading menu..."
       >
-        {/* Name */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-            Item Name <span className="text-red-500">*</span>
-          </label>
-          <input
-            {...register("name")}
-            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
+        {filtered.length === 0 ? (
+          <EmptyState
+            variant={search ? "search" : "menu"}
+            title={search ? "No items found" : "No menu items yet"}
+            message={
+              search
+                ? `Nothing matched "${search}"`
+                : "Add your first dish to get started."
+            }
+            action={
+              !search
+                ? {
+                    label: "Add Item",
+                    onClick: () => router.push("/owner/menu/items/new"),
+                  }
+                : undefined
+            }
           />
-          {errors.name && (
-            <p className="text-xs text-red-500 mt-1">{errors.name.message}</p>
-          )}
-        </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filtered.map((item, i) => {
+              const category = categories.find((c) => c.id === item.category_id);
+              const isAvailable = item.status === "available";
+              const tags = item.dietary_tags ?? [];
 
-        {/* Description */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-            Description
-          </label>
-          <textarea
-            {...register("description")}
-            rows={3}
-            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
-          />
-        </div>
-
-        {/* Price + Prep time */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-              Price (₹) <span className="text-red-500">*</span>
-            </label>
-            <input
-              {...register("price")}
-              type="number"
-              min="0"
-              step="0.01"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
-            />
-            {errors.price && (
-              <p className="text-xs text-red-500 mt-1">{errors.price.message}</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-              Prep Time (min)
-            </label>
-            <input
-              {...register("prep_time_minutes")}
-              type="number"
-              min="0"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
-            />
-          </div>
-        </div>
-
-        {/* Category */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-            Category <span className="text-red-500">*</span>
-          </label>
-          <select
-            {...register("category_id")}
-            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20 bg-white"
-          >
-            <option value="">Select a category…</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.name}
-              </option>
-            ))}
-          </select>
-          {errors.category_id && (
-            <p className="text-xs text-red-500 mt-1">
-              {errors.category_id.message}
-            </p>
-          )}
-        </div>
-
-        {/* Dietary tags */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-2">
-            Dietary Tags
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {DIETARY_TAGS.map((tag) => {
-              const active = watchedTags.includes(tag);
               return (
-                <button
-                  type="button"
-                  key={tag}
-                  onClick={() => toggleTag(tag)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-medium border transition",
-                    active
-                      ? "bg-green-100 border-green-400 text-green-700"
-                      : "border-gray-200 text-gray-500 hover:border-gray-300"
-                  )}
+                <motion.div
+                  key={item.id}
+                  layout
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: Math.min(i * 0.04, 0.3) }}
                 >
-                  {tag.replace("_", " ")}
-                </button>
+                  <Card className="p-4 flex gap-4 hover:shadow-md transition-shadow">
+                    {/* Thumbnail */}
+                    {item.photo_url ? (
+                      <img
+                        src={item.photo_url}
+                        alt={item.name}
+                        className="w-16 h-16 rounded-xl object-cover shrink-0 bg-gray-100"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+                        <ChefHat size={20} className="text-gray-300" />
+                      </div>
+                    )}
+
+                    {/* Details */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="font-medium text-gray-900 truncate leading-snug">
+                          {item.name}
+                        </p>
+                        <StatusBadge status={item.status} size="sm" />
+                      </div>
+
+                      {category && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {category.name}
+                        </p>
+                      )}
+
+                      <div className="flex items-center justify-between mt-2">
+                        <p className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(item.price)}
+                        </p>
+                        {tags.length > 0 && (
+                          <div className="flex gap-1">
+                            {tags.slice(0, 2).map((tag) => (
+                              <span
+                                key={tag}
+                                className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-700 font-medium"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action row */}
+                      <div className="flex items-center gap-1 mt-3">
+                        {/* Edit */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2 text-gray-500 hover:text-[#1A3C5E]"
+                          onClick={() =>
+                            router.push(`/owner/menu/items/${item.id}/edit`)
+                          }
+                        >
+                          <Pencil size={14} />
+                        </Button>
+
+                        {/* Toggle availability */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-8 px-2 ${
+                            isAvailable
+                              ? "text-green-600 hover:bg-green-50"
+                              : "text-gray-400 hover:bg-gray-50"
+                          }`}
+                          disabled={toggleAvailability.isPending}
+                          onClick={() =>
+                            toggleAvailability.mutate({
+                              id: item.id,
+                              status: isAvailable ? "sold_out" : "available",
+                            })
+                          }
+                          title={isAvailable ? "Mark sold out" : "Mark available"}
+                        >
+                          {isAvailable ? (
+                            <ToggleRight size={16} />
+                          ) : (
+                            <ToggleLeft size={16} />
+                          )}
+                        </Button>
+
+                        {/* Delete */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2 text-red-400 hover:text-red-600 hover:bg-red-50"
+                          disabled={deletingId === item.id}
+                          onClick={() => handleDelete(item)}
+                        >
+                          {deletingId === item.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                </motion.div>
               );
             })}
           </div>
-        </div>
-
-        {/* Image URL */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-            Image URL
-          </label>
-          <input
-            {...register("image_url")}
-            type="url"
-            placeholder="https://…"
-            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
-          />
-          {errors.image_url && (
-            <p className="text-xs text-red-500 mt-1">
-              {errors.image_url.message}
-            </p>
-          )}
-          {watchedImageUrl && !errors.image_url && (
-            <img
-              src={watchedImageUrl}
-              alt="Preview"
-              className="mt-2 h-24 w-24 object-cover rounded-xl border border-gray-200"
-              onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
-            />
-          )}
-        </div>
-
-        {/* Availability */}
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="is_available"
-            {...register("is_available")}
-            className="rounded"
-          />
-          <label htmlFor="is_available" className="text-sm text-gray-700 cursor-pointer">
-            Available for ordering
-          </label>
-        </div>
-
-        {/* Actions */}
-        <div className="flex gap-3 pt-2">
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting || !isDirty}
-            className="flex-1 py-3 rounded-xl bg-[#1A3C5E] text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60 hover:bg-[#15304d] transition"
-          >
-            {isSubmitting && <Loader2 size={15} className="animate-spin" />}
-            Save Changes
-          </button>
-        </div>
-      </form>
-
-      {/* Delete confirmation */}
-      <ConfirmDialog
-        isOpen={showDeleteDialog}
-        title="Delete Item?"
-        message={`"${item.name}" will be permanently removed from your menu. This cannot be undone.`}
-        confirmLabel="Delete"
-        variant="danger"
-        onCancel={() => setShowDeleteDialog(false)}
-        onConfirm={() => {
-          setShowDeleteDialog(false);
-          deleteItem();
-        }}
-      />
-    </div>
+        )}
+      </QueryBoundary>
+    </PageWrapper>
   );
 }
