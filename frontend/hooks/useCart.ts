@@ -1,77 +1,178 @@
 "use client";
+
+/**
+ * useCart — Zustand-persisted shopping cart
+ *
+ * Fixes vs. old implementation
+ * ──────────────────────────────
+ * 1. CartItem.menuItemId → id  (matches spec / API)
+ * 2. CartItem.photoUrl   → image_url  (matches spec)
+ * 3. persist key "dineluxe-cart" → "dineluxe_cart"  (spec)
+ * 4. updateQuantity kept + updateQty alias added  (spec surface)
+ * 5. addItem now takes (item, restaurantId?, branchId?) — restaurantId /
+ *    branchId are optional so call-sites that don't have them still compile.
+ */
+
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
- 
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
 export interface CartItem {
-  menuItemId: string;
+  /** Primary key — matches menu_item.id from the backend. */
+  id: string;
   name: string;
   price: number;
   quantity: number;
+  image_url?: string | null;
   notes?: string;
   addons?: { name: string; extraPrice: number }[];
-  photoUrl?: string;
 }
- 
-interface CartState {
-  items:        CartItem[];
-  restaurantId: string | null;
-  branchId:     string | null;
-  tableId:      string | null;
-  addItem:       (item: CartItem, restaurantId: string | null, branchId: string | null) => void;
 
-  removeItem:    (menuItemId: string) => void;
-  updateQuantity:(menuItemId: string, quantity: number) => void;
-  updateNotes:   (menuItemId: string, notes: string) => void;
-  setTable:      (tableId: string) => void;
-  clearCart:     () => void;
-  total:         () => number;
-  itemCount:     () => number;
+interface CartState {
+  // ── State ────────────────────────────────────────────────────────────────────
+  items: CartItem[];
+  restaurantId: string | null;
+  branchId: string | null;
+  tableId: string | null;
+
+  // ── Mutators ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Add an item to the cart.
+   * • If the restaurantId changes, the existing cart is cleared first.
+   * • If the item already exists, its quantity is incremented.
+   */
+  addItem: (
+    item: CartItem,
+    restaurantId?: string | null,
+    branchId?: string | null
+  ) => void;
+
+  /** Remove a line by item id. */
+  removeItem: (id: string) => void;
+
+  /**
+   * Set the exact quantity for an item.
+   * Passing qty ≤ 0 removes the item.
+   */
+  updateQty: (id: string, qty: number) => void;
+
+  /** Backward-compat alias for updateQty. */
+  updateQuantity: (id: string, quantity: number) => void;
+
+  /** Update per-item notes (special requests). */
+  updateNotes: (id: string, notes: string) => void;
+
+  /** Attach a table to the in-progress order. */
+  setTable: (tableId: string) => void;
+
+  /** Wipe the entire cart. */
+  clearCart: () => void;
+
+  // ── Derived (called as functions because zustand can't persist computed values) ──
+
+  /** Grand total including addons. */
+  total: () => number;
+
+  /** Total number of individual items (sum of quantities). */
+  itemCount: () => number;
 }
- 
+
+// ── Store ──────────────────────────────────────────────────────────────────────
+
 export const useCart = create<CartState>()(
   persist(
     (set, get) => ({
-      items: [], restaurantId: null, branchId: null, tableId: null,
- 
-      addItem: (newItem, restaurantId, branchId) => {
-        const { items, restaurantId: cur } = get();
-        if (cur && cur !== restaurantId) {
-          set({ items: [newItem], restaurantId, branchId });
+      items: [],
+      restaurantId: null,
+      branchId: null,
+      tableId: null,
+
+      // ── addItem ─────────────────────────────────────────────────────────────
+
+      addItem: (newItem, restaurantId = null, branchId = null) => {
+        const { items, restaurantId: currentRestaurantId } = get();
+
+        // Different restaurant → clear and start fresh
+        if (
+          restaurantId &&
+          currentRestaurantId &&
+          currentRestaurantId !== restaurantId
+        ) {
+          set({ items: [{ ...newItem, quantity: newItem.quantity || 1 }], restaurantId, branchId });
           return;
         }
-        const existing = items.find((i) => i.menuItemId === newItem.menuItemId);
+
+        const existing = items.find((i) => i.id === newItem.id);
         if (existing) {
-          set({ items: items.map((i) => i.menuItemId === newItem.menuItemId
-            ? { ...i, quantity: i.quantity + newItem.quantity } : i) });
+          set({
+            items: items.map((i) =>
+              i.id === newItem.id
+                ? { ...i, quantity: i.quantity + (newItem.quantity || 1) }
+                : i
+            ),
+          });
         } else {
-          set({ items: [...items, newItem], restaurantId, branchId });
+          set({
+            items: [...items, { ...newItem, quantity: newItem.quantity || 1 }],
+            restaurantId: restaurantId ?? currentRestaurantId,
+            branchId: branchId ?? get().branchId,
+          });
         }
       },
- 
-      removeItem: (menuItemId) =>
-        set((s) => ({ items: s.items.filter((i) => i.menuItemId !== menuItemId) })),
- 
-      updateQuantity: (menuItemId, quantity) =>
+
+      // ── removeItem ──────────────────────────────────────────────────────────
+
+      removeItem: (id) =>
+        set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
+
+      // ── updateQty ───────────────────────────────────────────────────────────
+
+      updateQty: (id, qty) =>
         set((s) => ({
-          items: quantity <= 0
-            ? s.items.filter((i) => i.menuItemId !== menuItemId)
-            : s.items.map((i) => i.menuItemId === menuItemId ? { ...i, quantity } : i),
+          items:
+            qty <= 0
+              ? s.items.filter((i) => i.id !== id)
+              : s.items.map((i) => (i.id === id ? { ...i, quantity: qty } : i)),
         })),
- 
-      updateNotes: (menuItemId, notes) =>
-        set((s) => ({ items: s.items.map((i) => i.menuItemId === menuItemId ? { ...i, notes } : i) })),
- 
+
+      // Backward-compat alias
+      updateQuantity: (id, quantity) => get().updateQty(id, quantity),
+
+      // ── updateNotes ─────────────────────────────────────────────────────────
+
+      updateNotes: (id, notes) =>
+        set((s) => ({
+          items: s.items.map((i) => (i.id === id ? { ...i, notes } : i)),
+        })),
+
+      // ── setTable ────────────────────────────────────────────────────────────
+
       setTable: (tableId) => set({ tableId }),
- 
-      clearCart: () => set({ items: [], restaurantId: null, branchId: null, tableId: null }),
- 
-      total: () => get().items.reduce((sum, item) => {
-        const addonsTotal = item.addons?.reduce((a, b) => a + b.extraPrice, 0) ?? 0;
-        return sum + (item.price + addonsTotal) * item.quantity;
-      }, 0),
- 
-      itemCount: () => get().items.reduce((sum, i) => sum + i.quantity, 0),
+
+      // ── clearCart ───────────────────────────────────────────────────────────
+
+      clearCart: () =>
+        set({ items: [], restaurantId: null, branchId: null, tableId: null }),
+
+      // ── total ───────────────────────────────────────────────────────────────
+
+      total: () =>
+        get().items.reduce((sum, item) => {
+          const addonsTotal =
+            item.addons?.reduce((a, b) => a + b.extraPrice, 0) ?? 0;
+          return sum + (item.price + addonsTotal) * item.quantity;
+        }, 0),
+
+      // ── itemCount ───────────────────────────────────────────────────────────
+
+      itemCount: () =>
+        get().items.reduce((sum, i) => sum + i.quantity, 0),
     }),
-    { name: "dineluxe-cart" }
+    {
+      // ← spec requires underscore key "dineluxe_cart"
+      name: "dineluxe_cart",
+    }
   )
 );
