@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import { useQuery } from "@tanstack/react-query"
 import { useAuth } from "@/hooks/useAuth"
-import { cn } from "@/lib/utils"
-import { toast } from "sonner"
 import { apiClient } from "@/lib/api-client"
-import { timeAgo } from "@/lib/utils"
+import { NotificationPanel, type Notification } from "@/components/notifications/NotificationPanel"
+import { cn } from "@/lib/utils"
 import {
   Bell,
   Search,
@@ -17,57 +17,50 @@ import {
   Menu,
 } from "lucide-react"
 
+// ── Props ─────────────────────────────────────────────────────────────────────
+
 interface TopBarProps {
   onMenuClick?: () => void
   className?: string
 }
 
-interface NotificationItem {
-  id: string
-  title: string
-  body: string
-  created_at: string
-  is_read: boolean
-}
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export function TopBar({ onMenuClick, className }: TopBarProps) {
+  const { user, role, signOut } = useAuth()
+  const bellRef = useRef<HTMLButtonElement>(null)
+
   const [showNotifications, setShowNotifications] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
-  const { user, role, signOut } = useAuth()
-  const [notifications, setNotifications] = useState<NotificationItem[]>([])
-  const [loadingNotifications, setLoadingNotifications] = useState(false)
+
+  // ── Notification badge count ───────────────────────────────────────────────
+  // Polls every 60 s so the unread badge stays current without a WebSocket.
+  // This query is separate from the one inside NotificationPanel so the badge
+  // always reflects the latest count even when the panel is closed.
+  const { data: notifications = [] } = useQuery<Notification[]>({
+    queryKey: ["notifications"],
+    queryFn: () => apiClient.get<Notification[]>("/notifications"),
+    refetchInterval: 60_000,
+    enabled: !!user,
+  })
+
+  const unreadCount = notifications.filter((n) => !n.is_read).length
+
+  // ── Logout ────────────────────────────────────────────────────────────────
 
   const handleLogout = async () => {
     await signOut()
     window.location.assign("/auth/login")
   }
 
-  useEffect(() => {
-    if (!user) return
-
-    const loadNotifications = async () => {
-      try {
-        setLoadingNotifications(true)
-        const result = await apiClient.get<{ data: NotificationItem[]; count: number }>("/notifications")
-        setNotifications(result.data ?? [])
-      } catch {
-        // Ignore notification errors for now
-      } finally {
-        setLoadingNotifications(false)
-      }
-    }
-
-    loadNotifications()
-  }, [user])
-
-  const unreadCount = notifications.filter((n) => !n.is_read).length
-
   return (
-    <header className={cn(
-      "h-16 bg-white border-b border-gray-100 flex items-center justify-between px-4 lg:px-6",
-      className
-    )}>
-      {/* Left side */}
+    <header
+      className={cn(
+        "h-16 bg-white border-b border-gray-100 flex items-center justify-between px-4 lg:px-6",
+        className
+      )}
+    >
+      {/* ── Left ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-4">
         <motion.button
           whileTap={{ scale: 0.95 }}
@@ -88,103 +81,58 @@ export function TopBar({ onMenuClick, className }: TopBarProps) {
         </div>
       </div>
 
-      {/* Right side */}
+      {/* ── Right ────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2">
-        {/* Notifications */}
+
+        {/* ── Bell + NotificationPanel ─────────────────────────────────── */}
         <div className="relative">
           <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setShowNotifications(!showNotifications)}
-            className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <Bell size={20} className="text-gray-600" />
-            {unreadCount > 0 && (
-              <motion.span
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center"
-              >
-                {unreadCount}
-              </motion.span>
+            ref={bellRef}
+            whileTap={{ scale: 0.92 }}
+            onClick={() => {
+              setShowNotifications((v) => !v)
+              if (showUserMenu) setShowUserMenu(false)
+            }}
+            className={cn(
+              "relative p-2 rounded-lg transition-colors",
+              showNotifications
+                ? "bg-brand-primary/10 text-brand-primary"
+                : "hover:bg-gray-100 text-gray-600"
             )}
+            aria-label="Toggle notifications"
+          >
+            <Bell size={20} />
+            <AnimatePresence>
+              {unreadCount > 0 && (
+                <motion.span
+                  key="badge"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0 }}
+                  className="absolute top-1 right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5"
+                >
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </motion.span>
+              )}
+            </AnimatePresence>
           </motion.button>
 
-          <AnimatePresence>
-            {showNotifications && (
-              <motion.div
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
-                className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50"
-              >
-                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                  <h3 className="font-semibold text-sm">Notifications</h3>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await apiClient.patch("/notifications/read-all", {})
-                        setNotifications((items) => items.map((item) => ({ ...item, is_read: true })))
-                        toast.success("Notifications marked as read")
-                      } catch {
-                        toast.error("Could not update notifications")
-                      }
-                    }}
-                    className="text-xs text-brand-primary hover:underline"
-                  >
-                    Mark all read
-                  </button>
-                </div>
-                <div className="max-h-64 overflow-y-auto">
-                  {!loadingNotifications && notifications.length === 0 && (
-                    <div className="px-4 py-6 text-center text-xs text-gray-400">
-                      No notifications yet
-                    </div>
-                  )}
-                  {notifications.map((notification) => (
-                    <motion.button
-                      key={notification.id}
-                      whileHover={{ backgroundColor: "#F9FAFB" }}
-                      onClick={async () => {
-                        try {
-                          await apiClient.patch(`/notifications/${notification.id}/read`, {})
-                          setNotifications((items) =>
-                            items.map((item) => item.id === notification.id ? { ...item, is_read: true } : item)
-                          )
-                          toast.info(notification.title)
-                        } catch {
-                          toast.error("Could not update notification")
-                        }
-                      }}
-                      className={cn(
-                        "w-full text-left px-4 py-3 border-b border-gray-50 cursor-pointer",
-                        !notification.is_read && "bg-blue-50/50"
-                      )}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className={cn(
-                          "w-2 h-2 rounded-full mt-1.5 shrink-0",
-                          notification.is_read ? "bg-gray-300" : "bg-brand-primary"
-                        )} />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{notification.title}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">{notification.body}</p>
-                          <p className="text-xs text-gray-400 mt-1">{timeAgo(notification.created_at)}</p>
-                        </div>
-                      </div>
-                    </motion.button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* NotificationPanel is positioned relative to this wrapper */}
+          <NotificationPanel
+            isOpen={showNotifications}
+            onClose={() => setShowNotifications(false)}
+            anchorRef={bellRef}
+          />
         </div>
 
-        {/* User menu */}
+        {/* ── User menu ─────────────────────────────────────────────────── */}
         <div className="relative">
           <motion.button
             whileTap={{ scale: 0.95 }}
-            onClick={() => setShowUserMenu(!showUserMenu)}
+            onClick={() => {
+              setShowUserMenu((v) => !v)
+              if (showNotifications) setShowNotifications(false)
+            }}
             className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <div className="w-8 h-8 bg-brand-primary/10 rounded-full flex items-center justify-center">
@@ -199,9 +147,10 @@ export function TopBar({ onMenuClick, className }: TopBarProps) {
                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
+                transition={{ duration: 0.18 }}
                 className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50"
               >
+                {/* User info */}
                 <div className="px-4 py-3 border-b border-gray-100">
                   <p className="text-sm font-medium text-gray-900">
                     {user?.name || user?.email || "Team member"}
@@ -210,6 +159,8 @@ export function TopBar({ onMenuClick, className }: TopBarProps) {
                     {role?.replace("_", " ") || "Signed in"}
                   </p>
                 </div>
+
+                {/* Actions */}
                 <div className="py-1">
                   <button
                     onClick={() => {
@@ -233,6 +184,7 @@ export function TopBar({ onMenuClick, className }: TopBarProps) {
             )}
           </AnimatePresence>
         </div>
+
       </div>
     </header>
   )
