@@ -111,12 +111,13 @@ export default function RestaurantDetailPage({ params }: Props) {
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
   // Cart state
-  const cartItems   = useCart((s) => s.items);
-  const addItem     = useCart((s) => s.addItem);
-  const removeItem  = useCart((s) => s.removeItem);
-  const updateQty   = useCart((s) => s.updateQty);
-  const cartTotal   = useCart((s) => s.total);
-  const cartCount   = useCart((s) => s.itemCount);
+  const cartItems      = useCart((s) => s.items);
+  const addItem        = useCart((s) => s.addItem);
+  const removeItem     = useCart((s) => s.removeItem);
+  // FIX C: CartState exposes updateQuantity, not updateQty
+  const updateQuantity = useCart((s) => s.updateQuantity);
+  const cartTotal      = useCart((s) => s.total);
+  const cartCount      = useCart((s) => s.itemCount);
 
   // ── Fetch restaurant ─────────────────────────────────────────────────────────
 
@@ -161,9 +162,10 @@ export default function RestaurantDetailPage({ params }: Props) {
 
   // ── Cart helpers ─────────────────────────────────────────────────────────────
 
+  // FIX D: CartItem key is "menuItemId", not "id"
   const getItemQty = useCallback(
     (itemId: string) =>
-      cartItems.find((ci) => ci.id === itemId)?.quantity ?? 0,
+      cartItems.find((ci) => ci.menuItemId === itemId)?.quantity ?? 0,
     [cartItems]
   );
 
@@ -173,24 +175,27 @@ export default function RestaurantDetailPage({ params }: Props) {
         removeItem(item.id);
         return;
       }
-      const inCart = cartItems.find((ci) => ci.id === item.id);
+      // FIX D: CartItem key is "menuItemId", not "id"
+      const inCart = cartItems.find((ci) => ci.menuItemId === item.id);
       if (!inCart) {
+        // FIX A: CartItem shape is { menuItemId, photoUrl }, not { id, image_url }
         addItem(
           {
-            id: item.id,
+            menuItemId: item.id,
             name: item.name,
             price: item.discountedPrice ?? item.price,
             quantity: 1,
-            image_url: item.photoUrl ?? null,
+            photoUrl: item.photoUrl,
           },
           restaurantId,
           activeBranch?.id ?? null
         );
       } else {
-        updateQty(item.id, newQty);
+        // FIX C: method is updateQuantity, not updateQty
+        updateQuantity(item.id, newQty);
       }
     },
-    [cartItems, addItem, removeItem, updateQty, restaurantId, activeBranch]
+    [cartItems, addItem, removeItem, updateQuantity, restaurantId, activeBranch]
   );
 
   // ── Loading state ─────────────────────────────────────────────────────────────
