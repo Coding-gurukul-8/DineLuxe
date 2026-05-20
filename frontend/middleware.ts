@@ -5,6 +5,13 @@ import { NextRequest, NextResponse } from "next/server";
 const ACCESS_TOKEN_COOKIE = "dineluxe_access_token";
 const USER_ROLE_COOKIE = "dineluxe_user_role";
 
+// ── Public portal routes ───────────────────────────────────────────────────
+const PORTAL_ROUTES: Record<string, string> = {
+  "/": "/auth/customer",
+  "/admin": "/auth/admin",
+  "/restaurant": "/auth/restaurant",
+};
+
 // ── Role → dashboard map ──────────────────────────────────────────────────────
 function dashboardForRole(role: string): string {
   const map: Record<string, string> = {
@@ -46,6 +53,16 @@ function getRequiredRoles(pathname: string): string[] | null {
     }
   }
   return null; // public route
+}
+
+function loginForRoles(requiredRoles: string[] | null): string {
+  if (!requiredRoles) return "/auth/login";
+  if (requiredRoles.includes("super_admin")) return "/auth/admin";
+  if (requiredRoles.some((r) => ["owner", "manager", "host", "waiter", "chef", "cashier"].includes(r))) {
+    return "/auth/restaurant";
+  }
+  if (requiredRoles.includes("customer")) return "/auth/customer";
+  return "/auth/login";
 }
 
 // ── JWT decode (edge-safe, no crypto) ────────────────────────────────────────
@@ -99,7 +116,16 @@ export async function middleware(request: NextRequest) {
 
   const isAuthenticated = Boolean(accessToken && !tokenExpired);
 
-  // ── 2. /auth/* — redirect to dashboard if already signed in ──────────────
+  // ── 2. Portal routes (/ , /admin, /restaurant) ──────────────────────────
+  const portalLogin = PORTAL_ROUTES[pathname];
+  if (portalLogin) {
+    if (isAuthenticated && userRole) {
+      return NextResponse.redirect(new URL(dashboardForRole(userRole), request.url));
+    }
+    return NextResponse.redirect(new URL(portalLogin, request.url));
+  }
+
+  // ── 3. /auth/* — redirect to dashboard if already signed in ──────────────
   // Prevents logged-in users from hitting /auth/login or /auth/signup.
   // Exception: /auth/logout is always allowed through (it clears state).
   if (pathname.startsWith("/auth") && !pathname.startsWith("/auth/logout")) {
@@ -109,30 +135,30 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // ── 3. Public routes ──────────────────────────────────────────────────────
+  // ── 4. Public routes ──────────────────────────────────────────────────────
   const requiredRoles = getRequiredRoles(pathname);
   if (requiredRoles === null) {
     // Route is public (e.g. "/", "/api/*" handled by matcher exclusion).
     return NextResponse.next();
   }
 
-  // ── 4. Protected route — unauthenticated ──────────────────────────────────
+  // ── 5. Protected route — unauthenticated ──────────────────────────────────
   if (!isAuthenticated) {
-    const loginUrl = new URL("/auth/login", request.url);
+    const loginUrl = new URL(loginForRoles(requiredRoles), request.url);
     // Preserve the intended destination so LoginForm can redirect back after
     // a successful sign-in (honours ?redirect= param).
     loginUrl.searchParams.set("redirect", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // ── 5. Protected route — wrong role ──────────────────────────────────────
+  // ── 6. Protected route — wrong role ──────────────────────────────────────
   // The user is authenticated but their role doesn't match this section.
   // Send them to their own dashboard rather than showing a blank 403.
   if (userRole && !requiredRoles.includes(userRole)) {
     return NextResponse.redirect(new URL(dashboardForRole(userRole), request.url));
   }
 
-  // ── 6. All checks passed ──────────────────────────────────────────────────
+  // ── 7. All checks passed ──────────────────────────────────────────────────
   return NextResponse.next();
 }
 

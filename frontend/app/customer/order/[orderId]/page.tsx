@@ -42,7 +42,8 @@ function getStepIndex(steps: typeof STATUS_STEPS, status: string): number {
 export default function OrderTrackingPage() {
   const { orderId } = useParams<{ orderId:string }>();
   const router = useRouter();
-  const { on, joinRoom } = useRealtime();
+  const room = orderId ? `order:${orderId}` : "";
+  const { on } = useRealtime({ room });
   const qc = useQueryClient();
 
   const { data: order, isLoading } = useQuery({
@@ -54,11 +55,10 @@ export default function OrderTrackingPage() {
 
   useEffect(() => {
     if (!orderId) return;
-    joinRoom(`order:${orderId}`);
     const u  = on(WS_EVENTS.KITCHEN_STATUS_UPDATED, () => qc.invalidateQueries({ queryKey:["order", orderId] }));
     const u2 = on(WS_EVENTS.FOOD_READY,             () => qc.invalidateQueries({ queryKey:["order", orderId] }));
     return () => { u(); u2(); };
-  }, [orderId, on, joinRoom, qc]);
+  }, [orderId, on, qc]);
 
   const steps = order?.type === "delivery" ? DELIVERY_STEPS : STATUS_STEPS;
   const currentStep = order ? getStepIndex(steps, order.status) : 0;

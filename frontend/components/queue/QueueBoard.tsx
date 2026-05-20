@@ -8,34 +8,45 @@ import { cn } from "@/lib/utils";
 import { Users, Clock } from "lucide-react";
  
 interface QueueEntry {
-  id:string; token:string; name:string; partySize:number;
-  estimatedWait:number; status:"waiting"|"called"|"seated";
+  id: string;
+  position: number;
+  guest_name: string | null;
+  people_count: number;
+  estimated_wait_minutes?: number;
+  status: "waiting" | "arrived" | "seated" | "no_show" | "cancelled";
+}
+
+interface PaginatedQueue {
+  data: QueueEntry[];
+  total: number;
+  page: number;
+  limit: number;
 }
  
 interface QueueBoardProps { branchId:string; showFullList?:boolean; }
  
 export function QueueBoard({ branchId, showFullList = false }: QueueBoardProps) {
-  const { on, joinRoom } = useRealtime();
+  const { on } = useRealtime({ branchId, role: "host" });
   const qc = useQueryClient();
  
-  const { data: queue = [] } = useQuery({
+  const { data: queuePage } = useQuery({
     queryKey: ["queue","board", branchId],
-    queryFn:  () => apiClient.get<QueueEntry[]>(`/queue/branch/${branchId}`),
+    queryFn:  () => apiClient.get<PaginatedQueue>(`/queue/branch/${branchId}`),
     enabled: !!branchId,
     refetchInterval: 30_000,
   });
+  const queue = queuePage?.data ?? [];
  
   useEffect(() => {
     if (!branchId) return;
-    joinRoom(`branch:${branchId}:queue`);
     const unsubs = [
-      on(WS_EVENTS.QUEUE_UPDATED,         () => qc.invalidateQueries({ queryKey:["queue","board"] })),
-      on(WS_EVENTS.QUEUE_POSITION_UPDATE,  () => qc.invalidateQueries({ queryKey:["queue","board"] })),
+      on(WS_EVENTS.QUEUE_UPDATED,         () => qc.invalidateQueries({ queryKey:["queue","board", branchId] })),
+      on(WS_EVENTS.QUEUE_POSITION_UPDATE,  () => qc.invalidateQueries({ queryKey:["queue","board", branchId] })),
     ];
     return () => unsubs.forEach(u => u());
-  }, [branchId, on, joinRoom, qc]);
+  }, [branchId, on, qc]);
  
-  const called  = queue.filter(q => q.status === "called");
+  const called  = queue.filter(q => q.status === "arrived");
   const waiting = queue.filter(q => q.status === "waiting");
  
   return (
@@ -47,8 +58,10 @@ export function QueueBoard({ branchId, showFullList = false }: QueueBoardProps) 
           <div className="flex items-center justify-center gap-4 flex-wrap">
             {called.map(entry => (
               <div key={entry.id} className="flex flex-col items-center">
-                <span className="text-6xl font-black tracking-tight">{entry.token}</span>
-                <span className="text-sm opacity-80 mt-1">{entry.name}  {entry.partySize}p</span>
+                <span className="text-6xl font-black tracking-tight">{entry.position}</span>
+                <span className="text-sm opacity-80 mt-1">
+                  {entry.guest_name ?? "Walk-in"} {entry.people_count}p
+                </span>
               </div>
             ))}
           </div>
@@ -63,7 +76,7 @@ export function QueueBoard({ branchId, showFullList = false }: QueueBoardProps) 
         </div>
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
           <p className="text-3xl font-bold text-gray-900">
-            {waiting.length > 0 ? waiting[0].estimatedWait : 0}
+            {waiting.length > 0 ? waiting[0].estimated_wait_minutes ?? 0 : 0}
           </p>
           <p className="text-xs text-gray-500 mt-1 flex items-center justify-center gap-1"><Clock size={11}/> Min Wait</p>
         </div>
@@ -81,14 +94,16 @@ export function QueueBoard({ branchId, showFullList = false }: QueueBoardProps) 
                 idx === 0 && "bg-[#E8A020]/5")}>
                 <span className={cn("text-2xl font-black w-12 text-center",
                   idx === 0 ? "text-[#E8A020]" : "text-gray-300")}>
-                  {entry.token}
+                  {entry.position}
                 </span>
                 <div className="flex-1">
-                  <p className="text-sm font-semibold text-gray-800">{entry.name}</p>
-                  <p className="text-xs text-gray-500">{entry.partySize} guests</p>
+                  <p className="text-sm font-semibold text-gray-800">{entry.guest_name ?? "Walk-in"}</p>
+                  <p className="text-xs text-gray-500">{entry.people_count} guests</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-bold text-gray-700">{entry.estimatedWait}m</p>
+                  <p className="text-sm font-bold text-gray-700">
+                    {entry.estimated_wait_minutes ?? 0}m
+                  </p>
                   <p className="text-xs text-gray-400">est. wait</p>
                 </div>
               </div>

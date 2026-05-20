@@ -240,7 +240,7 @@ function QueueFeedRow({ entry }: { entry: QueueEntry }) {
 export default function ManagerPage() {
   const { branchId } = useAuth();
   const qc = useQueryClient();
-  const { on, joinRoom } = useRealtime();
+  const { on } = useRealtime({ branchId: branchId ?? "", role: "manager" });
 
   // ── Live Stats — GET /branches/:id/live-stats every 30 s ──────────────────
   const { data: stats, isLoading: statsLoading } = useQuery<LiveStats>({
@@ -285,7 +285,6 @@ export default function ManagerPage() {
   // ── WebSocket invalidation ────────────────────────────────────────────────
   useEffect(() => {
     if (!branchId) return;
-    joinRoom(`branch:${branchId}:manager`);
     const unsubs = [
       on(WS_EVENTS.TABLE_STATUS_CHANGED, () =>
         qc.invalidateQueries({ queryKey: ["mgr", "tables", branchId] })
@@ -301,7 +300,7 @@ export default function ManagerPage() {
       ),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [branchId, on, joinRoom, qc]);
+  }, [branchId, on, qc]);
 
   // ── Derived values ────────────────────────────────────────────────────────
   // live-stats.tables is a Record<status, count> — NOT a simple number.

@@ -3,12 +3,12 @@
 /**
  * hooks/useRealtime.ts
  *
- * Core real-time hook. Accepts the branch and role so it can join the correct
- * server-side room ("branch:{branchId}:{role}") automatically on mount.
+ * Core real-time hook. Accepts either a room name or a branch+role so it can
+ * join the correct server-side room automatically on mount.
  *
  * Fixes vs. old version:
  * - Socket creation/management moved to lib/socket.ts (singleton)
- * - Accepts { branchId, role } and auto-joins the right room
+ * - Accepts { branchId, role } or { room } and auto-joins the right room
  * - URL derived from NEXT_PUBLIC_API_URL (not NEXT_PUBLIC_BACKEND_WS_URL)
  * - autoConnect: false — socket connects explicitly via getSocket()
  * - Returns { on, off } as specified; isConnected available as bonus
@@ -24,10 +24,9 @@ import {
 
 export type RealtimeRole = "host" | "kitchen" | "manager" | "waiter";
 
-interface UseRealtimeOptions {
-  branchId: string;
-  role: RealtimeRole;
-}
+type UseRealtimeOptions =
+  | { branchId: string; role: RealtimeRole }
+  | { room: string };
 
 interface UseRealtimeReturn {
   /** Subscribe to a socket event. Returns an unsubscribe function. */
@@ -38,15 +37,16 @@ interface UseRealtimeReturn {
   isConnected: boolean;
 }
 
-export function useRealtime({
-  branchId,
-  role,
-}: UseRealtimeOptions): UseRealtimeReturn {
+export function useRealtime(options: UseRealtimeOptions): UseRealtimeReturn {
   const [isConnected, setIsConnected] = useState(false);
-  const room = `branch:${branchId}:${role}`;
+  const room = "room" in options
+    ? options.room
+    : options.branchId
+      ? `branch:${options.branchId}:${options.role}`
+      : "";
 
   useEffect(() => {
-    if (!branchId) return;
+    if (!room) return;
 
     const socket = getSocket();
     incrementRoomCount();
@@ -76,7 +76,7 @@ export function useRealtime({
       socket.off("disconnect", onDisconnect);
       decrementRoomCount();
     };
-  }, [branchId, role, room]);
+  }, [room]);
 
   const on = useCallback(
     <T,>(event: string, handler: (payload: T) => void) => {

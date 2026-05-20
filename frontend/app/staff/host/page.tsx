@@ -487,7 +487,7 @@ function BookingRow({ booking }: { booking: Booking }) {
 export default function HostPage() {
   const { branchId } = useAuth();
   const qc = useQueryClient();
-  const { on, joinRoom } = useRealtime();
+  const { on } = useRealtime({ branchId: branchId ?? "", role: "host" });
 
   // ── Queue — paginated, refetch every 20 s ─────────────────────────────────
   const {
@@ -536,7 +536,6 @@ export default function HostPage() {
   // ── WebSocket — instant invalidation on queue/table events ───────────────
   useEffect(() => {
     if (!branchId) return;
-    joinRoom(`branch:${branchId}:host`);
     const unsubs = [
       on(WS_EVENTS.QUEUE_UPDATED, () =>
         qc.invalidateQueries({ queryKey: ["host", "queue", branchId] })
@@ -546,7 +545,7 @@ export default function HostPage() {
       ),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [branchId, on, joinRoom, qc]);
+  }, [branchId, on, qc]);
 
   const floorTables = tables.map(toFloorTable);
   const freeTables = tables.filter((t) => t.status === "free").length;

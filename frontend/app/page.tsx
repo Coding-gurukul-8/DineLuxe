@@ -1,34 +1,20 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getServerSupabase } from "@/lib/supabase-server";
+import { getRoleDashboard } from "@/lib/role-routing";
+import type { Role } from "@/lib/constants";
 
-function isSupabaseConfigured() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  return Boolean(url?.startsWith("https://") && key && key !== "anon-key" && key.length > 40);
-}
+const ACCESS_TOKEN_COOKIE = "dineluxe_access_token";
+const USER_ROLE_COOKIE = "dineluxe_user_role";
 
-export default async function RootPage() {
-  if (!isSupabaseConfigured()) redirect("/auth/login");
+export default function RootPage() {
+  const cookieStore = cookies();
+  const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
+  const role = cookieStore.get(USER_ROLE_COOKIE)?.value as Role | undefined;
 
-  const supabase = await getServerSupabase();
-
-  const { data: { session } } = await supabase.auth.getSession();
- 
-  if (!session) redirect("/auth/login");
- 
-  const role = session.user.user_metadata?.role as string | undefined;
- 
-  switch (role) {
-    case "super_admin":   redirect("/admin/dashboard");
-    case "owner":         redirect("/owner/dashboard");
-    case "manager":       redirect("/staff/manager/dashboard");
-    case "host":          redirect("/staff/host");
-    case "waiter":        redirect("/staff/waiter");
-    case "chef":          redirect("/staff/chef/kitchen");
-    case "cashier":       redirect("/staff/cashier");
-    case "customer":      redirect("/customer/home");
-    case "delivery_partner": redirect("/delivery");
-    default:              redirect("/auth/login");
+  if (accessToken && role) {
+    const dashboard = getRoleDashboard(role);
+    if (dashboard && dashboard !== "/") redirect(dashboard);
   }
 
+  redirect("/auth/customer");
 }

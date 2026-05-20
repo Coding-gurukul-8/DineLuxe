@@ -26,7 +26,7 @@ interface DataTableProps<T> {
  
 type SortDir = "asc"|"desc"|null;
  
-export function DataTable<T extends Record<string, unknown>>({
+export function DataTable<T extends object>({
   columns, data, loading = false,
   pageSize = 20, emptyTitle = "No data", emptyDesc,
   onRowClick, keyField = "id" as keyof T,
@@ -44,10 +44,18 @@ export function DataTable<T extends Record<string, unknown>>({
  
   const sorted = [...data].sort((a, b) => {
     if (!sortKey || !sortDir) return 0;
-    const av = a[sortKey] as any;
-    const bv = b[sortKey] as any;
+    const av = (a as Record<string, unknown>)[sortKey];
+    const bv = (b as Record<string, unknown>)[sortKey];
     if (av === bv) return 0;
-    const cmp = av > bv ? 1 : -1;
+    if (av == null) return sortDir === "asc" ? 1 : -1;
+    if (bv == null) return sortDir === "asc" ? -1 : 1;
+    if (typeof av === "number" && typeof bv === "number") {
+      return sortDir === "asc" ? av - bv : bv - av;
+    }
+    const cmp = String(av).localeCompare(String(bv), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
     return sortDir === "asc" ? cmp : -cmp;
   });
  
@@ -103,7 +111,9 @@ export function DataTable<T extends Record<string, unknown>>({
                   <td key={String(col.key)}
                     className={cn("px-5 py-3 text-gray-700",
                       col.align === "center" ? "text-center" : col.align === "right" ? "text-right" : "")}>
-                    {col.render ? col.render(row) : String(row[String(col.key) as keyof T] ?? "-")}
+                    {col.render
+                      ? col.render(row)
+                      : String((row as Record<string, unknown>)[String(col.key)] ?? "-")}
                   </td>
                 ))}
               </tr>

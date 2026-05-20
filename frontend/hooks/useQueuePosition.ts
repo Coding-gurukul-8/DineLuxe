@@ -33,10 +33,14 @@ export type QueueStatus =
 
 export interface QueueEntry {
   id: string;
+  queueId?: string;
   position: number;
   status: QueueStatus;
   estimatedWaitMinutes: number;
   partySize: number;
+  userName?: string | null;
+  phone?: string | null;
+  source?: string | null;
   arrivedAt?: string | null;
   seatedAt?: string | null;
   createdAt: string;

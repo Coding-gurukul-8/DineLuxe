@@ -51,7 +51,7 @@ export default function CartPage() {
         table_id:   tableId ?? undefined,
         order_type: "dine_in",   // underscore — matches backend OrderType enum
         items: items.map((i) => ({
-          menu_item_id: i.menuItemId,
+          menu_item_id: i.id,
           quantity:     i.quantity,
           notes:        i.notes ?? undefined,
         })),
@@ -94,7 +94,7 @@ export default function CartPage() {
         <AnimatePresence initial={false}>
           {items.map((item) => (
             <motion.div
-              key={item.menuItemId}
+              key={item.id}
               layout
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -103,9 +103,9 @@ export default function CartPage() {
               className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center gap-3"
             >
               {/* Thumbnail */}
-              {item.photoUrl ? (
+              {item.image_url ? (
                 <img
-                  src={item.photoUrl}
+                  src={item.image_url}
                   alt={item.name}
                   className="w-16 h-16 rounded-lg object-cover shrink-0"
                 />
@@ -134,7 +134,7 @@ export default function CartPage() {
               {/* Qty controls */}
               <div className="flex items-center gap-1 shrink-0">
                 <button
-                  onClick={() => updateQty(item.menuItemId, item.quantity - 1)}
+                  onClick={() => updateQty(item.id, item.quantity - 1)}
                   className="w-8 h-8 rounded-lg border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors"
                   aria-label="Decrease quantity"
                 >
@@ -155,7 +155,7 @@ export default function CartPage() {
                 </motion.span>
 
                 <button
-                  onClick={() => updateQty(item.menuItemId, item.quantity + 1)}
+                  onClick={() => updateQty(item.id, item.quantity + 1)}
                   className="w-8 h-8 rounded-lg bg-brand-primary text-white flex items-center justify-center hover:bg-brand-primary/90 transition-colors"
                   aria-label="Increase quantity"
                 >

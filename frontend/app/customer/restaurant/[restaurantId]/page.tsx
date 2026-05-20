@@ -15,10 +15,10 @@
  *
  * Cart wiring (ground truth from useCart.ts)
  * ──────────────────────────────────────────
- * CartItem shape  : { menuItemId, name, price, quantity, photoUrl? }
+ * CartItem shape  : { id, name, price, quantity, image_url? }
  * addItem()       : (CartItem, restaurantId, branchId)
- * removeItem()    : (menuItemId)                    ← takes menuItemId, not id
- * updateQuantity(): (menuItemId, quantity)
+ * removeItem()    : (id)
+ * updateQuantity(): (id, quantity)
  * total()         : () => number                    ← it's a getter function
  * itemCount()     : () => number                    ← it's a getter function
  *
@@ -415,10 +415,10 @@ export default function RestaurantDetailPage({ params }: Props) {
 
   // ── Cart helpers ──────────────────────────────────────────────────────────
 
-  // Returns how many of this item are in the cart (keyed by menuItemId)
+  // Returns how many of this item are in the cart (keyed by menu item id)
   const getItemQty = useCallback(
     (itemId: string) =>
-      cartItems.find((ci) => ci.menuItemId === itemId)?.quantity ?? 0,
+      cartItems.find((ci) => ci.id === itemId)?.quantity ?? 0,
     [cartItems]
   );
 
@@ -427,24 +427,24 @@ export default function RestaurantDetailPage({ params }: Props) {
    * FoodCard already computes the new qty (current ± 1), so we receive the
    * target quantity — we do not add a delta here.
    *
-   * normalizedItem.id === the API item id === CartItem.menuItemId, so using
-   * item.id as the removeItem / updateQuantity key is correct.
+   * normalizedItem.id === the API item id === CartItem.id, so using item.id
+   * as the removeItem / updateQuantity key is correct.
    */
   const handleCartUpdate = useCallback(
     (item: MenuItem, newQty: number) => {
       if (newQty <= 0) {
-        removeItem(item.id);   // removeItem(menuItemId) — item.id is the menuItemId
+        removeItem(item.id);
         return;
       }
-      const inCart = cartItems.find((ci) => ci.menuItemId === item.id);
+      const inCart = cartItems.find((ci) => ci.id === item.id);
       if (!inCart) {
         addItem(
           {
-            menuItemId: item.id,
+            id: item.id,
             name: item.name,
             price: item.discountedPrice ?? item.price,
             quantity: newQty,
-            photoUrl: item.photoUrl,
+            image_url: item.photoUrl,
           },
           restaurantId,
           activeBranch?.id ?? null

@@ -27,6 +27,7 @@ interface ActiveOrder {
   id: string
   status: string
   total: number
+  tax?: number
   created_at: string
   tables?: { label: string; floor_number: number } | null
   order_items: Array<{

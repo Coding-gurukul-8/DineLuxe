@@ -9,15 +9,15 @@ interface FoodCardProps {
   item: {
     id: string
     name: string
-    description: string
+    description?: string | null
     price: number
     discountedPrice?: number
     photoUrl?: string
-    dietaryTags: string[]
-    allergens: string[]
+    dietaryTags?: string[]
+    allergens?: string[]
     prepTimeMinutes?: number
-    isAvailable: boolean
-    isSoldOut: boolean
+    isAvailable?: boolean
+    isSoldOut?: boolean
   }
   quantity?: number
   onAddToCart?: (itemId: string, quantity: number) => void
@@ -27,10 +27,12 @@ interface FoodCardProps {
 export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCardProps) {
   const [showAllergens, setShowAllergens] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
+  const dietaryTags = item.dietaryTags ?? []
+  const description = item.description ?? ""
   
   const hasDiscount = item.discountedPrice && item.discountedPrice < item.price
-  const isVeg = item.dietaryTags.includes('veg') || item.dietaryTags.includes('veg') 
-  const isNonVeg = item.dietaryTags.includes('non-veg')
+  const isVeg = dietaryTags.includes("veg") || dietaryTags.includes("vegan")
+  const isNonVeg = dietaryTags.includes("non-veg")
   
   return (
     <div className={cn("relative bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow", className)}>
@@ -74,7 +76,7 @@ export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCar
       {/* Content */}
       <div className="p-3">
         <h3 className="font-semibold text-gray-900 text-sm line-clamp-1">{item.name}</h3>
-        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.description}</p>
+        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{description}</p>
         
         {/* Price and Add button */}
         <div className="flex items-center justify-between mt-3">

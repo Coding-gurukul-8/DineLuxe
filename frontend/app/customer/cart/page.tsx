@@ -15,15 +15,15 @@ export default function CustomerCartPage() {
   const { items: cartItems, tableId, updateQuantity, removeItem, total, clearCart } = useCart()
   const [isBooking, setIsBooking] = useState(false)
 
-  const handleQuantityChange = (menuItemId: string, delta: number) => {
-    const item = cartItems.find(i => i.menuItemId === menuItemId)
+  const handleQuantityChange = (itemId: string, delta: number) => {
+    const item = cartItems.find(i => i.id === itemId)
     if (item) {
-      updateQuantity(menuItemId, Math.max(0, item.quantity + delta))
+      updateQuantity(itemId, Math.max(0, item.quantity + delta))
     }
   }
 
-  const handleRemoveItem = (menuItemId: string) => {
-    removeItem(menuItemId)
+  const handleRemoveItem = (itemId: string) => {
+    removeItem(itemId)
   }
 
   const handleConfirmBooking = async () => {
@@ -88,7 +88,7 @@ export default function CustomerCartPage() {
             <AnimatePresence>
               {cartItems.map((item) => (
                 <motion.div
-                  key={item.menuItemId}
+                  key={item.id}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 20 }}
@@ -109,7 +109,7 @@ export default function CustomerCartPage() {
                   <div className="flex items-center gap-2">
                     <motion.button
                       whileTap={{ scale: 0.9 }}
-                      onClick={() => handleQuantityChange(item.menuItemId, -1)}
+                      onClick={() => handleQuantityChange(item.id, -1)}
                       className="w-8 h-8 bg-gray-100 dark:bg-surface-700 rounded-lg flex items-center justify-center hover:bg-gray-200 dark:hover:bg-surface-600 transition-colors"
                     >
                       <Minus size={14} />
@@ -117,7 +117,7 @@ export default function CustomerCartPage() {
                     <span className="w-8 text-center font-medium text-gray-900 dark:text-white">{item.quantity}</span>
                     <motion.button
                       whileTap={{ scale: 0.9 }}
-                      onClick={() => handleQuantityChange(item.menuItemId, 1)}
+                      onClick={() => handleQuantityChange(item.id, 1)}
                       className="w-8 h-8 bg-gray-100 dark:bg-surface-700 rounded-lg flex items-center justify-center hover:bg-gray-200 dark:hover:bg-surface-600 transition-colors"
                     >
                       <Plus size={14} />
@@ -132,7 +132,7 @@ export default function CustomerCartPage() {
                   {/* Remove */}
                   <motion.button
                     whileTap={{ scale: 0.9 }}
-                    onClick={() => handleRemoveItem(item.menuItemId)}
+                    onClick={() => handleRemoveItem(item.id)}
                     className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                   >
                     <Trash2 size={18} />

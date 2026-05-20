@@ -9,15 +9,15 @@ interface FoodCardProps {
   item: {
     id: string
     name: string
-    description: string
+    description?: string | null
     price: number
     discountedPrice?: number
     photoUrl?: string
-    dietaryTags: string[]
-    allergens: string[]
+    dietaryTags?: string[]
+    allergens?: string[]
     prepTimeMinutes?: number
-    isAvailable: boolean
-    isSoldOut: boolean
+    isAvailable?: boolean
+    isSoldOut?: boolean
   }
   quantity?: number
   onAddToCart?: (itemId: string, quantity: number) => void
@@ -27,13 +27,18 @@ interface FoodCardProps {
 export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCardProps) {
   const [showAllergens, setShowAllergens] = useState(false)
   const [imageLoaded, setImageLoaded] = useState(false)
+  const dietaryTags = item.dietaryTags ?? []
+  const allergens = item.allergens ?? []
+  const isAvailable = item.isAvailable ?? true
+  const isSoldOut = item.isSoldOut ?? false
+  const description = item.description ?? ""
 
   const hasDiscount = item.discountedPrice && item.discountedPrice < item.price
-  const isVeg = item.dietaryTags.includes('veg') || item.dietaryTags.includes('vegan')
-  const isNonVeg = item.dietaryTags.includes('non-veg')
+  const isVeg = dietaryTags.includes("veg") || dietaryTags.includes("vegan")
+  const isNonVeg = dietaryTags.includes("non-veg")
 
   const handleAdd = () => {
-    if (item.isSoldOut || !item.isAvailable) return
+    if (isSoldOut || !isAvailable) return
     onAddToCart?.(item.id, (quantity || 0) + 1)
   }
 
@@ -50,7 +55,7 @@ export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCar
       transition={{ duration: 0.3 }}
       className={cn(
         "relative bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow",
-        (item.isSoldOut || !item.isAvailable) && "opacity-60",
+        (isSoldOut || !isAvailable) && "opacity-60",
         className
       )}
     >
@@ -91,7 +96,7 @@ export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCar
         </div>
 
         {/* Allergen warning */}
-        {item.allergens.length > 0 && (
+        {allergens.length > 0 && (
           <button
             onClick={() => setShowAllergens(!showAllergens)}
             className="absolute top-2 right-2 p-1.5 bg-amber-100 text-amber-700 rounded-full hover:bg-amber-200 transition-colors"
@@ -102,7 +107,7 @@ export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCar
         )}
 
         {/* Sold out overlay */}
-        {(item.isSoldOut || !item.isAvailable) && (
+        {(isSoldOut || !isAvailable) && (
           <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
             <span className="bg-gray-900 text-white text-sm font-semibold px-4 py-2 rounded-full">
               Sold Out
@@ -112,7 +117,7 @@ export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCar
 
         {/* Allergen tooltip */}
         <AnimatePresence>
-          {showAllergens && item.allergens.length > 0 && (
+          {showAllergens && allergens.length > 0 && (
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -120,7 +125,7 @@ export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCar
               className="absolute top-10 right-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs p-2 rounded-lg shadow-lg max-w-[200px] z-10"
             >
               <p className="font-semibold mb-1"> Contains:</p>
-              <p>{item.allergens.join(", ")}</p>
+              <p>{allergens.join(", ")}</p>
             </motion.div>
           )}
         </AnimatePresence>
@@ -129,7 +134,7 @@ export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCar
       {/* Content */}
       <div className="p-3">
         <h3 className="font-semibold text-gray-900 text-sm line-clamp-1">{item.name}</h3>
-        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.description}</p>
+        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{description}</p>
 
         {/* Price and Add button */}
         <div className="flex items-center justify-between mt-3">
@@ -171,10 +176,10 @@ export function FoodCard({ item, quantity = 0, onAddToCart, className }: FoodCar
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={handleAdd}
-              disabled={item.isSoldOut || !item.isAvailable}
+              disabled={isSoldOut || !isAvailable}
               className={cn(
                 "flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors touch-target",
-                item.isSoldOut || !item.isAvailable
+                isSoldOut || !isAvailable
                   ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                   : "bg-brand-primary text-white hover:bg-brand-primary/90"
               )}

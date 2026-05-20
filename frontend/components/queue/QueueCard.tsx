@@ -56,6 +56,8 @@ export function QueueCard({
 }: QueueCardProps) {
   const config = statusConfig[entry.status]
   const isActive = entry.status === "waiting" || entry.status === "arrived"
+  const queueId = entry.queueId ?? entry.id
+  const displayName = entry.userName ?? "Walk-in"
 
   return (
     <motion.div
@@ -91,7 +93,7 @@ export function QueueCard({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-semibold text-gray-900">
-                {entry.userName || "Walk-in"}
+                {displayName}
               </span>
               {entry.source === "pre_booked" && (
                 <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
@@ -147,7 +149,7 @@ export function QueueCard({
           {entry.status === "waiting" && onMarkArrived && (
             <motion.button
               whileTap={{ scale: 0.95 }}
-              onClick={() => onMarkArrived(entry.queueId)}
+              onClick={() => onMarkArrived(queueId)}
               className="flex-1 flex items-center justify-center gap-2 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-colors"
             >
               <Check size={16} />
@@ -158,7 +160,7 @@ export function QueueCard({
           {(entry.status === "arrived" || (entry.status === "waiting" && isGeoArrived)) && onAssignTable && (
             <motion.button
               whileTap={{ scale: 0.95 }}
-              onClick={() => onAssignTable(entry.queueId)}
+              onClick={() => onAssignTable(queueId)}
               className="flex-1 flex items-center justify-center gap-2 py-2 bg-brand-primary text-white rounded-lg text-sm font-medium hover:bg-brand-primary/90 transition-colors"
             >
               <UserCheck size={16} />
@@ -169,7 +171,7 @@ export function QueueCard({
           {onRemove && (
             <motion.button
               whileTap={{ scale: 0.95 }}
-              onClick={() => onRemove(entry.queueId)}
+              onClick={() => onRemove(queueId)}
               className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
               aria-label="Remove from queue"
             >

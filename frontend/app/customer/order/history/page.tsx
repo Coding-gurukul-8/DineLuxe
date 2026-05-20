@@ -40,7 +40,7 @@ export default function CustomerOrderHistoryPage() {
     order.items.forEach((item) => {
       addItem(
         {
-          menuItemId: item.menuItemId ?? item.id ?? item.name,
+          id: item.menuItemId ?? item.id ?? item.name,
           name: item.name,
           price: item.unitPrice,
           quantity: item.quantity,
