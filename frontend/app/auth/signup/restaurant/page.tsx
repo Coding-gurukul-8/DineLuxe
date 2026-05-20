@@ -2,12 +2,12 @@
 
 import { motion } from "framer-motion"
 import Link from "next/link"
-import { LoginForm } from "@/components/auth/LoginForm"
 import { Store } from "lucide-react"
+import { RestaurantSignupWizard } from "@/components/auth/RestaurantSignupWizard"
 
-export default function RestaurantLoginPage() {
+export default function RestaurantSignupPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-8">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -23,29 +23,25 @@ export default function RestaurantLoginPage() {
           >
             <Store size={32} className="text-white" />
           </motion.div>
-          <h1 className="text-2xl font-bold text-gray-900">Restaurant Team Login</h1>
-          <p className="text-sm text-gray-500 mt-1">Owners, managers, and staff</p>
+          <h1 className="text-2xl font-bold text-gray-900">Restaurant Registration</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Register as an owner — you can add branches and staff after setup
+          </p>
         </div>
 
         <div className="bg-white rounded-md shadow-sm border border-gray-100 p-6">
-          <LoginForm />
+          <RestaurantSignupWizard />
         </div>
 
-        <div className="mt-6 text-center space-y-3">
-          <Link
-            href="/auth/forgot-password"
-            className="text-sm text-brand-primary hover:underline"
-          >
-            Forgot your password?
-          </Link>
+        <div className="mt-6 text-center space-y-2">
           <p className="text-sm text-gray-500">
-            New restaurant?{" "}
-            <Link href="/auth/signup/restaurant" className="text-brand-primary font-medium hover:underline">
-              Register here
+            Already have an account?{" "}
+            <Link href="/auth/restaurant" className="text-brand-primary font-medium hover:underline">
+              Sign in
             </Link>
           </p>
-          <Link href="/auth/login" className="text-sm text-brand-primary hover:underline">
-            Back to portal
+          <Link href="/auth/signup" className="text-sm text-brand-primary hover:underline block">
+            ← Back to account types
           </Link>
         </div>
       </motion.div>

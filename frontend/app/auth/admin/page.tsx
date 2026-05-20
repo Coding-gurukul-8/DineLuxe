@@ -32,6 +32,18 @@ export default function AdminLoginPage() {
         </div>
 
         <div className="mt-6 text-center space-y-3">
+          <Link
+            href="/auth/forgot-password"
+            className="text-sm text-brand-primary hover:underline"
+          >
+            Forgot your password?
+          </Link>
+          <p className="text-sm text-gray-500">
+            Setting up a new admin account?{" "}
+            <Link href="/auth/signup/admin" className="text-brand-primary font-medium hover:underline">
+              Register here
+            </Link>
+          </p>
           <Link href="/auth/login" className="text-sm text-brand-primary hover:underline">
             Back to portal
           </Link>

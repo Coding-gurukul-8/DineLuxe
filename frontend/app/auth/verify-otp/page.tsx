@@ -6,30 +6,45 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { ApiError } from "@repo/shared"
 import { OTPInput } from "@/components/auth/OTPInput"
 import { Button } from "@/components/ui/button"
-import { Loader2, Utensils, RefreshCw } from "lucide-react"
+import { Loader2, Utensils, RefreshCw, ArrowRight } from "lucide-react"
 import { resendSignupOtp, verifyOtp } from "@/lib/auth-client"
 import { getPendingSignup } from "@/lib/auth-storage"
 import { getRoleDashboard } from "@/lib/role-routing"
 import { useAuth } from "@/hooks/useAuth"
+import type { Role } from "@/lib/constants"
+
+// Maps the ?portal= query param to the fallback (unverified) dashboard path.
+// When a user skips OTP, we send them somewhere useful immediately —
+// they can verify their email later from their profile settings.
+function getSkipDestination(portal: string | null): string {
+  switch (portal) {
+    case "restaurant": return "/owner/dashboard"
+    case "admin":      return "/admin/dashboard"
+    default:           return "/customer/home"
+  }
+}
 
 export default function VerifyOTPPage() {
-  const [otp, setOtp] = useState("")
+  const [otp, setOtp]           = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]       = useState<string | null>(null)
   const [countdown, setCountdown] = useState(60)
-  const router = useRouter()
+  const router      = useRouter()
   const searchParams = useSearchParams()
   const { setUser } = useAuth()
 
-  // Resolve email: prefer ?email= query param (set by SignupWizard redirect),
-  // fall back to the pending-signup entry in localStorage (set by auth-client).
+  // Resolve email: prefer ?email= param, fall back to localStorage pending-signup.
   const email = useMemo(() => {
     const fromQuery = searchParams.get("email")?.trim()
     if (fromQuery) return fromQuery
     return getPendingSignup()?.email ?? ""
   }, [searchParams])
 
-  // Countdown timer for the resend throttle.
+  // The portal the user signed up through (customer | restaurant | admin).
+  // Used to determine where "Verify later" should send them.
+  const portal = searchParams.get("portal")
+
+  // 60-second resend countdown.
   useEffect(() => {
     if (countdown <= 0) return
     const timer = setInterval(() => {
@@ -48,31 +63,16 @@ export default function VerifyOTPPage() {
     return "Something went wrong. Please try again."
   }
 
-  // Called when the user clicks "Verify" or OTPInput fires onComplete.
-  // verifyOtp() calls POST /auth/verify-otp, stores new tokens, then fetches
-  // /users/me to return the fully hydrated AuthUser.
+  // Called when the user enters all 6 digits (auto) or clicks Verify (manual).
   const handleVerify = async (value: string) => {
     if (value.length !== 6) return
     setIsLoading(true)
     setError(null)
-
     try {
-      if (!email) {
-        throw new Error("Missing email address. Please sign up again.")
-      }
-
+      if (!email) throw new Error("Missing email address. Please sign up again.")
       const user = await verifyOtp(email, value)
-
-      // Hydrate global auth state so the rest of the app sees the user
-      // immediately without a /users/me refetch.
       setUser(user)
-
-      // Route to the correct dashboard for the verified user's role:
-      //   customer         → /customer/home
-      //   owner            → /owner/dashboard
-      //   delivery_partner → /delivery
-      //   (and so on — getRoleDashboard covers all roles)
-      router.push(getRoleDashboard(user.role))
+      router.push(getRoleDashboard(user.role as Role))
     } catch (err) {
       setError(getVerifyErrorMessage(err))
     } finally {
@@ -80,12 +80,10 @@ export default function VerifyOTPPage() {
     }
   }
 
-  // Resend calls POST /auth/send-otp — throttled by the 60-second countdown.
   const handleResend = async () => {
     if (countdown > 0 || isLoading) return
     setIsLoading(true)
     setError(null)
-
     try {
       await resendSignupOtp(email)
       setCountdown(60)
@@ -102,6 +100,12 @@ export default function VerifyOTPPage() {
     }
   }
 
+  // "Verify later" — navigates to the correct portal dashboard without OTP.
+  // The user's account is active; they just haven't verified their email yet.
+  const handleSkip = () => {
+    router.push(getSkipDestination(portal))
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <motion.div
@@ -110,7 +114,7 @@ export default function VerifyOTPPage() {
         transition={{ duration: 0.5 }}
         className="w-full max-w-md"
       >
-        {/* Logo / header */}
+        {/* Header */}
         <div className="text-center mb-8">
           <motion.div
             initial={{ scale: 0 }}
@@ -136,7 +140,7 @@ export default function VerifyOTPPage() {
         {/* Card */}
         <div className="bg-white rounded-md shadow-sm border border-gray-100 p-6">
           <div className="space-y-6">
-            {/* OTP boxes — onComplete fires handleVerify as soon as 6 digits are entered */}
+            {/* OTP input — fires handleVerify automatically on 6 digits */}
             <OTPInput
               value={otp}
               onChange={setOtp}
@@ -145,7 +149,6 @@ export default function VerifyOTPPage() {
               disabled={isLoading}
             />
 
-            {/* Error message */}
             {error && (
               <motion.p
                 role="alert"
@@ -157,23 +160,20 @@ export default function VerifyOTPPage() {
               </motion.p>
             )}
 
-            {/* Manual verify button (fallback for onComplete) */}
+            {/* Verify button */}
             <Button
               onClick={() => handleVerify(otp)}
               disabled={otp.length !== 6 || isLoading}
               className="w-full h-11 bg-brand-primary hover:bg-brand-primary/90 text-white font-medium"
             >
               {isLoading ? (
-                <>
-                  <Loader2 className="animate-spin mr-2" size={18} />
-                  Verifying…
-                </>
+                <><Loader2 className="animate-spin mr-2" size={18} />Verifying…</>
               ) : (
-                "Verify"
+                "Verify Email"
               )}
             </Button>
 
-            {/* Resend link */}
+            {/* Resend */}
             <div className="text-center">
               <button
                 type="button"
@@ -192,15 +192,31 @@ export default function VerifyOTPPage() {
               </button>
             </div>
 
-            {/* Skip — only relevant if the backend allows deferred verification */}
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => router.push("/customer/home")}
-              className="w-full text-gray-500"
-            >
-              Verify later
-            </Button>
+            {/* Divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-100" />
+              </div>
+              <div className="relative flex justify-center text-xs text-gray-400 uppercase bg-white px-2 w-fit mx-auto">
+                or
+              </div>
+            </div>
+
+            {/* Skip / Verify later */}
+            <div className="text-center space-y-1">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleSkip}
+                className="w-full text-gray-500 hover:text-gray-700"
+              >
+                <ArrowRight size={16} className="mr-2" />
+                Skip for now — verify later
+              </Button>
+              <p className="text-xs text-gray-400">
+                You can verify your email anytime from your profile settings.
+              </p>
+            </div>
           </div>
         </div>
       </motion.div>
