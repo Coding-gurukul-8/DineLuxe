@@ -5,49 +5,87 @@ import Link from "next/link"
 import { LoginForm } from "@/components/auth/LoginForm"
 import { Utensils } from "lucide-react"
 
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08, delayChildren: 0.1 },
+  },
+}
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+}
+
+const cardVariants = {
+  hidden: { opacity: 0, scale: 0.96, y: 20 },
+  visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.6 } },
+}
+
 export default function CustomerLoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 py-16">
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
         className="w-full max-w-md"
       >
-        <div className="text-center mb-8">
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 200, damping: 15 }}
-            className="w-16 h-16 bg-brand-primary rounded-md flex items-center justify-center mx-auto mb-4"
-          >
-            <Utensils size={32} className="text-white" />
-          </motion.div>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome Back</h1>
-          <p className="text-sm text-gray-500 mt-1">Sign in to your DineLuxe account</p>
-        </div>
+        <motion.div variants={itemVariants} className="text-center mb-8">
+          <Link href="/auth/login" className="inline-flex items-center gap-2.5 mb-6 group">
+            <div className="w-9 h-9 rounded-lg bg-[#1A3C5E] flex items-center justify-center transition-transform duration-300 group-hover:scale-105">
+              <Utensils size={18} className="text-[#E8A020]" />
+            </div>
+            <span className="font-['Playfair_Display',Georgia,serif] text-xl text-[#1A3C5E] tracking-wide">
+              DineLuxe
+            </span>
+          </Link>
 
-        <div className="bg-white rounded-md shadow-sm border border-gray-100 p-6">
+          <h1 className="font-['Playfair_Display',Georgia,serif] text-3xl text-[#1A3C5E] mb-1.5">
+            Welcome back
+          </h1>
+          <p className="text-sm text-[#1A3C5E]/45 tracking-wide">Sign in to your customer account</p>
+        </motion.div>
+
+        <motion.div
+          variants={cardVariants}
+          className="rounded-3xl border border-white/70 p-8"
+          style={{
+            background: "rgba(255,255,255,0.65)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            boxShadow: "0 8px 32px rgba(26,60,94,0.08), 0 2px 8px rgba(26,60,94,0.04), inset 0 1px 0 rgba(255,255,255,0.8)",
+          }}
+        >
           <LoginForm />
-        </div>
 
-        <div className="mt-6 text-center space-y-3">
+          <div className="mt-6 pt-5 border-t border-[#1A3C5E]/6">
+            <div className="text-center space-y-2">
+              <Link
+                href="/auth/forgot-password"
+                className="block text-sm text-[#1A3C5E]/45 hover:text-[#E8A020] transition-colors tracking-wide"
+              >
+                Forgot your password?
+              </Link>
+              <p className="text-sm text-[#1A3C5E]/40">
+                Don't have an account?{" "}
+                <Link href="/auth/signup/customer" className="text-[#E8A020] font-medium hover:underline">
+                  Sign up
+                </Link>
+              </p>
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div variants={itemVariants} className="mt-6 text-center">
           <Link
-            href="/auth/forgot-password"
-            className="text-sm text-brand-primary hover:underline"
+            href="/auth/login"
+            className="inline-flex items-center gap-1.5 text-xs text-[#1A3C5E]/35 hover:text-[#1A3C5E]/60 transition-colors tracking-wide"
           >
-            Forgot your password?
+            ← Back to portal selection
           </Link>
-          <p className="text-sm text-gray-500">
-            Don't have an account?{" "}
-            <Link href="/auth/signup" className="text-brand-primary font-medium hover:underline">
-              Sign up
-            </Link>
-          </p>
-          <Link href="/auth/login" className="text-sm text-brand-primary hover:underline">
-            Back to portal
-          </Link>
-        </div>
+        </motion.div>
       </motion.div>
     </div>
   )
