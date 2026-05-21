@@ -49,23 +49,21 @@ export function useAuth() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Internal setter ─────────────────────────────────────────────────────────
-  // Centralises all state updates so role, isAuthenticated, and the optional
-  // localStorage cache are always kept in sync with the user object.
+  // Centralises all state updates so role and isAuthenticated are always kept
+  // in sync with the user object.
+  // NOTE: direct localStorage writes have been removed — auth-storage.ts
+  // functions (setUserRole, clearAuthTokens) already handle persistence with
+  // the correct prefixed keys ("dineluxe_*"), so writing plain "userData" /
+  // "userRole" keys here would create an orphaned cache that clearAuthTokens()
+  // never clears.
   const setUserData = (userData: AuthUser | null) => {
     setUser(userData);
     if (userData) {
       setRole(userData.role);
       setIsAuthenticated(true);
-      // Mirror to localStorage so other tabs / SSR middleware can read role
-      // without making an API call (NOT used to hydrate auth state on mount —
-      // see the useEffect comment above).
-      localStorage.setItem("userData", JSON.stringify(userData));
-      localStorage.setItem("userRole", userData.role);
     } else {
       setRole(null);
       setIsAuthenticated(false);
-      localStorage.removeItem("userData");
-      localStorage.removeItem("userRole");
     }
   };
 
@@ -82,8 +80,6 @@ export function useAuth() {
     setUser(null);
     setRole(null);
     setIsAuthenticated(false);
-    localStorage.removeItem("userData");
-    localStorage.removeItem("userRole");
 
     // authLogout() fires POST /auth/logout and calls clearAuthTokens() in its
     // finally block — errors are silently swallowed so the client always logs
