@@ -61,7 +61,8 @@ function resolveRestaurantId(): string | null {
 
   // 2. Auth storage — used by owner/staff who are logged in
   try {
-    const stored = localStorage.getItem("userData");
+    const ls = safeLocalStorage()
+    const stored = ls?.getItem("userData")
     if (stored) {
       const user = JSON.parse(stored);
       if (user?.restaurantId) return user.restaurantId;

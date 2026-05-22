@@ -32,6 +32,18 @@ function isBrowser(): boolean {
   return typeof window !== "undefined"
 }
 
+function safeLocalStorage(): Storage | null {
+  if (!isBrowser()) return null
+  try {
+    const storage = window.localStorage
+    return typeof storage?.getItem === "function" && typeof storage?.setItem === "function"
+      ? storage
+      : null
+  } catch {
+    return null
+  }
+}
+
 // Writes a cookie readable by both JS and the Next.js middleware (edge runtime).
 // Secure flag is added automatically on HTTPS origins.
 function setCookie(name: string, value: string, maxAgeSeconds: number): void {
@@ -51,9 +63,10 @@ function clearCookie(name: string): void {
 // ── Token storage ─────────────────────────────────────────────────────────────
 
 export function setAuthTokens(tokens: AuthTokens): void {
-  if (!isBrowser()) return
-  localStorage.setItem(ACCESS_TOKEN_KEY,  tokens.accessToken)
-  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken)
+  const storage = safeLocalStorage()
+  if (!storage) return
+  storage.setItem(ACCESS_TOKEN_KEY,  tokens.accessToken)
+  storage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken)
   setCookie(ACCESS_TOKEN_KEY,  tokens.accessToken,  ACCESS_TOKEN_MAX_AGE)
   setCookie(REFRESH_TOKEN_KEY, tokens.refreshToken, REFRESH_TOKEN_MAX_AGE)
   // Role cookie is NOT written here because setAuthTokens receives only tokens.
@@ -69,9 +82,11 @@ export function setUserRole(role: string): void {
 }
 
 export function clearAuthTokens(): void {
-  if (!isBrowser()) return
-  localStorage.removeItem(ACCESS_TOKEN_KEY)
-  localStorage.removeItem(REFRESH_TOKEN_KEY)
+  const storage = safeLocalStorage()
+  if (storage) {
+    storage.removeItem(ACCESS_TOKEN_KEY)
+    storage.removeItem(REFRESH_TOKEN_KEY)
+  }
   clearCookie(ACCESS_TOKEN_KEY)
   clearCookie(REFRESH_TOKEN_KEY)
   // Clear the role cookie so the middleware no longer sees the user as
@@ -80,11 +95,11 @@ export function clearAuthTokens(): void {
 }
 
 export function getAccessToken(): string | null {
-  return isBrowser() ? localStorage.getItem(ACCESS_TOKEN_KEY) : null
+  return safeLocalStorage()?.getItem(ACCESS_TOKEN_KEY) ?? null
 }
 
 export function getRefreshToken(): string | null {
-  return isBrowser() ? localStorage.getItem(REFRESH_TOKEN_KEY) : null
+  return safeLocalStorage()?.getItem(REFRESH_TOKEN_KEY) ?? null
 }
 
 // ── Pending signup ────────────────────────────────────────────────────────────
@@ -92,13 +107,15 @@ export function getRefreshToken(): string | null {
 // resendSignupOtp() can recover the email without an extra prop-drill.
 
 export function setPendingSignup(data: PendingSignup): void {
-  if (!isBrowser()) return
-  localStorage.setItem(PENDING_SIGNUP_KEY, JSON.stringify(data))
+  const storage = safeLocalStorage()
+  if (!storage) return
+  storage.setItem(PENDING_SIGNUP_KEY, JSON.stringify(data))
 }
 
 export function getPendingSignup(): PendingSignup | null {
-  if (!isBrowser()) return null
-  const raw = localStorage.getItem(PENDING_SIGNUP_KEY)
+  const storage = safeLocalStorage()
+  if (!storage) return null
+  const raw = storage.getItem(PENDING_SIGNUP_KEY)
   if (!raw) return null
   try {
     return JSON.parse(raw) as PendingSignup
@@ -108,6 +125,6 @@ export function getPendingSignup(): PendingSignup | null {
 }
 
 export function clearPendingSignup(): void {
-  if (!isBrowser()) return
-  localStorage.removeItem(PENDING_SIGNUP_KEY)
+  const storage = safeLocalStorage()
+  storage?.removeItem(PENDING_SIGNUP_KEY)
 }

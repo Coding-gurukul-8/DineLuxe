@@ -1,3 +1,5 @@
+import { ensureSafeBrowserStorage } from "@/lib/safe-browser-storage"
+
 let browserSupabase: any = null;
  
 export async function getBrowserSupabase() {
@@ -5,6 +7,8 @@ export async function getBrowserSupabase() {
     throw new Error("Supabase browser client can only be created in the browser.");
   }
  
+  ensureSafeBrowserStorage();
+
   if (!browserSupabase) {
     const { createBrowserClient } = await import("@supabase/ssr");
     browserSupabase = createBrowserClient(

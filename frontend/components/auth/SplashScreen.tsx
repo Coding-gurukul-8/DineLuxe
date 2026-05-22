@@ -147,7 +147,11 @@ export function SplashScreen() {
   useEffect(() => {
     // Load branding from localStorage (white-label support)
     try {
-      const stored = localStorage.getItem('restaurant_branding')
+      const storage = typeof window !== 'undefined' &&
+        typeof window.localStorage?.getItem === 'function'
+        ? window.localStorage
+        : null
+      const stored = storage?.getItem('restaurant_branding')
       if (stored) {
         setBranding(JSON.parse(stored))
       }

@@ -1,4 +1,5 @@
 "use client";
+import { ensureSafeBrowserStorage } from "@/lib/safe-browser-storage";
 import { createContext, useContext } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import type { AuthUser } from "@/types/auth";
@@ -16,6 +17,7 @@ const AuthContext = createContext<AuthContextValue>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  ensureSafeBrowserStorage();
   const { user, loading, signOut } = useAuth();
 
   return (
