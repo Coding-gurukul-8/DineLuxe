@@ -188,7 +188,7 @@ export default function EditMenuItemPage() {
           </button>
           <div>
             <h1 className="text-xl font-bold text-gray-900">Edit Item</h1>
-            <p className="text-sm text-gray-400 truncate max-w-[240px]">
+            <p className="text-sm text-gray-400 truncate max-w-60">
               {item.name}
             </p>
           </div>

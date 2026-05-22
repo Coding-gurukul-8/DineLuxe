@@ -21,6 +21,9 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  Heart,
+  Package,
+  Palette,
 } from "lucide-react"
 
 interface NavItem {
@@ -62,6 +65,38 @@ const navItems: NavItem[] = [
   { label: "Kitchen", href: "/staff/chef/kitchen", icon: <ChefHat size={20} />, roles: ["manager", "chef"] },
   { label: "POS", href: "/staff/cashier", icon: <CreditCard size={20} />, roles: ["manager", "cashier"] },
   { label: "Reports", href: "/staff/manager", icon: <BarChart3 size={20} />, roles: ["manager"] },
+]
+
+const navItems: NavItem[] = [
+  { label: "Dashboard", href: "/admin/dashboard", icon: <LayoutDashboard size={18} />, roles: ["super_admin"], section: "Platform" },
+  { label: "Restaurants", href: "/admin/restaurants", icon: <Store size={18} />, roles: ["super_admin"], section: "Platform" },
+  { label: "Customers", href: "/admin/customers", icon: <Users size={18} />, roles: ["super_admin"], section: "Platform" },
+  { label: "Reports", href: "/admin/reports", icon: <BarChart3 size={18} />, roles: ["super_admin"], section: "Analytics" },
+  { label: "Platform Health", href: "/admin/platform-health", icon: <Shield size={18} />, roles: ["super_admin"], section: "Analytics" },
+  { label: "Settings", href: "/admin/settings", icon: <Settings size={18} />, roles: ["super_admin"], section: "System" },
+
+  { label: "Dashboard", href: "/owner/dashboard", icon: <LayoutDashboard size={18} />, roles: ["owner"], section: "Overview" },
+  { label: "Branches", href: "/owner/branches", icon: <Store size={18} />, roles: ["owner"], section: "Operations" },
+  { label: "Menu", href: "/owner/menu", icon: <Utensils size={18} />, roles: ["owner"], section: "Operations" },
+  { label: "Inventory", href: "/owner/inventory", icon: <Package size={18} />, roles: ["owner"], section: "Operations" },
+  { label: "Staff", href: "/owner/staff", icon: <Users size={18} />, roles: ["owner"], section: "Operations" },
+  { label: "Bookings", href: "/owner/bookings", icon: <Calendar size={18} />, roles: ["owner"], section: "Operations" },
+  { label: "Customers", href: "/owner/customers", icon: <Heart size={18} />, roles: ["owner"], section: "Insights" },
+  { label: "Reports", href: "/owner/reports", icon: <BarChart3 size={18} />, roles: ["owner"], section: "Insights" },
+  { label: "Branding", href: "/owner/branding", icon: <Palette size={18} />, roles: ["owner"], section: "Settings" },
+  { label: "Settings", href: "/owner/settings", icon: <Settings size={18} />, roles: ["owner"], section: "Settings" },
+
+  { label: "Dashboard", href: "/staff/manager/dashboard", icon: <LayoutDashboard size={18} />, roles: ["manager"], section: "Overview" },
+  { label: "Dashboard", href: "/staff/host", icon: <LayoutDashboard size={18} />, roles: ["host"], section: "Overview" },
+  { label: "Dashboard", href: "/staff/waiter", icon: <LayoutDashboard size={18} />, roles: ["waiter"], section: "Overview" },
+  { label: "Dashboard", href: "/staff/chef/kitchen", icon: <LayoutDashboard size={18} />, roles: ["chef"], section: "Overview" },
+  { label: "Dashboard", href: "/staff/cashier", icon: <LayoutDashboard size={18} />, roles: ["cashier"], section: "Overview" },
+  { label: "Floor Map", href: "/staff/host/floor", icon: <QrCode size={18} />, roles: ["manager", "host"], section: "Operations" },
+  { label: "Queue", href: "/staff/host/queue", icon: <ClipboardList size={18} />, roles: ["manager", "host"], section: "Operations" },
+  { label: "Orders", href: "/staff/waiter", icon: <Utensils size={18} />, roles: ["manager", "waiter"], section: "Operations" },
+  { label: "Kitchen", href: "/staff/chef/kitchen", icon: <ChefHat size={18} />, roles: ["manager", "chef"], section: "Operations" },
+  { label: "POS", href: "/staff/cashier", icon: <CreditCard size={18} />, roles: ["manager", "cashier"], section: "Operations" },
+  { label: "Reports", href: "/staff/manager", icon: <BarChart3 size={18} />, roles: ["manager"], section: "Analytics" },
 ]
 
 export function Sidebar() {

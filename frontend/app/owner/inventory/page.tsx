@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
-  Plus, Package, AlertTriangle, Pencil, Trash2, Check, X,
+  Plus, Package, AlertTriangle, Pencil, Trash2, Check, X, RefreshCw,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
@@ -420,7 +420,7 @@ export default function OwnerInventoryPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<InventoryItem | null>(null);
 
-  const { data: rawItems = [], isLoading } = useQuery<InventoryItem[]>({
+  const { data: rawItems = [], isLoading, isError, refetch } = useQuery<InventoryItem[]>({
     queryKey: ["inventory", "branch", branchId],
     queryFn: () =>
       apiClient.get<InventoryItem[]>(`/inventory/branch/${branchId}`),
@@ -463,17 +463,26 @@ export default function OwnerInventoryPage() {
       }
     >
       {/* Summary bar */}
-      <div className="flex items-center gap-5 text-sm">
-        <span className="flex items-center gap-1.5 text-gray-500">
-          <Package size={15} />
-          {isLoading ? "Loading…" : `${items.length} item${items.length !== 1 ? "s" : ""}`}
-        </span>
-        {lowCount > 0 && (
-          <span className="flex items-center gap-1.5 text-red-600 font-medium">
-            <AlertTriangle size={14} />
-            {lowCount} low-stock item{lowCount !== 1 ? "s" : ""}
+      <div className="flex items-center justify-between gap-5 text-sm">
+        <div className="flex items-center gap-5">
+          <span className="flex items-center gap-1.5 text-gray-500">
+            <Package size={15} />
+            {isLoading ? "Loading…" : `${items.length} item${items.length !== 1 ? "s" : ""}`}
           </span>
-        )}
+          {lowCount > 0 && (
+            <span className="flex items-center gap-1.5 text-red-600 font-medium">
+              <AlertTriangle size={14} />
+              {lowCount} low-stock item{lowCount !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => refetch()}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-xs font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          <RefreshCw size={13} />
+          Refresh
+        </button>
       </div>
 
       {/* Table */}
@@ -483,6 +492,13 @@ export default function OwnerInventoryPage() {
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="h-10 bg-gray-100 rounded-lg animate-pulse" />
             ))}
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center py-16 gap-3 text-gray-400">
+            <p className="text-sm">Failed to load inventory</p>
+            <button onClick={() => refetch()} className="text-sm text-[#1A3C5E] flex items-center gap-1 hover:underline">
+              <RefreshCw size={13} /> Retry
+            </button>
           </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center px-4">

@@ -52,361 +52,368 @@ function StatusActionButton({
         title="Suspend restaurant"
       >
         <Ban size={13} />
-        Suspend
-      </button>
-    );
-  }
+        "use client";
 
-  if (restaurant.status === "suspended" || restaurant.status === "pending") {
-    return (
-      <button
-        disabled={isPending}
-        onClick={() => onMutate({ id: restaurant.id, newStatus: "active" })}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-green-50 text-green-600 hover:bg-green-100 disabled:opacity-50 transition"
-        title="Activate restaurant"
-      >
-        <Check size={13} />
-        Activate
-      </button>
-    );
-  }
+        import { useMemo, useState } from "react";
+        import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+        import { motion, AnimatePresence } from "framer-motion";
+        import {
+          Ban, Check, Mail, Search, ChevronDown, Store, AlertCircle,
+          ArrowUp, ArrowDown, ChevronRight, X,
+        } from "lucide-react";
+        import PageWrapper from "@/components/layout/PageWrapper";
+        import { StatusBadge } from "@/components/shared/StatusBadge";
+        import { apiClient } from "@/lib/api-client";
+        import { formatCurrency, formatDate } from "@/lib/utils";
+        import { cn } from "@/lib/utils";
+        import { toast } from "sonner";
 
-  return null;
-}
+        interface Restaurant {
+          id: string;
+          name: string;
+          status: "active" | "pending" | "suspended";
+          owner?: { name?: string; email?: string };
+          city?: string;
+          branches?: { id: string; name: string; city?: string; active?: boolean }[];
+          totalRevenue?: number;
+          createdAt?: string;
+        }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+        type SortKey = "name" | "status" | "totalRevenue" | "createdAt";
+        type SortDir = "asc" | "desc";
 
-export default function AdminRestaurantsPage() {
-  const queryClient = useQueryClient();
-
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  // ── Fetch all restaurants ─────────────────────────────────────────────────
-  // GET /admin/restaurants?page=1&limit=20
-  // The backend getRestaurants() returns { data, count } — we read .data but
-  // the apiClient already unwraps the outer ApiResponse envelope (json.data),
-  // so depending on what the controller returns we might get an array directly
-  // or { data: [], count: N }. Handle both shapes below.
-  const { data: raw, isLoading, isError } = useQuery({
-    queryKey: ["admin", "restaurants"],
-    queryFn: () =>
-      apiClient.get<Restaurant[] | { data: Restaurant[]; count: number }>(
-        "/admin/restaurants?page=1&limit=20"
-      ),
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-  });
-
-  // Normalise: backend may return array or { data, count }
-  const restaurants: Restaurant[] = useMemo(() => {
-    if (!raw) return [];
-    if (Array.isArray(raw)) return raw;
-    if ("data" in raw && Array.isArray(raw.data)) return raw.data;
-    return [];
-  }, [raw]);
-
-  // ── Status mutation ───────────────────────────────────────────────────────
-  // PATCH /restaurants/:id/status  → { status: "active" | "suspended" }
-  const statusMutation = useMutation({
-    mutationFn: ({ id, newStatus }: { id: string; newStatus: string }) =>
-      apiClient.patch(`/restaurants/${id}/status`, { status: newStatus }),
-    onSuccess: (_, vars) => {
-      toast.success(
-        `Restaurant ${vars.newStatus === "active" ? "activated" : "suspended"} successfully`
-      );
-      queryClient.invalidateQueries({ queryKey: ["admin", "restaurants"] });
-    },
-    onError: () => toast.error("Failed to update restaurant status"),
-  });
-
-  // ── Filtered list ─────────────────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return restaurants.filter((r) => {
-      const matchesStatus =
-        statusFilter === "all" || r.status === statusFilter;
-      const matchesSearch =
-        !needle ||
-        r.name?.toLowerCase().includes(needle) ||
-        r.owner?.name?.toLowerCase().includes(needle) ||
-        r.owner?.email?.toLowerCase().includes(needle) ||
-        r.city?.toLowerCase().includes(needle);
-      return matchesStatus && matchesSearch;
-    });
-  }, [restaurants, search, statusFilter]);
-
-  const STATUS_OPTIONS = ["all", "active", "pending", "suspended"];
-
-  return (
-    <PageWrapper
-      title="Restaurants"
-      subtitle="Manage all restaurants on the platform"
-    >
-      <div className="space-y-5">
-
-        {/* Filters */}
-        <div className="flex flex-wrap gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search
-              size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, owner, or city…"
-              className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-gray-200 bg-white text-sm outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
-            />
-          </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s === "all"
-                  ? "All Status"
-                  : s.charAt(0).toUpperCase() + s.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Summary pills */}
-        {!isLoading && (
-          <div className="flex flex-wrap gap-2 text-xs font-medium">
-            {[
-              {
-                label: "Total",
-                count: restaurants.length,
-                color: "bg-gray-100 text-gray-600",
-              },
-              {
-                label: "Active",
-                count: restaurants.filter((r) => r.status === "active").length,
-                color: "bg-green-100 text-green-700",
-              },
-              {
-                label: "Pending",
-                count: restaurants.filter((r) => r.status === "pending").length,
-                color: "bg-yellow-100 text-yellow-700",
-              },
-              {
-                label: "Suspended",
-                count: restaurants.filter((r) => r.status === "suspended")
-                  .length,
-                color: "bg-red-100 text-red-700",
-              },
-            ].map((pill) => (
-              <span
-                key={pill.label}
-                className={cn("px-3 py-1 rounded-full", pill.color)}
+        function StatusActionButton({ restaurant, onMutate, isPending }: {
+          restaurant: Restaurant;
+          onMutate: (payload: { id: string; newStatus: string }) => void;
+          isPending: boolean;
+        }) {
+          if (restaurant.status === "active") {
+            return (
+              <button
+                disabled={isPending}
+                onClick={() => onMutate({ id: restaurant.id, newStatus: "suspended" })}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50 transition"
               >
-                {pill.count} {pill.label}
-              </span>
-            ))}
-          </div>
-        )}
+                <Ban size={12} /> Suspend
+              </button>
+            );
+          }
+          return (
+            <button
+              disabled={isPending}
+              onClick={() => onMutate({ id: restaurant.id, newStatus: "active" })}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 disabled:opacity-50 transition"
+            >
+              <Check size={12} /> Activate
+            </button>
+          );
+        }
 
-        {/* Error */}
-        {isError && (
-          <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
-            <AlertCircle size={16} />
-            Failed to load restaurants. Check your permissions and try again.
-          </div>
-        )}
-
-        {/* Loading skeleton */}
-        {isLoading && (
-          <div className="space-y-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-16 bg-white rounded-xl border border-gray-100 animate-pulse"
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Table */}
-        {!isLoading && (
-          <div className="rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
-                <tr>
-                  {[
-                    "Restaurant",
-                    "Owner",
-                    "City",
-                    "Status",
-                    "Revenue",
-                    "Joined",
-                    "Actions",
-                  ].map((h) => (
-                    <th key={h} className="px-5 py-3 font-semibold whitespace-nowrap">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map((r) => (
-                  <>
-                    {/* Main row */}
-                    <tr
-                      key={r.id}
-                      className="hover:bg-gray-50 cursor-pointer"
-                      onClick={() =>
-                        setExpanded(expanded === r.id ? null : r.id)
-                      }
-                    >
-                      {/* Name */}
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-[#1A3C5E]/10 flex items-center justify-center text-[#1A3C5E] font-bold text-sm shrink-0">
-                            {r.name?.slice(0, 2).toUpperCase()}
-                          </div>
-                          <p className="font-semibold text-gray-900">
-                            {r.name}
+        function DetailPanel({ restaurant, onClose }: { restaurant: Restaurant; onClose: () => void }) {
+          return (
+            <AnimatePresence>
+              <motion.tr key="detail">
+                <td colSpan={6} className="p-0">
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="overflow-hidden bg-gray-50/80 border-t border-gray-100"
+                  >
+                    <div className="px-6 py-5">
+                      <div className="flex items-start justify-between mb-4">
+                        <h3 className="font-semibold text-gray-900">{restaurant.name} — Details</h3>
+                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Owner</p>
+                          <p className="text-gray-700">{restaurant.owner?.name ?? "—"}</p>
+                          <p className="text-xs text-gray-400">{restaurant.owner?.email ?? ""}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Total Revenue</p>
+                          <p className="font-mono font-semibold text-[#E8A020]">
+                            {restaurant.totalRevenue != null ? formatCurrency(restaurant.totalRevenue) : "—"}
                           </p>
                         </div>
-                      </td>
-
-                      {/* Owner */}
-                      <td className="px-5 py-4">
-                        <p className="text-gray-900">{r.owner?.name ?? "—"}</p>
-                        <p className="text-xs text-gray-400">
-                          {r.owner?.email ?? ""}
-                        </p>
-                      </td>
-
-                      {/* City */}
-                      <td className="px-5 py-4 text-gray-600">
-                        {r.city ?? r.branches?.[0]?.city ?? "—"}
-                      </td>
-
-                      {/* Status */}
-                      <td className="px-5 py-4">
-                        <StatusBadge status={r.status} size="sm" />
-                      </td>
-
-                      {/* Revenue */}
-                      <td className="px-5 py-4 font-medium text-gray-800">
-                        {formatCurrency(r.totalRevenue ?? 0)}
-                      </td>
-
-                      {/* Joined */}
-                      <td className="px-5 py-4 text-gray-500 text-xs">
-                        {r.createdAt ? formatDate(r.createdAt) : "—"}
-                      </td>
-
-                      {/* Actions */}
-                      <td
-                        className="px-5 py-4"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="flex items-center gap-2">
-                          <StatusActionButton
-                            restaurant={r}
-                            onMutate={(p) => statusMutation.mutate(p)}
-                            isPending={statusMutation.isPending}
-                          />
-                          {r.owner?.email && (
-                            <a
-                              href={`mailto:${r.owner.email}`}
-                              className="p-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition"
-                              title="Email owner"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Mail size={14} />
-                            </a>
-                          )}
-                          <ChevronDown
-                            size={14}
-                            className={cn(
-                              "text-gray-400 transition-transform",
-                              expanded === r.id && "rotate-180"
-                            )}
-                          />
+                        <div>
+                          <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Branches</p>
+                          <p className="text-gray-700">{restaurant.branches?.length ?? 0} branch(es)</p>
                         </div>
-                      </td>
-                    </tr>
-
-                    {/* Expanded row — branches detail */}
-                    {expanded === r.id && (
-                      <tr key={`${r.id}-detail`} className="bg-blue-50/30">
-                        <td colSpan={7} className="px-5 py-4">
-                          <div className="grid sm:grid-cols-2 gap-4">
-                            <div>
-                              <p className="text-xs font-semibold uppercase text-gray-500 mb-2">
-                                Branches ({r.branches?.length ?? 0})
-                              </p>
-                              {r.branches?.length ? (
-                                r.branches.map((b) => (
-                                  <div
-                                    key={b.id ?? b.name}
-                                    className="flex items-center gap-2 mb-1.5"
-                                  >
-                                    <span
-                                      className={cn(
-                                        "h-2 w-2 rounded-full shrink-0",
-                                        b.active
-                                          ? "bg-green-500"
-                                          : "bg-gray-300"
-                                      )}
-                                    />
-                                    <span className="text-sm text-gray-700">
-                                      {b.name}
-                                    </span>
-                                    {b.city && (
-                                      <span className="text-xs text-gray-400">
-                                        — {b.city}
-                                      </span>
-                                    )}
-                                  </div>
-                                ))
-                              ) : (
-                                <p className="text-sm text-gray-400">
-                                  No branches on record
-                                </p>
-                              )}
-                            </div>
-                            <div>
-                              <p className="text-xs font-semibold uppercase text-gray-500 mb-2">
-                                Owner Contact
-                              </p>
-                              <p className="text-sm text-gray-700">
-                                {r.owner?.name ?? "—"}
-                              </p>
-                              <p className="text-xs text-gray-400">
-                                {r.owner?.email ?? "—"}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                ))}
-
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-5 py-10 text-center">
-                      <div className="flex flex-col items-center gap-2 text-gray-400">
-                        <Store size={32} className="opacity-30" />
-                        <p className="text-sm">No restaurants match your filters</p>
+                        <div>
+                          <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">City</p>
+                          <p className="text-gray-700">{restaurant.city ?? "—"}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Joined</p>
+                          <p className="text-gray-700">{restaurant.createdAt ? formatDate(restaurant.createdAt) : "—"}</p>
+                        </div>
                       </div>
-                    </td>
-                  </tr>
+                    </div>
+                  </motion.div>
+                </td>
+              </motion.tr>
+            </AnimatePresence>
+          );
+        }
+
+        export default function AdminRestaurantsPage() {
+          const qc = useQueryClient();
+          const [search, setSearch] = useState("");
+          const [statusFilter, setStatusFilter] = useState<"all" | "active" | "pending" | "suspended">("all");
+          const [sortKey, setSortKey] = useState<SortKey>("name");
+          const [sortDir, setSortDir] = useState<SortDir>("asc");
+          const [expandedId, setExpandedId] = useState<string | null>(null);
+          const [selected, setSelected] = useState<Set<string>>(new Set());
+
+          const { data: restaurants = [], isLoading, isError } = useQuery<Restaurant[]>({
+            queryKey: ["admin", "restaurants"],
+            queryFn: () => apiClient.get<Restaurant[]>("/admin/restaurants"),
+            staleTime: 30_000,
+          });
+
+          const statusMutation = useMutation({
+            mutationFn: ({ id, newStatus }: { id: string; newStatus: string }) =>
+              apiClient.patch(`/admin/restaurants/${id}/status`, { status: newStatus }),
+            onSuccess: () => {
+              qc.invalidateQueries({ queryKey: ["admin", "restaurants"] });
+              toast.success("Restaurant status updated");
+            },
+            onError: () => toast.error("Failed to update status"),
+          });
+
+          const handleSort = (key: SortKey) => {
+            if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+            else { setSortKey(key); setSortDir("asc"); }
+          };
+
+          const filtered = useMemo(() => {
+            let list = restaurants.filter((r) => {
+              const matchSearch = r.name.toLowerCase().includes(search.toLowerCase())
+                || r.owner?.email?.toLowerCase().includes(search.toLowerCase());
+              const matchStatus = statusFilter === "all" || r.status === statusFilter;
+              return matchSearch && matchStatus;
+            });
+            list = [...list].sort((a, b) => {
+              let av: string | number = (a as any)[sortKey] ?? "";
+              let bv: string | number = (b as any)[sortKey] ?? "";
+              if (typeof av === "string") av = av.toLowerCase();
+              if (typeof bv === "string") bv = bv.toLowerCase();
+              if (av < bv) return sortDir === "asc" ? -1 : 1;
+              if (av > bv) return sortDir === "asc" ? 1 : -1;
+              return 0;
+            });
+            return list;
+          }, [restaurants, search, statusFilter, sortKey, sortDir]);
+
+          const toggleSelect = (id: string) => {
+            setSelected((prev) => {
+              const next = new Set(prev);
+              next.has(id) ? next.delete(id) : next.add(id);
+              return next;
+            });
+          };
+
+          const SortIcon = ({ col }: { col: SortKey }) =>
+            sortKey !== col ? <ChevronDown size={12} className="text-gray-300" /> :
+            sortDir === "asc" ? <ArrowUp size={12} className="text-[#1A3C5E]" /> :
+            <ArrowDown size={12} className="text-[#1A3C5E]" />;
+
+          const ThBtn = ({ col, label }: { col: SortKey; label: string }) => (
+            <button
+              onClick={() => handleSort(col)}
+              className="flex items-center gap-1 text-xs font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600 transition-colors"
+            >
+              {label} <SortIcon col={col} />
+            </button>
+          );
+
+          return (
+            <PageWrapper>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Playfair Display, serif" }}>
+                    Restaurants
+                  </h1>
+                  <p className="text-sm text-gray-400 mt-0.5">{filtered.length} results</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3 mb-5">
+                <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 flex-1 min-w-50 max-w-xs">
+                  <Search size={14} className="text-gray-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search restaurants..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="bg-transparent text-sm outline-none w-full placeholder:text-gray-400"
+                  />
+                </div>
+                <div className="flex gap-1.5">
+                  {(["all", "active", "pending", "suspended"] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setStatusFilter(s)}
+                      className={cn(
+                        "px-3 py-2 rounded-xl text-xs font-semibold capitalize transition-colors",
+                        statusFilter === s
+                          ? "bg-[#1A3C5E] text-white"
+                          : "bg-white border border-gray-200 text-gray-500 hover:border-gray-300"
+                      )}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50/80">
+                      <tr>
+                        <th className="w-8 px-4 py-3">
+                          <input
+                            type="checkbox"
+                            className="rounded"
+                            onChange={(e) =>
+                              setSelected(e.target.checked ? new Set(filtered.map((r) => r.id)) : new Set())
+                            }
+                          />
+                        </th>
+                        <th className="px-4 py-3 text-left"><ThBtn col="name" label="Name" /></th>
+                        <th className="px-4 py-3 text-left"><ThBtn col="status" label="Status" /></th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide hidden md:table-cell">
+                          Owner
+                        </th>
+                        <th className="px-4 py-3 text-right hidden md:table-cell"><ThBtn col="totalRevenue" label="Revenue" /></th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {isLoading
+                        ? Array.from({ length: 5 }).map((_, i) => (
+                            <tr key={i} className="border-t border-gray-50">
+                              <td colSpan={6} className="px-4 py-4">
+                                <div className="h-5 bg-gray-100 rounded animate-pulse" />
+                              </td>
+                            </tr>
+                          ))
+                        : isError
+                        ? (
+                            <tr>
+                              <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-400">
+                                Failed to load restaurants
+                              </td>
+                            </tr>
+                          )
+                        : filtered.map((r, idx) => (
+                            <>
+                              <motion.tr
+                                key={r.id}
+                                layout
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ delay: idx * 0.04 }}
+                                className={cn(
+                                  "border-t border-gray-50 group relative hover:bg-gray-50/50 transition-colors",
+                                  selected.has(r.id) && "bg-[#1A3C5E]/3"
+                                )}
+                              >
+                                <td className="w-8 px-4 py-3.5">
+                                  <div className="absolute left-0 top-1 bottom-1 w-0.5 bg-[#E8A020] opacity-0 group-hover:opacity-100 transition-opacity rounded-full" />
+                                  <input
+                                    type="checkbox"
+                                    className="rounded"
+                                    checked={selected.has(r.id)}
+                                    onChange={() => toggleSelect(r.id)}
+                                  />
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <p className="text-sm font-medium text-gray-800">{r.name}</p>
+                                  {r.city && <p className="text-xs text-gray-400">{r.city}</p>}
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <StatusBadge status={r.status} />
+                                </td>
+                                <td className="px-4 py-3.5 hidden md:table-cell">
+                                  <p className="text-xs text-gray-600">{r.owner?.name ?? "—"}</p>
+                                  <p className="text-[10px] text-gray-400">{r.owner?.email ?? ""}</p>
+                                </td>
+                                <td className="px-4 py-3.5 text-right hidden md:table-cell">
+                                  <span className="font-mono text-sm font-semibold text-[#E8A020]">
+                                    {r.totalRevenue != null ? formatCurrency(r.totalRevenue) : "—"}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <StatusActionButton
+                                      restaurant={r}
+                                      onMutate={(p) => statusMutation.mutate(p)}
+                                      isPending={statusMutation.isPending}
+                                    />
+                                    <button
+                                      onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-[#1A3C5E] transition-colors px-2 py-1.5 rounded-lg hover:bg-[#1A3C5E]/8"
+                                    >
+                                      View <ChevronRight size={12} className={cn("transition-transform", expandedId === r.id && "rotate-90")} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </motion.tr>
+                              {expandedId === r.id && (
+                                <DetailPanel restaurant={r} onClose={() => setExpandedId(null)} />
+                              )}
+                            </>
+                          ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <AnimatePresence>
+                {selected.size > 0 && (
+                  <motion.div
+                    initial={{ y: 60, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ y: 60, opacity: 0 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                    className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-[#1A3C5E] text-white rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-4 z-50"
+                  >
+                    <span className="text-sm font-medium">{selected.size} selected</span>
+                    <div className="h-4 w-px bg-white/20" />
+                    <button
+                      className="flex items-center gap-1.5 text-sm font-medium text-emerald-300 hover:text-emerald-200 transition-colors"
+                      onClick={() => {
+                        selected.forEach((id) => statusMutation.mutate({ id, newStatus: "active" }));
+                        setSelected(new Set());
+                      }}
+                    >
+                      <Check size={14} /> Activate All
+                    </button>
+                    <button
+                      className="flex items-center gap-1.5 text-sm font-medium text-red-300 hover:text-red-200 transition-colors"
+                      onClick={() => {
+                        selected.forEach((id) => statusMutation.mutate({ id, newStatus: "suspended" }));
+                        setSelected(new Set());
+                      }}
+                    >
+                      <Ban size={14} /> Suspend All
+                    </button>
+                    <button
+                      onClick={() => setSelected(new Set())}
+                      className="text-white/40 hover:text-white/70 transition-colors"
+                    >
+                      <X size={16} />
+                    </button>
+                  </motion.div>
                 )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </PageWrapper>
-  );
-}
+              </AnimatePresence>
+            </PageWrapper>
+          );
+        }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -67,6 +67,121 @@ type BrandingFormData = z.infer<typeof brandingSchema>;
 
 type PreviewScreen = "Splash" | "Login" | "Home";
 
+function LogoDropZone({
+  restaurantId,
+  value,
+  onChange,
+}: {
+  restaurantId: string;
+  value: string;
+  onChange: (url: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const uploadLogo = useCallback(async (file: File) => {
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/svg+xml", "image/x-icon"];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error("Logo must be JPEG, PNG, WebP, SVG, or ICO");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const uploadInfo = await apiClient.post<{
+        upload_url: string;
+        public_url: string;
+        expires_in: number;
+        max_size_bytes: number;
+      }>(`/restaurants/${restaurantId}/branding/upload-url`, {
+        file_type: "logo",
+        content_type: file.type,
+      });
+
+      if (file.size > uploadInfo.max_size_bytes) {
+        toast.error(`Logo must be smaller than ${(uploadInfo.max_size_bytes / (1024 * 1024)).toFixed(0)} MB`);
+        return;
+      }
+
+      const response = await fetch(uploadInfo.upload_url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type,
+        },
+        body: file,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed with status ${response.status}`);
+      }
+
+      onChange(uploadInfo.public_url);
+      toast.success("Logo uploaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to upload logo");
+    } finally {
+      setIsUploading(false);
+    }
+  }, [onChange, restaurantId]);
+
+  return (
+    <div
+      onDragOver={(event) => {
+        event.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setIsDragging(false);
+        const file = event.dataTransfer.files?.[0];
+        if (file) void uploadLogo(file);
+      }}
+      className={cn(
+        "rounded-xl border border-dashed p-4 transition-colors",
+        isDragging ? "border-[#1A3C5E] bg-[#1A3C5E]/5" : "border-gray-200 bg-gray-50"
+      )}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/svg+xml,image/x-icon"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void uploadLogo(file);
+        }}
+      />
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-800">Drop a logo here</p>
+          <p className="text-xs text-gray-500">
+            PNG, JPG, WebP, SVG, or ICO. Uploads update the preview and save to the branding record.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={isUploading}
+          className="shrink-0 rounded-lg bg-[#1A3C5E] px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+        >
+          {isUploading ? "Uploading..." : value ? "Replace" : "Choose file"}
+        </button>
+      </div>
+      {value && (
+        <div className="mt-3 flex items-center gap-3 rounded-lg bg-white p-3 border border-gray-200">
+          <img src={value} alt="Logo preview" className="h-10 w-10 rounded-md object-cover" />
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-gray-700 truncate">Uploaded logo</p>
+            <p className="text-[10px] text-gray-400 truncate">{value}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Phone Preview ─────────────────────────────────────────────────────────────
 
 function BrandLogo({
@@ -108,14 +223,14 @@ function PhonePreview({
 }) {
   if (screen === "Splash") {
     return (
-      <div className="flex h-full flex-col items-center justify-center bg-[var(--preview-primary)] px-8 text-center text-white">
+      <div className="flex h-full flex-col items-center justify-center bg-(--preview-primary) px-8 text-center text-white">
         <div className="mb-7">
           <BrandLogo logoUrl={logoUrl} appName={appName} />
         </div>
         <h3 className="text-3xl font-bold">{appName}</h3>
         <p className="mt-2 text-sm text-white/80">{tagline}</p>
         <div className="mt-10 flex gap-2">
-          <span className="h-2 w-8 rounded-full bg-[var(--preview-secondary)]" />
+          <span className="h-2 w-8 rounded-full bg-(--preview-secondary)" />
           <span className="h-2 w-2 rounded-full bg-white/40" />
           <span className="h-2 w-2 rounded-full bg-white/40" />
         </div>
@@ -126,7 +241,7 @@ function PhonePreview({
   if (screen === "Login") {
     return (
       <div className="flex h-full flex-col bg-gray-50">
-        <div className="bg-[var(--preview-primary)] px-6 pb-10 pt-12 text-white">
+        <div className="bg-(--preview-primary) px-6 pb-10 pt-12 text-white">
           <BrandLogo logoUrl={logoUrl} appName={appName} />
           <h3 className="mt-5 text-2xl font-bold">{appName}</h3>
           <p className="mt-1 text-sm text-white/80">{tagline}</p>
@@ -135,7 +250,7 @@ function PhonePreview({
           <div className="rounded-lg bg-white p-4 shadow-sm">
             <div className="h-11 rounded-lg bg-gray-100" />
             <div className="mt-3 h-11 rounded-lg bg-gray-100" />
-            <div className="mt-4 h-12 w-full rounded-lg bg-[var(--preview-secondary)] flex items-center justify-center text-sm font-bold text-gray-950">
+            <div className="mt-4 h-12 w-full rounded-lg bg-(--preview-secondary) flex items-center justify-center text-sm font-bold text-gray-950">
               Sign In
             </div>
           </div>
@@ -149,7 +264,7 @@ function PhonePreview({
 
   return (
     <div className="h-full bg-gray-50">
-      <div className="bg-[var(--preview-primary)] px-5 pb-5 pt-9 text-white">
+      <div className="bg-(--preview-primary) px-5 pb-5 pt-9 text-white">
         <div className="flex items-center gap-3">
           <BrandLogo logoUrl={logoUrl} appName={appName} />
           <div>
@@ -166,7 +281,7 @@ function PhonePreview({
           <h4 className="mt-2 text-lg font-bold text-gray-950">
             Chef's tasting menu
           </h4>
-          <div className="mt-4 h-11 rounded-lg bg-[var(--preview-secondary)] flex items-center px-4 text-sm font-bold text-gray-950">
+          <div className="mt-4 h-11 rounded-lg bg-(--preview-secondary) flex items-center px-4 text-sm font-bold text-gray-950">
             Reserve table
           </div>
         </div>
@@ -196,6 +311,7 @@ export default function BrandingPage() {
     handleSubmit,
     watch,
     reset,
+    setValue,
     formState: { errors, isDirty },
   } = useForm<BrandingFormData>({
     resolver: zodResolver(brandingSchema),
@@ -428,23 +544,19 @@ export default function BrandingPage() {
                 </div>
               </div>
 
-              {/* Logo URL */}
+              {/* Logo */}
               <div className="space-y-1.5">
                 <label className="text-sm font-semibold text-gray-800">
-                  Logo URL
+                  Logo
                 </label>
-                <input
-                  {...register("logo_url")}
-                  type="url"
-                  placeholder="https://your-supabase.supabase.co/storage/v1/object/public/..."
-                  className="min-h-12 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1A3C5E]"
+                <LogoDropZone
+                  restaurantId={restaurantId}
+                  value={watch("logo_url") ?? ""}
+                  onChange={(url) => setValue("logo_url", url, { shouldDirty: true, shouldValidate: true })}
                 />
                 {errors.logo_url && (
                   <p className="text-xs text-red-500">{errors.logo_url.message}</p>
                 )}
-                <p className="text-xs text-gray-400">
-                  Must be a Supabase Storage public URL. Use the Upload API to get one.
-                </p>
               </div>
 
               {/* Banner URL */}
@@ -538,9 +650,9 @@ export default function BrandingPage() {
               </div>
 
               <div className="mt-6 flex justify-center">
-                <div className="w-[280px] rounded-[34px] border-[10px] border-gray-950 bg-gray-950 shadow-lg">
+                <div className="w-70 rounded-[34px] border-10 border-gray-950 bg-gray-950 shadow-lg">
                   <div
-                    className="h-[580px] overflow-hidden rounded-[24px] bg-white"
+                    className="h-145 overflow-hidden rounded-3xl bg-white"
                     style={previewVars}
                   >
                     <PhonePreview

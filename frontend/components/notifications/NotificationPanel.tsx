@@ -138,7 +138,7 @@ export function NotificationPanel({ isOpen, onClose }: NotificationPanelProps) {
             transition={{ type: "spring", stiffness: 340, damping: 28 }}
             className={cn(
               "absolute right-0 top-full mt-2 z-50",
-              "w-[340px] max-h-[480px] flex flex-col",
+              "w-85 max-h-120 flex flex-col",
               "bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
             )}
           >
