@@ -1,25 +1,23 @@
 "use client"
 
 import { useState } from "react"
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { ApiError } from "@repo/shared"
 import { signup } from "@/lib/auth-client"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter"
-import { Loader2, User, Mail, Lock, ShieldCheck, Eye, EyeOff, Check } from "lucide-react"
+import { Loader2, User, Mail, Lock, ShieldCheck, Eye, EyeOff, CheckCircle2, Check, Key } from "lucide-react"
 
 const adminSignupSchema = z
   .object({
-    firstName:    z.string().min(1, "First name is required"),
-    lastName:     z.string().min(1, "Last name is required"),
-    email:        z.string().email("Enter a valid email"),
-    inviteCode:   z.string().min(1, "Invite code is required"),
-    password:     z.string().min(8, "Password must be at least 8 characters"),
+    firstName:       z.string().min(1, "First name is required"),
+    lastName:        z.string().min(1, "Last name is required"),
+    email:           z.string().email("Enter a valid email"),
+    inviteCode:      z.string().min(1, "Invite code is required"),
+    password:        z.string().min(8, "Password must be at least 8 characters"),
     confirmPassword: z.string().min(1, "Please confirm your password"),
   })
   .refine((d) => d.password === d.confirmPassword, {
@@ -27,57 +25,108 @@ const adminSignupSchema = z
     path: ["confirmPassword"],
   })
 
-type AdminSignupForm = z.infer<typeof adminSignupSchema>
+type AdminSignupFormValues = z.infer<typeof adminSignupSchema>
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } },
+}
+const itemVariants = {
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as any } },
+}
+
+function FloatingInput({
+  id, label, type = "text", icon, error, disabled, registration, onChange: onChangeProp, suffix,
+}: {
+  id: string; label: string; type?: string; icon: React.ReactNode
+  error?: string; disabled?: boolean; registration: object
+  onChange?: () => void; suffix?: React.ReactNode
+}) {
+  const [focused, setFocused] = useState(false)
+  const [hasValue, setHasValue] = useState(false)
+
+  return (
+    <div>
+      <div className={`relative rounded-xl border transition-all duration-300 bg-white/60 backdrop-blur-sm
+        ${error ? "border-red-400 shadow-[0_0_0_3px_rgba(239,68,68,0.08)]" : ""}
+        ${focused && !error ? "border-[#E8A020] shadow-[0_0_0_3px_rgba(232,160,32,0.12)]" : ""}
+        ${!focused && !error ? "border-[#1A3C5E]/12 hover:border-[#1A3C5E]/25" : ""}`}>
+        <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-200 pointer-events-none
+          ${focused ? "text-[#E8A020]" : "text-[#1A3C5E]/30"}`}>{icon}</div>
+        <label htmlFor={id}
+          className={`absolute left-11 pointer-events-none transition-all duration-200 ease-out
+            ${(focused || hasValue) ? "top-2 text-[10px] tracking-wider" : "top-1/2 -translate-y-1/2 text-sm"}
+            ${focused ? "text-[#E8A020]" : error ? "text-red-400" : "text-[#1A3C5E]/50"}`}>
+          {label}
+        </label>
+        <input id={id} type={type} disabled={disabled}
+          className="w-full bg-transparent pt-6 pb-2 pl-11 pr-11 text-sm text-[#1A3C5E] outline-none rounded-xl placeholder-transparent disabled:opacity-50"
+          {...(registration as object)}
+          onFocus={() => setFocused(true)}
+          onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+            setFocused(false); setHasValue(e.target.value.length > 0)
+            ;(registration as { onBlur?: (e: React.FocusEvent) => void }).onBlur?.(e)
+          }}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+            setHasValue(e.target.value.length > 0)
+            ;(registration as { onChange?: (e: React.ChangeEvent) => void }).onChange?.(e)
+            onChangeProp?.()
+          }}
+        />
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden rounded-b-xl">
+          <motion.div className="h-full bg-[#E8A020]" initial={{ scaleX: 0, originX: 0 }}
+            animate={{ scaleX: focused ? 1 : 0 }} transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] as any }} />
+        </div>
+        {suffix && <div className="absolute right-3 top-1/2 -translate-y-1/2">{suffix}</div>}
+      </div>
+      <AnimatePresence>
+        {error && (
+          <motion.p role="alert" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="mt-1.5 ml-1 text-xs text-red-500">{error}</motion.p>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
 
 export function AdminSignupForm() {
-  const [showPassword, setShowPassword]   = useState(false)
-  const [showConfirm,  setShowConfirm]    = useState(false)
-  const [isSubmitting, setIsSubmitting]   = useState(false)
-  const [error, setError]                 = useState<string | null>(null)
-  const [success, setSuccess]             = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSuccess, setIsSuccess] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    watch,
-  } = useForm<AdminSignupForm>({
+  const { register, handleSubmit, watch, formState: { errors } } = useForm<AdminSignupFormValues>({
     resolver: zodResolver(adminSignupSchema),
     mode: "onChange",
   })
 
-  const password        = watch("password")
-  const confirmPassword = watch("confirmPassword")
+  const password = watch("password") ?? ""
+  const confirmPassword = watch("confirmPassword") ?? ""
 
   const getErrorMessage = (err: unknown): string => {
     if (err instanceof ApiError) {
       if (err.statusCode === 409) return "An account with this email already exists."
       if (err.statusCode === 403) return "Invalid invite code. Please contact your platform administrator."
-      return err.message || "Something went wrong. Please try again."
+      return err.message || "An unexpected error occurred. Please try again."
     }
-    if (err instanceof Error) return err.message
-    return "Something went wrong. Please try again."
+    return "An unexpected error occurred. Please try again."
   }
 
-  const onSubmit = async (data: AdminSignupForm) => {
-    setIsSubmitting(true)
-    setError(null)
+  const onSubmit = async (data: AdminSignupFormValues) => {
+    setIsSubmitting(true); setError(null)
     try {
-      const result = await signup({
-        email:     data.email,
-        password:  data.password,
+      await signup({
         firstName: data.firstName,
-        lastName:  data.lastName,
+        lastName: data.lastName,
+        email: data.email,
+        password: data.password,
+        inviteCode: data.inviteCode,
       })
-      setSuccess(true)
-      if (result.verification_pending) {
-        setTimeout(() => {
-          router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}&portal=admin`)
-        }, 1500)
-      } else {
-        setTimeout(() => router.push("/admin/dashboard"), 1500)
-      }
+      setIsSuccess(true)
+      setTimeout(() => router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}&portal=admin`), 800)
     } catch (err) {
       setError(getErrorMessage(err))
     } finally {
@@ -85,161 +134,115 @@ export function AdminSignupForm() {
     }
   }
 
-  if (success) {
-    return (
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="text-center py-8"
-      >
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ type: "spring", stiffness: 200, damping: 15 }}
-          className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4"
-        >
-          <Check size={32} className="text-green-600" />
-        </motion.div>
-        <h3 className="text-xl font-semibold text-gray-900 mb-2">Admin Account Created!</h3>
-        <p className="text-sm text-gray-500">Redirecting you now…</p>
-      </motion.div>
-    )
-  }
-
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      {/* First name + Last name */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className="text-sm font-medium text-gray-700">First Name</label>
-          <div className="relative">
-            <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <Input placeholder="Jane" className="pl-9" disabled={isSubmitting} {...register("firstName")} />
+    <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {/* Progress indicator (single step, admin is one form) */}
+        <motion.div variants={itemVariants} className="mb-2">
+          <div className="h-1 rounded-full bg-[#1A3C5E]/8 overflow-hidden">
+            <div className="h-full w-full rounded-full bg-[#E8A020]/50" />
           </div>
-          {errors.firstName && (
-            <p className="text-xs text-red-500" role="alert">{errors.firstName.message}</p>
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-sm font-medium text-gray-700">Last Name</label>
-          <div className="relative">
-            <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <Input placeholder="Doe" className="pl-9" disabled={isSubmitting} {...register("lastName")} />
-          </div>
-          {errors.lastName && (
-            <p className="text-xs text-red-500" role="alert">{errors.lastName.message}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Email */}
-      <div className="space-y-1">
-        <label className="text-sm font-medium text-gray-700">Email</label>
-        <div className="relative">
-          <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <Input type="email" placeholder="admin@dineluxe.com" className="pl-9" disabled={isSubmitting} {...register("email")} />
-        </div>
-        {errors.email && (
-          <p className="text-xs text-red-500" role="alert">{errors.email.message}</p>
-        )}
-      </div>
-
-      {/* Invite code */}
-      <div className="space-y-1">
-        <label className="text-sm font-medium text-gray-700">Admin Invite Code</label>
-        <div className="relative">
-          <ShieldCheck size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <Input placeholder="Enter the invite code you received" className="pl-9" disabled={isSubmitting} {...register("inviteCode")} />
-        </div>
-        {errors.inviteCode && (
-          <p className="text-xs text-red-500" role="alert">{errors.inviteCode.message}</p>
-        )}
-        <p className="text-xs text-gray-400">
-          Admin accounts require an invite code issued by an existing super-admin.
-        </p>
-      </div>
-
-      {/* Password */}
-      <div className="space-y-1">
-        <label className="text-sm font-medium text-gray-700">Password</label>
-        <div className="relative">
-          <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <Input
-            type={showPassword ? "text" : "password"}
-            placeholder="Create a strong password"
-            className="pl-9 pr-10"
-            disabled={isSubmitting}
-            {...register("password")}
-          />
-          <button
-            type="button"
-            tabIndex={-1}
-            onClick={() => setShowPassword((v) => !v)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-          >
-            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        </div>
-        {errors.password && (
-          <p className="text-xs text-red-500" role="alert">{errors.password.message}</p>
-        )}
-        {password && <PasswordStrengthMeter password={password} />}
-      </div>
-
-      {/* Confirm password */}
-      <div className="space-y-1">
-        <label className="text-sm font-medium text-gray-700">Confirm Password</label>
-        <div className="relative">
-          <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <Input
-            type={showConfirm ? "text" : "password"}
-            placeholder="Re-enter your password"
-            className="pl-9 pr-10"
-            disabled={isSubmitting}
-            {...register("confirmPassword")}
-          />
-          <button
-            type="button"
-            tabIndex={-1}
-            onClick={() => setShowConfirm((v) => !v)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-          >
-            {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        </div>
-        {errors.confirmPassword && (
-          <p className="text-xs text-red-500" role="alert">{errors.confirmPassword.message}</p>
-        )}
-        {confirmPassword && (
-          <p className={`text-xs ${password === confirmPassword ? "text-green-600" : "text-red-500"}`}>
-            {password === confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
-          </p>
-        )}
-      </div>
-
-      {error && (
-        <motion.div
-          role="alert"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-lg"
-        >
-          {error}
+          <p className="mt-1.5 text-[10px] text-[#1A3C5E]/35 tracking-wider uppercase">Admin Registration</p>
         </motion.div>
-      )}
 
-      <Button
-        type="submit"
-        disabled={isSubmitting}
-        className="w-full h-11 bg-brand-primary hover:bg-brand-primary/90 text-white font-medium mt-2"
-      >
-        {isSubmitting ? (
-          <><Loader2 className="animate-spin mr-2" size={18} />Creating admin account…</>
-        ) : (
-          <><ShieldCheck size={18} className="mr-2" />Create Admin Account</>
-        )}
-      </Button>
-    </form>
+        {/* Admin badge */}
+        <motion.div variants={itemVariants}
+          className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-[#1A3C5E]/4 border border-[#1A3C5E]/8">
+          <ShieldCheck size={16} className="text-[#E8A020] shrink-0" />
+          <p className="text-xs text-[#1A3C5E]/60">
+            Admin accounts require a valid invite code issued by your platform administrator.
+          </p>
+        </motion.div>
+
+        <motion.div variants={itemVariants} className="grid grid-cols-2 gap-3">
+          <FloatingInput id="adm-firstName" label="First name" icon={<User size={17} />}
+            error={errors.firstName?.message} disabled={isSubmitting} registration={register("firstName")} />
+          <FloatingInput id="adm-lastName" label="Last name" icon={<User size={17} />}
+            error={errors.lastName?.message} disabled={isSubmitting} registration={register("lastName")} />
+        </motion.div>
+
+        <motion.div variants={itemVariants}>
+          <FloatingInput id="adm-email" label="Email address" type="email" icon={<Mail size={17} />}
+            error={errors.email?.message} disabled={isSubmitting} registration={register("email")} />
+        </motion.div>
+
+        <motion.div variants={itemVariants}>
+          <FloatingInput id="adm-invite" label="Invite code" icon={<Key size={17} />}
+            error={errors.inviteCode?.message} disabled={isSubmitting} registration={register("inviteCode")} />
+        </motion.div>
+
+        <motion.div variants={itemVariants} className="space-y-1">
+          <FloatingInput id="adm-password" label="Password" type={showPassword ? "text" : "password"}
+            icon={<Lock size={17} />} error={errors.password?.message} disabled={isSubmitting}
+            registration={register("password")}
+            suffix={
+              <button type="button" onClick={() => setShowPassword((v) => !v)}
+                className="text-[#1A3C5E]/30 hover:text-[#E8A020] transition-colors p-1" tabIndex={-1}>
+                <motion.div key={showPassword ? "h" : "s"} initial={{ opacity: 0, rotate: -15 }} animate={{ opacity: 1, rotate: 0 }} transition={{ duration: 0.2 }}>
+                  {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                </motion.div>
+              </button>
+            }
+          />
+          {password && <PasswordStrengthMeter password={password} className="mt-2" />}
+        </motion.div>
+
+        <motion.div variants={itemVariants} className="space-y-1">
+          <FloatingInput id="adm-confirm" label="Confirm password" type={showConfirm ? "text" : "password"}
+            icon={<Lock size={17} />} error={errors.confirmPassword?.message} disabled={isSubmitting}
+            registration={register("confirmPassword")}
+            suffix={
+              <button type="button" onClick={() => setShowConfirm((v) => !v)}
+                className="text-[#1A3C5E]/30 hover:text-[#E8A020] transition-colors p-1" tabIndex={-1}>
+                <motion.div key={showConfirm ? "h" : "s"} initial={{ opacity: 0, rotate: -15 }} animate={{ opacity: 1, rotate: 0 }} transition={{ duration: 0.2 }}>
+                  {showConfirm ? <EyeOff size={17} /> : <Eye size={17} />}
+                </motion.div>
+              </button>
+            }
+          />
+          <AnimatePresence>
+            {confirmPassword && password === confirmPassword && (
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="mt-1.5 ml-1 text-xs text-emerald-600 flex items-center gap-1">
+                <Check size={11} />Passwords match
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </motion.div>
+
+        <AnimatePresence>
+          {error && (
+            <motion.div role="alert" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="rounded-xl bg-red-50 border border-red-200/80 px-4 py-3">
+              <p className="text-sm text-red-600">{error}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <motion.div variants={itemVariants}>
+          <button type="submit" disabled={isSubmitting || isSuccess}
+            className="w-full h-12 rounded-xl font-medium text-sm tracking-wide text-white transition-all duration-300 disabled:opacity-50 overflow-hidden"
+            style={{ background: "linear-gradient(135deg, #1A3C5E 0%, #1a4a72 100%)" }}>
+            <AnimatePresence mode="wait">
+              {isSuccess ? (
+                <motion.span key="s" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-center justify-center gap-2 text-[#E8A020]">
+                  <CheckCircle2 size={17} />Account Created
+                </motion.span>
+              ) : isSubmitting ? (
+                <motion.span key="l" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex items-center justify-center gap-2 text-white/70">
+                  <Loader2 size={17} className="animate-spin" />Creating…
+                </motion.span>
+              ) : (
+                <motion.span key="i" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  Create Admin Account
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </button>
+        </motion.div>
+      </form>
+    </motion.div>
   )
 }

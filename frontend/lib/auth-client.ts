@@ -19,6 +19,7 @@ type SignupInput = {
   firstName?: string
   lastName?: string
   email: string
+  inviteCode?: string
   phone?: string
   password: string
 }

@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, type ReactNode } from "react"
-import { motion, AnimatePresence, type Variants } from "framer-motion"
+import { useState } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useForm, type UseFormRegister } from "react-hook-form"
+import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { ApiError } from "@repo/shared"
@@ -25,22 +25,22 @@ const containerVariants = {
     opacity: 1,
     transition: { staggerChildren: 0.08, delayChildren: 0.1 },
   },
-} satisfies Variants
+}
 
 const itemVariants = {
   hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const } },
-} satisfies Variants
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as any } },
+}
 
 interface FloatingInputProps {
   id: string
   label: string
   type?: string
-  icon: ReactNode
+  icon: React.ReactNode
   error?: string
   disabled?: boolean
-  registration: ReturnType<UseFormRegister<LoginFormValues>>
-  suffix?: ReactNode
+  registration: ReturnType<ReturnType<typeof useForm>["register"]>
+  suffix?: React.ReactNode
   onChange?: () => void
 }
 
@@ -57,11 +57,13 @@ function FloatingInput({ id, label, type = "text", icon, error, disabled, regist
           ${!focused && !error ? "border-[#1A3C5E]/12 hover:border-[#1A3C5E]/25" : ""}
         `}
       >
+        {/* Icon */}
         <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-200 pointer-events-none
           ${focused ? "text-[#E8A020]" : "text-[#1A3C5E]/30"}`}>
           {icon}
         </div>
 
+        {/* Floating label */}
         <label
           htmlFor={id}
           className={`absolute left-11 pointer-events-none transition-all duration-200 ease-out
@@ -72,6 +74,7 @@ function FloatingInput({ id, label, type = "text", icon, error, disabled, regist
           {label}
         </label>
 
+        {/* Input */}
         <input
           id={id}
           type={type}
@@ -91,15 +94,17 @@ function FloatingInput({ id, label, type = "text", icon, error, disabled, regist
           }}
         />
 
+        {/* Gold underline sweep */}
         <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden rounded-b-xl">
           <motion.div
             className="h-full bg-[#E8A020]"
             initial={{ scaleX: 0, originX: 0 }}
             animate={{ scaleX: focused ? 1 : 0 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] as const }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] as any }}
           />
         </div>
 
+        {/* Suffix slot */}
         {suffix && (
           <div className="absolute right-3 top-1/2 -translate-y-1/2">
             {suffix}
@@ -107,6 +112,7 @@ function FloatingInput({ id, label, type = "text", icon, error, disabled, regist
         )}
       </div>
 
+      {/* Error */}
       <AnimatePresence>
         {error && (
           <motion.p
@@ -203,10 +209,10 @@ export function LoginForm() {
         onSubmit={handleSubmit(onSubmit, triggerShake)}
         aria-busy={isLoading}
         animate={shake ? { x: [0, -10, 10, -6, 6, -3, 3, 0] } : { x: 0 }}
-        transition={{ duration: 0.5, ease: "easeInOut" }
-        }
+        transition={{ duration: 0.5, ease: "easeInOut" }}
         className="space-y-4"
       >
+        {/* Email / username */}
         <motion.div variants={itemVariants}>
           <FloatingInput
             id="login-identifier"
@@ -220,6 +226,7 @@ export function LoginForm() {
           />
         </motion.div>
 
+        {/* Password */}
         <motion.div variants={itemVariants}>
           <FloatingInput
             id="login-password"
@@ -251,6 +258,7 @@ export function LoginForm() {
           />
         </motion.div>
 
+        {/* Error banner */}
         <AnimatePresence>
           {error && (
             <motion.div
@@ -267,6 +275,7 @@ export function LoginForm() {
           )}
         </AnimatePresence>
 
+        {/* Submit */}
         <motion.div variants={itemVariants}>
           <button
             type="submit"
@@ -274,6 +283,7 @@ export function LoginForm() {
             className="relative w-full h-12 rounded-xl overflow-hidden font-medium text-sm tracking-wide transition-all duration-300 disabled:cursor-not-allowed"
             style={{ background: "linear-gradient(135deg, #1A3C5E 0%, #1a4a72 100%)" }}
           >
+            {/* Gold shimmer on hover */}
             <div className="absolute inset-0 bg-linear-to-r from-transparent via-[#E8A020]/20 to-transparent -translate-x-full hover:translate-x-full transition-transform duration-700 pointer-events-none" />
 
             <AnimatePresence mode="wait">

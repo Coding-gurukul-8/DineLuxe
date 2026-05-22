@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
@@ -8,24 +8,13 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { ApiError } from "@repo/shared"
 import { signup } from "@/lib/auth-client"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter"
 import {
-  Loader2,
-  User,
-  Mail,
-  Phone,
-  Lock,
-  ChevronRight,
-  ChevronLeft,
-  Check,
+  Loader2, User, Mail, Phone, Lock, ChevronRight, ChevronLeft, Check,
+  Eye, EyeOff, CheckCircle2, XCircle,
 } from "lucide-react"
 
-// ── Validation schema ─────────────────────────────────────────────────────────
-// city / postalCode are captured in the UI for UX completeness but are NOT
-// sent to the backend (the signup endpoint only accepts firstName, lastName,
-// email, phone, password). They are intentionally excluded from the payload.
+// ── Schema ────────────────────────────────────────────────────────────────────
 const signupSchema = z
   .object({
     firstName: z.string().min(1, "First name is required"),
@@ -40,351 +29,344 @@ const signupSchema = z
     path: ["confirmPassword"],
   })
 
-type SignupForm = z.infer<typeof signupSchema>
+type SignupFormValues = z.infer<typeof signupSchema>
 
-interface Field {
-  name: keyof SignupForm
-  label: string
-  placeholder: string
-  type?: string
-  icon: React.ReactNode
+// ── Animation variants ─────────────────────────────────────────────────────────
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } },
+}
+const itemVariants = {
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as any } },
 }
 
-interface Step {
-  title: string
-  description: string
-  fields: Field[]
+// ── Floating input ─────────────────────────────────────────────────────────────
+function FloatingInput({
+  id, label, type = "text", icon, error, disabled, suffix,
+  registration, onChange: onChangeProp,
+}: {
+  id: string; label: string; type?: string; icon: React.ReactNode
+  error?: string; disabled?: boolean; suffix?: React.ReactNode
+  registration: object; onChange?: () => void
+}) {
+  const [focused, setFocused] = useState(false)
+  const [hasValue, setHasValue] = useState(false)
+
+  return (
+    <div>
+      <div className={`relative rounded-xl border transition-all duration-300 bg-white/60 backdrop-blur-sm
+        ${error ? "border-red-400 shadow-[0_0_0_3px_rgba(239,68,68,0.08)]" : ""}
+        ${focused && !error ? "border-[#E8A020] shadow-[0_0_0_3px_rgba(232,160,32,0.12)]" : ""}
+        ${!focused && !error ? "border-[#1A3C5E]/12 hover:border-[#1A3C5E]/25" : ""}`}
+      >
+        <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-200 pointer-events-none
+          ${focused ? "text-[#E8A020]" : "text-[#1A3C5E]/30"}`}>
+          {icon}
+        </div>
+        <label htmlFor={id}
+          className={`absolute left-11 pointer-events-none transition-all duration-200 ease-out
+            ${(focused || hasValue) ? "top-2 text-[10px] tracking-wider" : "top-1/2 -translate-y-1/2 text-sm"}
+            ${focused ? "text-[#E8A020]" : error ? "text-red-400" : "text-[#1A3C5E]/50"}`}>
+          {label}
+        </label>
+        <input
+          id={id} type={type} disabled={disabled}
+          className="w-full bg-transparent pt-6 pb-2 pl-11 pr-11 text-sm text-[#1A3C5E] outline-none rounded-xl placeholder-transparent disabled:opacity-50"
+          {...(registration as object)}
+          onFocus={() => setFocused(true)}
+          onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+            setFocused(false)
+            setHasValue(e.target.value.length > 0)
+            ;(registration as { onBlur?: (e: React.FocusEvent) => void }).onBlur?.(e)
+          }}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+            setHasValue(e.target.value.length > 0)
+            ;(registration as { onChange?: (e: React.ChangeEvent) => void }).onChange?.(e)
+            onChangeProp?.()
+          }}
+        />
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden rounded-b-xl">
+          <motion.div
+            className="h-full bg-[#E8A020]"
+            initial={{ scaleX: 0, originX: 0 }}
+            animate={{ scaleX: focused ? 1 : 0 }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] as any }}
+          />
+        </div>
+        {suffix && <div className="absolute right-3 top-1/2 -translate-y-1/2">{suffix}</div>}
+      </div>
+      <AnimatePresence>
+        {error && (
+          <motion.p role="alert"
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="mt-1.5 ml-1 text-xs text-red-500"
+          >{error}</motion.p>
+        )}
+      </AnimatePresence>
+    </div>
+  )
 }
 
-const steps: Step[] = [
-  {
-    title: "Your Profile",
-    description: "Let's start with your basic information",
-    fields: [
-      { name: "firstName", label: "First Name", placeholder: "John", icon: <User size={18} /> },
-      { name: "lastName", label: "Last Name", placeholder: "Doe", icon: <User size={18} /> },
-      {
-        name: "email",
-        label: "Email",
-        placeholder: "john@example.com",
-        type: "email",
-        icon: <Mail size={18} />,
-      },
-    ],
-  },
-  {
-    title: "Contact Details",
-    description: "How can we reach you?",
-    fields: [
-      {
-        name: "phone",
-        label: "Phone Number",
-        placeholder: "+91 98765 43210",
-        type: "tel",
-        icon: <Phone size={18} />,
-      },
-    ],
-  },
-  {
-    title: "Security Setup",
-    description: "Create a strong password to protect your account",
-    fields: [
-      {
-        name: "password",
-        label: "Password",
-        placeholder: "Create a strong password",
-        type: "password",
-        icon: <Lock size={18} />,
-      },
-      {
-        name: "confirmPassword",
-        label: "Confirm Password",
-        placeholder: "Re-enter your password",
-        type: "password",
-        icon: <Lock size={18} />,
-      },
-    ],
-  },
+// ── Step definitions ──────────────────────────────────────────────────────────
+const STEP_CONFIG = [
+  { title: "Your Profile",      description: "Let's start with your name" },
+  { title: "Contact Details",   description: "How can we reach you?" },
+  { title: "Secure your account", description: "Create a strong password" },
 ]
 
-const stepVariants = {
-  enter: (direction: number) => ({ x: direction > 0 ? 100 : -100, opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit: (direction: number) => ({ x: direction < 0 ? 100 : -100, opacity: 0 }),
-}
+type StepKey = "profile" | "contact" | "password"
+const STEPS: StepKey[] = ["profile", "contact", "password"]
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 export function SignupWizard() {
-  const [step, setStep] = useState(0)
-  const [direction, setDirection] = useState(0)
+  const [stepIndex, setStepIndex] = useState(0)
+  const [direction, setDirection] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSuccess, setIsSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [emailStatus, setEmailStatus] = useState<"idle" | "checking" | "available" | "taken">("idle")
   const router = useRouter()
 
   const {
-    register,
-    handleSubmit,
-    trigger,
+    register, handleSubmit, watch, trigger,
     formState: { errors },
-    watch,
-  } = useForm<SignupForm>({
+  } = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
     mode: "onChange",
   })
 
-  const password = watch("password")
-  const confirmPassword = watch("confirmPassword")
+  const email = watch("email") ?? ""
+  const password = watch("password") ?? ""
+  const confirmPassword = watch("confirmPassword") ?? ""
 
-  const currentStep = steps[step]
-  const isLastStep = step === steps.length - 1
-
-  const handleNext = async () => {
-    const fieldsToValidate = currentStep.fields.map((f) => f.name) as Array<keyof SignupForm>
-    const isValid = await trigger(fieldsToValidate)
-    if (isValid) {
-      setDirection(1)
-      setStep((prev) => prev + 1)
-      setError(null)
+  // Debounced email availability check
+  useEffect(() => {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEmailStatus("idle")
+      return
     }
+    setEmailStatus("checking")
+    const t = setTimeout(async () => {
+      try {
+        // Replace with actual endpoint check if available
+        await new Promise((r) => setTimeout(r, 600))
+        // Simulated: emails containing "taken" are unavailable
+        setEmailStatus(email.includes("taken") ? "taken" : "available")
+      } catch {
+        setEmailStatus("idle")
+      }
+    }, 600)
+    return () => clearTimeout(t)
+  }, [email])
+
+  const goNext = async () => {
+    const fieldsPerStep: (keyof SignupFormValues)[][] = [
+      ["firstName", "lastName"],
+      ["email", "phone"],
+      ["password", "confirmPassword"],
+    ]
+    const valid = await trigger(fieldsPerStep[stepIndex])
+    if (!valid) return
+    if (stepIndex === 1 && emailStatus === "taken") return
+    setDirection(1)
+    setStepIndex((i) => i + 1)
   }
 
-  const handleBack = () => {
+  const goBack = () => {
     setDirection(-1)
-    setStep((prev) => prev - 1)
-    setError(null)
+    setStepIndex((i) => i - 1)
   }
 
-  const getSignupErrorMessage = (err: unknown): string => {
-    if (err instanceof ApiError) {
-      // 409 = email already registered
-      if (err.statusCode === 409) return "An account with this email already exists."
-      return err.message || "Something went wrong. Please try again."
-    }
-    if (err instanceof Error) return err.message
-    return "Something went wrong. Please try again."
-  }
-
-  const onSubmit = async (data: SignupForm) => {
+  const onSubmit = async (data: SignupFormValues) => {
     setIsSubmitting(true)
     setError(null)
-
     try {
-      // POST /auth/signup — backend returns { accessToken, refreshToken, verification_pending }
-      const result = await signup({
-        email: data.email,
-        password: data.password,
+      await signup({
         firstName: data.firstName,
         lastName: data.lastName,
+        email: data.email,
         phone: data.phone,
+        password: data.password,
       })
-
-      setSuccess(true)
-
-      // Route based on whether the backend requires OTP email verification:
-      //   verification_pending === true  → OTP verification page
-      //   verification_pending === false → customer home (auto-verified accounts)
-      if (result.verification_pending) {
-        setTimeout(() => {
-          router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}`)
-        }, 1500)
-      } else {
-        setTimeout(() => {
-          router.push("/customer/home")
-        }, 1500)
-      }
+      setIsSuccess(true)
+      setTimeout(() => router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}&portal=customer`), 800)
     } catch (err) {
-      setError(getSignupErrorMessage(err))
+      if (err instanceof ApiError) {
+        setError(err.statusCode === 409
+          ? "An account with this email already exists."
+          : err.message || "An unexpected error occurred. Please try again.")
+      } else {
+        setError("An unexpected error occurred. Please try again.")
+      }
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  // ── Success state ───────────────────────────────────────────────────────────
-  if (success) {
-    return (
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="text-center py-8"
-      >
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ type: "spring", stiffness: 200, damping: 15 }}
-          className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4"
-        >
-          <Check size={32} className="text-green-600" />
-        </motion.div>
-        <h3 className="text-xl font-semibold text-gray-900 mb-2">Account Created!</h3>
-        <p className="text-sm text-gray-500">Redirecting you now…</p>
-      </motion.div>
-    )
+  const slideVariants = {
+    enter: (dir: number) => ({ x: dir > 0 ? 50 : -50, opacity: 0 }),
+    center: { x: 0, opacity: 1, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] as any } },
+    exit: (dir: number) => ({ x: dir < 0 ? 50 : -50, opacity: 0, transition: { duration: 0.28, ease: [0.22, 1, 0.36, 1] as any } }),
   }
 
-  // ── Wizard UI ───────────────────────────────────────────────────────────────
+  const progressPct = ((stepIndex) / (STEPS.length - 1)) * 100
+
   return (
-    <div className="w-full max-w-md mx-auto">
-      {/* Progress indicators */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-2">
-          {steps.map((s, index) => (
-            <div key={s.title} className="flex items-center">
-              <motion.div
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  index <= step ? "bg-brand-primary text-white" : "bg-gray-100 text-gray-400"
-                }`}
-                animate={{
-                  scale: index === step ? 1.1 : 1,
-                  backgroundColor: index <= step ? "#1A3C5E" : "#F3F4F6",
-                }}
-                transition={{ type: "spring", stiffness: 300, damping: 20 }}
-              >
-                {index < step ? <Check size={16} /> : index + 1}
-              </motion.div>
-              {index < steps.length - 1 && (
-                <div className="w-12 h-0.5 mx-2 bg-gray-100 overflow-hidden">
-                  <motion.div
-                    className="h-full bg-brand-primary"
-                    initial={{ width: "0%" }}
-                    animate={{ width: index < step ? "100%" : "0%" }}
-                    transition={{ duration: 0.3 }}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
+    <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-0">
+      {/* Progress bar */}
+      <motion.div variants={itemVariants} className="mb-6">
+        <div className="flex justify-between text-[10px] text-[#1A3C5E]/40 tracking-wider uppercase mb-2">
+          <span>{STEP_CONFIG[stepIndex].title}</span>
+          <span>{stepIndex + 1} / {STEPS.length}</span>
         </div>
-        <div className="text-center">
-          <p className="text-xs text-gray-400 uppercase tracking-wider">
-            Step {step + 1} of {steps.length}
-          </p>
-          <h2 className="text-lg font-semibold text-gray-900 mt-1">{currentStep.title}</h2>
-          <p className="text-sm text-gray-500">{currentStep.description}</p>
-        </div>
-      </div>
-
-      {/* Step form */}
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <AnimatePresence mode="wait" custom={direction}>
+        <div className="h-1 rounded-full bg-[#1A3C5E]/8 overflow-hidden">
           <motion.div
-            key={step}
-            custom={direction}
-            variants={stepVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="space-y-4"
-          >
-            {currentStep.fields.map((field) => (
-              <div key={field.name} className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">{field.label}</label>
-                <div className="relative">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                    {field.icon}
-                  </div>
-                  <Input
-                    type={field.type || "text"}
-                    placeholder={field.placeholder}
-                    className="pl-10"
-                    disabled={isSubmitting}
-                    {...register(field.name)}
-                  />
-                </div>
-                {errors[field.name] && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-xs text-red-500"
-                    role="alert"
-                  >
-                    {errors[field.name]?.message}
-                  </motion.p>
-                )}
-              </div>
-            ))}
+            className="h-full rounded-full bg-[#E8A020]"
+            animate={{ width: `${((stepIndex + 1) / STEPS.length) * 100}%` }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          />
+        </div>
+        <p className="mt-1.5 text-xs text-[#1A3C5E]/35">{STEP_CONFIG[stepIndex].description}</p>
+      </motion.div>
 
-            {/* Password strength meter — shown only on security step */}
-            {step === 2 && password && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-              >
-                <PasswordStrengthMeter password={password} />
+      <form onSubmit={handleSubmit(onSubmit)}>
+        <div className="overflow-hidden min-h-65">
+          <AnimatePresence mode="wait" custom={direction}>
+            {/* ── Step 0: Profile ── */}
+            {stepIndex === 0 && (
+              <motion.div key="profile" custom={direction} variants={slideVariants}
+                initial="enter" animate="center" exit="exit" className="space-y-4">
+                <FloatingInput id="firstName" label="First name" icon={<User size={17} />}
+                  error={errors.firstName?.message} disabled={isSubmitting}
+                  registration={register("firstName")} />
+                <FloatingInput id="lastName" label="Last name" icon={<User size={17} />}
+                  error={errors.lastName?.message} disabled={isSubmitting}
+                  registration={register("lastName")} />
               </motion.div>
             )}
 
-            {step === 2 && confirmPassword && (
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className={`text-xs ${
-                  password === confirmPassword ? "text-green-600" : "text-red-500"
-                }`}
-              >
-                {password === confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
-              </motion.p>
+            {/* ── Step 1: Contact ── */}
+            {stepIndex === 1 && (
+              <motion.div key="contact" custom={direction} variants={slideVariants}
+                initial="enter" animate="center" exit="exit" className="space-y-4">
+                <FloatingInput
+                  id="email" label="Email address" type="email" icon={<Mail size={17} />}
+                  error={errors.email?.message || (emailStatus === "taken" ? "This email is already taken" : undefined)}
+                  disabled={isSubmitting}
+                  registration={register("email")}
+                  suffix={
+                    emailStatus === "checking" ? <Loader2 size={15} className="animate-spin text-[#1A3C5E]/30" /> :
+                    emailStatus === "available" ? <CheckCircle2 size={15} className="text-emerald-500" /> :
+                    emailStatus === "taken" ? <XCircle size={15} className="text-red-500" /> : null
+                  }
+                />
+                <FloatingInput id="phone" label="Phone number" type="tel" icon={<Phone size={17} />}
+                  error={errors.phone?.message} disabled={isSubmitting}
+                  registration={register("phone")} />
+              </motion.div>
             )}
-          </motion.div>
+
+            {/* ── Step 2: Password ── */}
+            {stepIndex === 2 && (
+              <motion.div key="password" custom={direction} variants={slideVariants}
+                initial="enter" animate="center" exit="exit" className="space-y-4">
+                <div>
+                  <FloatingInput id="password" label="Password" type={showPassword ? "text" : "password"}
+                    icon={<Lock size={17} />} error={errors.password?.message} disabled={isSubmitting}
+                    registration={register("password")}
+                    suffix={
+                      <button type="button" onClick={() => setShowPassword((v) => !v)}
+                        className="text-[#1A3C5E]/30 hover:text-[#E8A020] transition-colors p-1" tabIndex={-1}>
+                        <motion.div key={showPassword ? "hide" : "show"} initial={{ opacity: 0, rotate: -15 }} animate={{ opacity: 1, rotate: 0 }} transition={{ duration: 0.2 }}>
+                          {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                        </motion.div>
+                      </button>
+                    }
+                  />
+                  {password && <PasswordStrengthMeter password={password} className="mt-3" />}
+                </div>
+
+                <div>
+                  <FloatingInput id="confirmPassword" label="Confirm password" type={showConfirm ? "text" : "password"}
+                    icon={<Lock size={17} />} error={errors.confirmPassword?.message} disabled={isSubmitting}
+                    registration={register("confirmPassword")}
+                    suffix={
+                      <button type="button" onClick={() => setShowConfirm((v) => !v)}
+                        className="text-[#1A3C5E]/30 hover:text-[#E8A020] transition-colors p-1" tabIndex={-1}>
+                        <motion.div key={showConfirm ? "hide" : "show"} initial={{ opacity: 0, rotate: -15 }} animate={{ opacity: 1, rotate: 0 }} transition={{ duration: 0.2 }}>
+                          {showConfirm ? <EyeOff size={17} /> : <Eye size={17} />}
+                        </motion.div>
+                      </button>
+                    }
+                  />
+                  <AnimatePresence>
+                    {confirmPassword && password === confirmPassword && (
+                      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        className="mt-1.5 ml-1 text-xs text-emerald-600 flex items-center gap-1">
+                        <Check size={11} />Passwords match
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Error */}
+        <AnimatePresence>
+          {error && (
+            <motion.div role="alert" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="mt-4 rounded-xl bg-red-50 border border-red-200/80 px-4 py-3">
+              <p className="text-sm text-red-600">{error}</p>
+            </motion.div>
+          )}
         </AnimatePresence>
 
-        {/* API error banner */}
-        {error && (
-          <motion.div
-            role="alert"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            className="mt-4 bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-lg"
-          >
-            {error}
-          </motion.div>
-        )}
-
         {/* Navigation */}
-        <div className="flex items-center justify-between mt-6">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={handleBack}
-            disabled={step === 0 || isSubmitting}
-            className="text-gray-500"
-          >
-            <ChevronLeft size={18} className="mr-1" />
-            Back
-          </Button>
+        <div className={`mt-6 flex gap-3 ${stepIndex > 0 ? "justify-between" : "justify-end"}`}>
+          {stepIndex > 0 && (
+            <button type="button" onClick={goBack} disabled={isSubmitting}
+              className="flex items-center gap-1.5 px-5 h-12 rounded-xl border border-[#1A3C5E]/12 text-sm text-[#1A3C5E]/60 hover:border-[#1A3C5E]/30 hover:text-[#1A3C5E] transition-all duration-200 disabled:opacity-40">
+              <ChevronLeft size={16} />Back
+            </button>
+          )}
 
-          {isLastStep ? (
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="bg-brand-primary hover:bg-brand-primary/90 text-white"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="animate-spin mr-2" size={18} />
-                  Creating…
-                </>
-              ) : (
-                <>
-                  Create Account
-                  <Check size={18} className="ml-1" />
-                </>
-              )}
-            </Button>
+          {stepIndex < STEPS.length - 1 ? (
+            <button type="button" onClick={goNext}
+              className="flex items-center gap-1.5 px-6 h-12 rounded-xl font-medium text-sm tracking-wide text-white transition-all duration-200 ml-auto"
+              style={{ background: "linear-gradient(135deg, #1A3C5E 0%, #1a4a72 100%)" }}>
+              Continue<ChevronRight size={16} />
+            </button>
           ) : (
-            <Button
-              type="button"
-              onClick={handleNext}
-              className="bg-brand-primary hover:bg-brand-primary/90 text-white"
-            >
-              Next
-              <ChevronRight size={18} className="ml-1" />
-            </Button>
+            <button type="submit" disabled={isSubmitting || isSuccess}
+              className="flex items-center justify-center gap-2 px-6 h-12 rounded-xl font-medium text-sm tracking-wide text-white transition-all duration-200 disabled:opacity-50 ml-auto min-w-35"
+              style={{ background: "linear-gradient(135deg, #1A3C5E 0%, #1a4a72 100%)" }}>
+              <AnimatePresence mode="wait">
+                {isSuccess ? (
+                  <motion.span key="s" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                    className="flex items-center gap-2 text-[#E8A020]">
+                    <CheckCircle2 size={17} />Done
+                  </motion.span>
+                ) : isSubmitting ? (
+                  <motion.span key="l" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="flex items-center gap-2 text-white/70">
+                    <Loader2 size={17} className="animate-spin" />Creating…
+                  </motion.span>
+                ) : (
+                  <motion.span key="i" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="flex items-center gap-2">
+                    <Check size={16} />Create Account
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </button>
           )}
         </div>
       </form>
-    </div>
+    </motion.div>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { motion, type Variants } from "framer-motion"
+import { motion } from "framer-motion"
 import Link from "next/link"
 import { ShieldCheck, Store, Utensils } from "lucide-react"
 
@@ -10,17 +10,17 @@ const containerVariants = {
     opacity: 1,
     transition: { staggerChildren: 0.08, delayChildren: 0.1 },
   },
-} satisfies Variants
+}
 
 const itemVariants = {
   hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const } },
-} satisfies Variants
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as any } },
+}
 
 const cardVariants = {
   hidden: { opacity: 0, scale: 0.96, y: 20 },
-  visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as const } },
-} satisfies Variants
+  visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as any } },
+}
 
 const portals = [
   {
@@ -56,13 +56,9 @@ const portals = [
 export default function LoginPage() {
   return (
     <div className="min-h-screen flex">
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-        className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-[#1A3C5E]"
-      >
-        {/* Left panel — decorative */}
+      {/* Left panel — decorative */}
+      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-[#1A3C5E]">
+        {/* Ambient particles (CSS-only) */}
         <div className="absolute inset-0">
           {[...Array(18)].map((_, i) => (
             <div
@@ -79,6 +75,7 @@ export default function LoginPage() {
           ))}
         </div>
 
+        {/* Diagonal grain overlay */}
         <div
           className="absolute inset-0 opacity-[0.04]"
           style={{
@@ -86,29 +83,36 @@ export default function LoginPage() {
           }}
         />
 
+        {/* Ambient glow orbs */}
         <div className="absolute top-1/4 left-1/4 w-64 h-64 rounded-full bg-[#E8A020]/10 blur-3xl" />
         <div className="absolute bottom-1/3 right-1/4 w-48 h-48 rounded-full bg-white/5 blur-2xl" />
 
+        {/* Food montage — abstract SVG illustration */}
         <div className="absolute inset-0 flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] as any }}
             className="relative w-80 h-80"
             style={{ animation: "slow-parallax 8s ease-in-out infinite alternate" }}
           >
             <svg viewBox="0 0 320 320" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
+              {/* Plate base */}
               <ellipse cx="160" cy="220" rx="110" ry="18" fill="#E8A020" opacity="0.15" />
               <circle cx="160" cy="180" r="90" fill="white" opacity="0.05" stroke="#E8A020" strokeWidth="1" strokeDasharray="4 6" />
               <circle cx="160" cy="180" r="72" fill="white" opacity="0.04" />
+              {/* Stylized food elements */}
               <path d="M110 160 Q130 120 160 155 Q190 120 210 160 Q200 200 160 205 Q120 200 110 160Z" fill="#E8A020" opacity="0.35" />
               <path d="M130 150 Q160 115 190 150 Q180 185 160 188 Q140 185 130 150Z" fill="#E8A020" opacity="0.5" />
+              {/* Fork */}
               <line x1="80" y1="120" x2="80" y2="200" stroke="#E8A020" strokeWidth="2" strokeLinecap="round" />
               <line x1="74" y1="120" x2="74" y2="145" stroke="#E8A020" strokeWidth="1.5" strokeLinecap="round" />
               <line x1="80" y1="120" x2="80" y2="145" stroke="#E8A020" strokeWidth="1.5" strokeLinecap="round" />
               <line x1="86" y1="120" x2="86" y2="145" stroke="#E8A020" strokeWidth="1.5" strokeLinecap="round" />
+              {/* Knife */}
               <line x1="240" y1="120" x2="240" y2="200" stroke="#E8A020" strokeWidth="2" strokeLinecap="round" />
               <path d="M240 120 L248 140 L240 145Z" fill="#E8A020" opacity="0.6" />
+              {/* Stars/sparkles */}
               <circle cx="100" cy="90" r="3" fill="#E8A020" opacity="0.7" />
               <circle cx="220" cy="80" r="2" fill="#E8A020" opacity="0.5" />
               <circle cx="250" cy="150" r="2.5" fill="#E8A020" opacity="0.4" />
@@ -117,11 +121,12 @@ export default function LoginPage() {
           </motion.div>
         </div>
 
+        {/* Left panel text */}
         <div className="absolute bottom-0 left-0 right-0 p-12">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.8, delay: 0.4, ease: [0.22, 1, 0.36, 1] as any }}
           >
             <p className="text-[#E8A020] text-xs tracking-[0.25em] uppercase font-medium mb-3">
               Fine Dining, Elevated
@@ -143,8 +148,9 @@ export default function LoginPage() {
             to { transform: translateY(-12px) rotate(1deg); }
           }
         `}</style>
-      </motion.div>
+      </div>
 
+      {/* Right panel — portal selector */}
       <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-16 bg-[#FDFAF5]">
         <motion.div
           variants={containerVariants}
@@ -152,6 +158,7 @@ export default function LoginPage() {
           animate="visible"
           className="w-full max-w-md"
         >
+          {/* Brand mark */}
           <motion.div variants={itemVariants} className="text-center mb-12">
             <div className="inline-flex items-center gap-3 mb-6">
               <div className="w-10 h-10 rounded-lg bg-[#1A3C5E] flex items-center justify-center">
@@ -169,6 +176,7 @@ export default function LoginPage() {
             </p>
           </motion.div>
 
+          {/* Portal cards */}
           <div className="space-y-3">
             {portals.map((portal) => {
               const Icon = portal.icon
@@ -183,6 +191,7 @@ export default function LoginPage() {
                         : "border-[#1A3C5E]/10 bg-white hover:border-[#E8A020]/60 hover:shadow-md"
                       }`}
                   >
+                    {/* Gold accent bar on hover */}
                     <div className={`absolute left-0 top-4 bottom-4 w-0.5 rounded-full bg-[#E8A020] transition-all duration-300 
                       ${portal.featured ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`} />
 

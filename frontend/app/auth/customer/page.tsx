@@ -15,12 +15,12 @@ const containerVariants = {
 
 const itemVariants = {
   hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as any } },
 }
 
 const cardVariants = {
   hidden: { opacity: 0, scale: 0.96, y: 20 },
-  visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.6 } },
+  visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] as any } },
 }
 
 export default function CustomerLoginPage() {
@@ -32,6 +32,7 @@ export default function CustomerLoginPage() {
         animate="visible"
         className="w-full max-w-md"
       >
+        {/* Brand mark */}
         <motion.div variants={itemVariants} className="text-center mb-8">
           <Link href="/auth/login" className="inline-flex items-center gap-2.5 mb-6 group">
             <div className="w-9 h-9 rounded-lg bg-[#1A3C5E] flex items-center justify-center transition-transform duration-300 group-hover:scale-105">
@@ -45,9 +46,12 @@ export default function CustomerLoginPage() {
           <h1 className="font-['Playfair_Display',Georgia,serif] text-3xl text-[#1A3C5E] mb-1.5">
             Welcome back
           </h1>
-          <p className="text-sm text-[#1A3C5E]/45 tracking-wide">Sign in to your customer account</p>
+          <p className="text-sm text-[#1A3C5E]/45 tracking-wide">
+            Sign in to your customer account
+          </p>
         </motion.div>
 
+        {/* Glassmorphism card */}
         <motion.div
           variants={cardVariants}
           className="rounded-3xl border border-white/70 p-8"
