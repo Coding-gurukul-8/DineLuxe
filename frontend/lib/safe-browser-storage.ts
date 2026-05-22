@@ -37,10 +37,12 @@ export function ensureSafeBrowserStorage(): void {
 
   try {
     const storage = window.localStorage as Partial<StorageLike> | undefined
+
+    // If localStorage exists but is not interface-compatible, shim it.
     const isUsable =
-      typeof storage?.getItem === "function" &&
-      typeof storage?.setItem === "function" &&
-      typeof storage?.removeItem === "function"
+      typeof (storage as any)?.getItem === "function" &&
+      typeof (storage as any)?.setItem === "function" &&
+      typeof (storage as any)?.removeItem === "function"
 
     if (isUsable) return
 

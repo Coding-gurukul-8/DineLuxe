@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
+import { ensureSafeBrowserStorage } from "@/lib/safe-browser-storage";
 
 interface Branding {
   primaryColor: string;
@@ -42,10 +43,10 @@ function applyToCSS(b: Branding) {
 
 function safeLocalStorage() {
   try {
-    return typeof window !== "undefined" &&
-      typeof window.localStorage?.getItem === "function"
-      ? window.localStorage
-      : null;
+    if (typeof window === "undefined") return null;
+    ensureSafeBrowserStorage();
+    const storage = window.localStorage as any;
+    return storage && typeof storage.getItem === "function" ? storage : null;
   } catch {
     return null;
   }

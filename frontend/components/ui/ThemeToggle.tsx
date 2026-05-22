@@ -9,13 +9,15 @@ export default function ThemeToggle() {
   useEffect(() => {
     // Only run on client
     try {
-      const saved = localStorage.getItem('dineluxe-theme');
-      const newMode = (saved === 'dark' ? 'dark' : 'light');
-      setMode(newMode);
-      
-      const root = document.documentElement;
-      if (newMode === 'dark') root.classList.add('dark-mode');
-      else root.classList.remove('dark-mode');
+      // Some test/dev environments can replace localStorage with a non-Storage value.
+      const ls: any = (typeof window !== "undefined" ? (window as any).localStorage : undefined)
+      const saved = ls && typeof ls.getItem === "function" ? ls.getItem("dineluxe-theme") : null
+      const newMode = saved === "dark" ? "dark" : "light"
+      setMode(newMode)
+
+      const root = document.documentElement
+      if (newMode === "dark") root.classList.add("dark-mode")
+      else root.classList.remove("dark-mode")
     } catch {}
     setMounted(true);
   }, []);
@@ -27,7 +29,10 @@ export default function ThemeToggle() {
     const root = document.documentElement;
     if (newMode === 'dark') root.classList.add('dark-mode');
     else root.classList.remove('dark-mode');
-    try { localStorage.setItem('dineluxe-theme', newMode); } catch {}
+    try {
+      const ls: any = (typeof window !== "undefined" ? (window as any).localStorage : undefined)
+      if (ls && typeof ls.setItem === "function") ls.setItem("dineluxe-theme", newMode)
+    } catch {}
   };
 
   return (
