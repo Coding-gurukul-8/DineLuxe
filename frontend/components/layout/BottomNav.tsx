@@ -25,7 +25,7 @@ function CartBadge({ count }: { count: number }) {
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0, opacity: 0 }}
           transition={{ type: "spring", stiffness: 500, damping: 22 }}
-          className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-[#C0392B] rounded-full flex items-center justify-center px-1"
+          className="absolute -top-1.5 -right-1.5 min-w-4.5 h-4.5 bg-[#C0392B] rounded-full flex items-center justify-center px-1"
         >
           {/* Pulse ring */}
           <motion.span
@@ -88,7 +88,7 @@ export function BottomNav() {
                 <motion.button
                   whileTap={{ scale: 0.88 }}
                   onClick={() => router.push(item.href)}
-                  className="w-13 h-13 rounded-2xl bg-gradient-to-br from-[#1A3C5E] to-[#2A5C8E] flex items-center justify-center shadow-lg -mt-4"
+                  className="w-13 h-13 rounded-2xl bg-linear-to-br from-[#1A3C5E] to-[#2A5C8E] flex items-center justify-center shadow-lg -mt-4"
                   style={{ width: 52, height: 52 }}
                 >
                   <Icon size={22} className="text-white" />
