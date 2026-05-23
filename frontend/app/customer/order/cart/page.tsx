@@ -29,7 +29,7 @@ function AnimatedPrice({ value }: { value: number }) {
 function CartItem({
   item, onQtyChange, onRemove,
 }: {
-  item: { id: string; name: string; price: number; quantity: number; image_url?: string };
+  item: { id: string; name: string; price: number; quantity: number; image_url?: string | null };
   onQtyChange: (id: string, qty: number) => void;
   onRemove: (id: string) => void;
 }) {
@@ -56,8 +56,8 @@ function CartItem({
             onDragEnd={handleDragEnd} style={{ x, opacity: itemOpacity }}
             className="relative z-10 bg-white rounded-2xl p-4 flex items-center gap-3 shadow-sm border border-gray-50 cursor-grab active:cursor-grabbing">
             {item.image_url
-              ? <img src={item.image_url} alt={item.name} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
-              : <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0"><ShoppingBag size={20} className="text-gray-300" /></div>
+              ? <img src={item.image_url} alt={item.name} className="w-16 h-16 rounded-xl object-cover shrink-0" />
+              : <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center shrink-0"><ShoppingBag size={20} className="text-gray-300" /></div>
             }
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-gray-900 truncate">{item.name}</p>
@@ -81,7 +81,7 @@ function CartItem({
                 </motion.button>
               </div>
             </div>
-            <div className="text-right text-sm font-bold text-gray-900 flex-shrink-0">
+            <div className="text-right text-sm font-bold text-gray-900 shrink-0">
               <AnimatedPrice value={item.price * item.quantity} />
             </div>
           </motion.div>
@@ -116,7 +116,7 @@ export default function CartPage() {
   const qc = useQueryClient();
   const { branchId } = useAuth();
   const items = useCart((s) => s.items);
-  const updateItem = useCart((s) => s.updateItemQuantity);
+  const updateItem = useCart((s) => s.updateQuantity);
   const removeItem = useCart((s) => s.removeItem);
   const clearCart = useCart((s) => s.clearCart);
   const cartTotal = useCart((s) => s.total);

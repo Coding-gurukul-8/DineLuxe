@@ -25,7 +25,7 @@ import {
 
 const cardVariants = {
   hidden: { opacity: 0, y: 28, scale: 0.97 },
-  visible: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 260, damping: 22 } },
+  visible: { opacity: 1, y: 0, scale: 1, transition: { type: "spring" as const, stiffness: 260, damping: 22 } },
 };
 
 const stagger = {
@@ -72,8 +72,8 @@ const moodTiles = [
 
 function ShimmerCard() {
   return (
-    <div className="flex-shrink-0 w-48 rounded-2xl overflow-hidden bg-white shadow-sm">
-      <div className="h-32 bg-gradient-to-r from-gray-100 via-gray-200 to-gray-100 animate-pulse" />
+    <div className="shrink-0 w-48 rounded-2xl overflow-hidden bg-white shadow-sm">
+      <div className="h-32 bg-linear-to-r from-gray-100 via-gray-200 to-gray-100 animate-pulse" />
       <div className="p-3 space-y-2">
         <div className="h-3 bg-gray-100 rounded animate-pulse w-3/4" />
         <div className="h-3 bg-gray-100 rounded animate-pulse w-1/2" />
@@ -185,7 +185,7 @@ export default function CustomerHomePage() {
       {/* ── Hero Header ───────────────────────────────────────────────────── */}
       <div
         ref={heroRef}
-        className="px-4 pt-12 pb-6 bg-gradient-to-br from-[#1A3C5E] via-[#1A3C5E] to-[#0D2A45] relative overflow-hidden"
+        className="px-4 pt-12 pb-6 bg-linear-to-br from-[#1A3C5E] via-[#1A3C5E] to-[#0D2A45] relative overflow-hidden"
       >
         {/* decorative circles */}
         <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full bg-white/5" />
@@ -200,7 +200,7 @@ export default function CustomerHomePage() {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-[#E8A020] text-sm font-medium mb-1">DineLuxe</p>
-              <h1 className="text-2xl font-bold text-white leading-tight min-h-[2.5rem]">
+              <h1 className="text-2xl font-bold text-white leading-tight min-h-10">
                 {greeting}
               </h1>
               <p className="text-white/60 text-sm mt-1 flex items-center gap-1">
@@ -261,7 +261,7 @@ export default function CustomerHomePage() {
             return (
               <motion.div key={action.label} variants={cardVariants} whileTap={{ scale: 0.92 }}>
                 <Link href={action.href} className="flex flex-col items-center gap-2">
-                  <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${action.gradient} flex items-center justify-center shadow-lg`}>
+                  <div className={`w-14 h-14 rounded-2xl bg-linear-to-br ${action.gradient} flex items-center justify-center shadow-lg`}>
                     <Icon size={22} className="text-white" />
                   </div>
                   <span className="text-[11px] font-semibold text-gray-600">{action.label}</span>
@@ -280,7 +280,7 @@ export default function CustomerHomePage() {
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ type: "spring", stiffness: 280, damping: 22 }}
               onClick={() => router.push(`/customer/order/${activeOrders[0].id}`)}
-              className="w-full text-left bg-gradient-to-r from-[#1A3C5E] to-[#2A5C8E] rounded-2xl p-4 shadow-lg"
+              className="w-full text-left bg-linear-to-r from-[#1A3C5E] to-[#2A5C8E] rounded-2xl p-4 shadow-lg"
             >
               <div className="flex items-center justify-between">
                 <div>
@@ -325,7 +325,7 @@ export default function CustomerHomePage() {
                 transition={{ delay: i * 0.07, type: "spring", stiffness: 280 }}
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.95 }}
-                className={`flex-shrink-0 w-28 h-20 rounded-2xl bg-gradient-to-br ${tile.color} flex flex-col items-center justify-center gap-1 shadow-md`}
+                className={`shrink-0 w-28 h-20 rounded-2xl bg-linear-to-br ${tile.color} flex flex-col items-center justify-center gap-1 shadow-md`}
               >
                 <span className="text-2xl">{tile.emoji}</span>
                 <span className="text-white text-[11px] font-semibold">{tile.label.split(" ").slice(1).join(" ")}</span>
@@ -339,7 +339,7 @@ export default function CustomerHomePage() {
           <div ref={aiRef}>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#E8A020] to-[#F0B840] flex items-center justify-center">
+                <div className="w-7 h-7 rounded-lg bg-linear-to-br from-[#E8A020] to-[#F0B840] flex items-center justify-center">
                   <Sparkles size={14} className="text-white" />
                 </div>
                 <h2 className="text-base font-bold text-gray-900">AI Picks For You</h2>
@@ -446,7 +446,7 @@ export default function CustomerHomePage() {
               </div>
               <div className="flex justify-between mt-2">
                 <span className="text-white/40 text-xs">0</span>
-                <span className="text-white/40 text-xs">{loyaltyData.nextRewardThreshold ?? 1000}</span>
+                <span className="text-white/40 text-xs">{loyaltyData.pointsToNextReward ?? 1000}</span>
               </div>
             </div>
           </motion.div>
