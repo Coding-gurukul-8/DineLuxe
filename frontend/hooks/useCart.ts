@@ -3,14 +3,18 @@
 /**
  * useCart — Zustand-persisted shopping cart
  *
- * Fixes vs. old implementation
- * ──────────────────────────────
- * 1. CartItem.menuItemId → id  (matches spec / API)
- * 2. CartItem.photoUrl   → image_url  (matches spec)
- * 3. persist key "dineluxe-cart" → "dineluxe_cart"  (spec)
- * 4. updateQuantity kept + updateQty alias added  (spec surface)
- * 5. addItem now takes (item, restaurantId?, branchId?) — restaurantId /
- *    branchId are optional so call-sites that don't have them still compile.
+ * SSR Safety Fix
+ * ──────────────
+ * createJSONStorage(factory) calls the factory IMMEDIATELY when the Zustand
+ * store is created (i.e. at module-load time). In Next.js 15 SSR, this runs
+ * on the server where window.localStorage exists as a partial mock but
+ * getItem/setItem are NOT real functions, causing:
+ *   TypeError: localStorage.getItem is not a function
+ *
+ * Fix: use a lazy proxy storage object whose methods only access
+ * window.localStorage at call time (inside useEffect / client interactions),
+ * never at module initialisation time. Combined with skipHydration: true,
+ * the persist middleware never calls these during SSR.
  */
 
 import { create } from "zustand";
@@ -78,6 +82,33 @@ interface CartState {
   /** Total number of individual items (sum of quantities). */
   itemCount: () => number;
 }
+
+// ── SSR-safe lazy storage proxy ────────────────────────────────────────────────
+//
+// createJSONStorage(fn) invokes fn() immediately at store-creation time, which
+// happens during module import — potentially on the server. Instead of passing
+// a factory that reads window.localStorage right away, we pass a proxy whose
+// methods resolve localStorage lazily (at call time). During SSR, skipHydration
+// ensures these methods are never actually called; on the client they work
+// normally. This avoids "localStorage.getItem is not a function" during Next.js
+// server-side pre-rendering.
+const lazyLocalStorage: Storage = new Proxy({} as Storage, {
+  get(_target, prop: string) {
+    if (typeof window === "undefined") {
+      // SSR: return no-op stubs — should never be called with skipHydration
+      if (prop === "getItem") return () => null;
+      if (prop === "setItem") return () => {};
+      if (prop === "removeItem") return () => {};
+      if (prop === "clear") return () => {};
+      if (prop === "key") return () => null;
+      if (prop === "length") return 0;
+      return undefined;
+    }
+    // Client: delegate to the real localStorage
+    const val = (window.localStorage as any)[prop];
+    return typeof val === "function" ? val.bind(window.localStorage) : val;
+  },
+});
 
 // ── Store ──────────────────────────────────────────────────────────────────────
 
@@ -171,30 +202,12 @@ export const useCart = create<CartState>()(
         get().items.reduce((sum, i) => sum + i.quantity, 0),
     }),
     {
-      // ← spec requires underscore key "dineluxe_cart"
       name: "dineluxe_cart",
-      // Use a lazy localStorage getter so the store is safe to import in SSR
-      // contexts (Next.js server render, middleware). The actual read/write only
-      // happens in the browser after hydration.
-      storage: createJSONStorage(() => {
-        // In Next.js 15, client components are pre-rendered on the server with a
-        // partial window mock where localStorage exists but getItem is NOT a real
-        // function. We must verify the API is callable before using it.
-        if (
-          typeof window !== "undefined" &&
-          typeof window.localStorage?.getItem === "function" &&
-          typeof window.localStorage?.setItem === "function"
-        ) {
-          return window.localStorage;
-        }
-        // Fall back to a no-op shim for SSR / broken environments.
-        return {
-          getItem: () => null,
-          setItem: () => {},
-          removeItem: () => {},
-        } as unknown as Storage;
-      }),
-      // Prevent Zustand from calling localStorage during SSR initialisation.
+      // Pass the lazy proxy through createJSONStorage. The factory fn is called
+      // immediately, but it just returns our proxy object — no localStorage
+      // access happens at this point.
+      storage: createJSONStorage(() => lazyLocalStorage),
+      // Prevent Zustand from calling storage.getItem during SSR initialisation.
       skipHydration: true,
     }
   )

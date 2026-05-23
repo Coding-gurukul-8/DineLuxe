@@ -4,6 +4,13 @@ import { createContext, useContext, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import type { AuthUser } from "@/types/auth";
 
+// Shim localStorage at module-evaluation time so it is ready before any
+// child component (including Zustand stores) first renders on the client.
+// The typeof window guard makes this a no-op during SSR.
+if (typeof window !== "undefined") {
+  ensureSafeBrowserStorage();
+}
+
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
@@ -19,8 +26,8 @@ const AuthContext = createContext<AuthContextValue>({
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { user, loading, signOut } = useAuth();
 
-  // Ensure localStorage is safe to use on first client render.
-  // Kept in useEffect so it never runs during SSR prerendering.
+  // Belt-and-suspenders: also shim in useEffect in case the module-scope
+  // call above ran in a context where the shim wasn't fully applied yet.
   useEffect(() => {
     ensureSafeBrowserStorage();
   }, []);
