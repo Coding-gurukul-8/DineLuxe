@@ -1,336 +1,226 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { useRouter, useSearchParams } from "next/navigation"
-import { apiClient } from "@/lib/api-client"
-import { cn } from "@/lib/utils"
-import { CheckCircle, X, Star, Download, Share, Home, ShoppingBag, Camera } from "lucide-react"
-import { toast } from "sonner"
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
+import { MapPin, Clock, ChevronRight, Star } from "lucide-react";
+import { apiClient } from "@/lib/api-client";
+import { formatCurrency, cn } from "@/lib/utils";
 
-interface OrderData {
-  id: string
-  restaurantName: string
-  tableLabel?: string
-  items: { name: string; quantity: number; unitPrice: number }[]
-  subtotal: number
-  tax: number
-  total: number
-  paymentMethod: string
-  createdAt: string
+// ── Confetti ──────────────────────────────────────────────────────────────────
+function Confetti() {
+  const particles = Array.from({ length: 36 }, (_, i) => ({
+    id: i,
+    color: ["#E8A020","#1A3C5E","#C0392B","#27AE60","#F0B840","#2A5C8E","#fff","#F39C12"][i % 8],
+    x: Math.random() * 100,
+    delay: Math.random() * 1.2,
+    size: 5 + Math.random() * 9,
+    duration: 1.5 + Math.random() * 1.2,
+    spin: Math.random() > 0.5 ? 720 : -720,
+  }));
+  return (
+    <div className="fixed inset-0 pointer-events-none z-40 overflow-hidden">
+      {particles.map((p) => (
+        <motion.div
+          key={p.id}
+          initial={{ y: -20, x: `${p.x}vw`, opacity: 1, rotate: 0, scale: 1 }}
+          animate={{ y: "110vh", opacity: 0, rotate: p.spin, scale: 0.4 }}
+          transition={{ duration: p.duration, delay: p.delay, ease: "easeIn" }}
+          className="absolute top-0 rounded-sm"
+          style={{ width: p.size, height: p.size, backgroundColor: p.color }}
+        />
+      ))}
+    </div>
+  );
 }
 
+// ── SVG Checkmark ─────────────────────────────────────────────────────────────
+function AnimatedCheck() {
+  return (
+    <div className="relative">
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={{ scale: [0, 1.2, 1] }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="w-28 h-28 rounded-full bg-green-50 flex items-center justify-center"
+      >
+        <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+          <motion.circle
+            cx="36" cy="36" r="32"
+            stroke="#27AE60" strokeWidth="3.5" fill="none"
+            initial={{ pathLength: 0, opacity: 0 }}
+            animate={{ pathLength: 1, opacity: 1 }}
+            transition={{ duration: 0.7, ease: "easeOut" }}
+          />
+          <motion.path
+            d="M20 36 L31 47 L52 25"
+            stroke="#27AE60" strokeWidth="3.5"
+            strokeLinecap="round" strokeLinejoin="round" fill="none"
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: 0.5, delay: 0.6, ease: "easeOut" }}
+          />
+        </svg>
+      </motion.div>
+      {/* Rings */}
+      {[1, 2].map((n) => (
+        <motion.div
+          key={n}
+          initial={{ scale: 1, opacity: 0.5 }}
+          animate={{ scale: 2 + n * 0.4, opacity: 0 }}
+          transition={{ duration: 0.8, delay: 0.3 + n * 0.15, ease: "easeOut" }}
+          className="absolute inset-0 rounded-full border-2 border-green-400"
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── Countdown clock ────────────────────────────────────────────────────────────
+function EstimatedCountdown({ minutes }: { minutes: number }) {
+  const [remaining, setRemaining] = useState(minutes * 60);
+  useEffect(() => {
+    const id = setInterval(() => setRemaining((n) => Math.max(0, n - 1)), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  return (
+    <div className="flex items-center gap-1 text-[#E8A020]">
+      <Clock size={14} />
+      <span className="text-sm font-bold tabular-nums">
+        {m}:{String(s).padStart(2, "0")} remaining
+      </span>
+    </div>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 export default function PaymentSuccessPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const orderId = searchParams.get("orderId")
-  const [showRating, setShowRating] = useState(false)
-  const [rating, setRating] = useState(0)
-  const [hoverRating, setHoverRating] = useState(0)
-  const [reviewText, setReviewText] = useState("")
-  const [photos, setPhotos] = useState<string[]>([])
-  const [submitting, setSubmitting] = useState(false)
-  const [order, setOrder] = useState<OrderData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const router = useRouter();
+  const [showConfetti, setShowConfetti] = useState(true);
+
+  // Fetch the most recent active order
+  const { data: orders = [] } = useQuery({
+    queryKey: ["customer", "recent-order"],
+    queryFn: () => apiClient.get<any[]>("/orders/user/me?limit=1&status=confirmed"),
+  });
+  const order = orders[0];
 
   useEffect(() => {
-    if (!orderId) {
-      setLoading(false)
-      return
-    }
-
-    apiClient.get<OrderData>(`/orders/${orderId}`)
-      .then(setOrder)
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [orderId])
-
-  useEffect(() => {
-    if (!orderId) return
-    // Show rating prompt after 1.5 seconds
-    const timer = setTimeout(() => setShowRating(true), 1500)
-    return () => clearTimeout(timer)
-  }, [orderId])
-
-  const handleSubmitRating = async () => {
-    if (!orderId || rating === 0) return
-
-    setSubmitting(true)
-    try {
-      await apiClient.post(`/reviews`, {
-        orderId,
-        overallRating: rating,
-        textReview: reviewText || undefined,
-        photos: photos.length > 0 ? photos : undefined,
-      })
-      toast.success("Review submitted")
-      setShowRating(false)
-    } catch (err) {
-      console.error("Failed to submit review:", err)
-      toast.error("Could not submit review in demo mode")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleSkip = () => {
-    setShowRating(false)
-  }
-
-  const handleGoHome = () => {
-    router.push("/customer/home")
-  }
-
-  const handleViewOrders = () => {
-    if (orderId) {
-      router.push(`/customer/order/${orderId}`)
-    } else {
-      router.push("/customer/order/history")
-    }
-  }
-
-  const handleReorder = async () => {
-    if (!order) return
-
-    try {
-      const items = order.items.map(item => ({
-        menuItemId: item.name, // This would be the actual ID in a real implementation
-        quantity: item.quantity,
-      }))
-      await apiClient.post("/cart/add", { items })
-      router.push("/customer/cart")
-    } catch (err) {
-      console.error("Failed to reorder:", err)
-      toast.error("Could not reorder in demo mode")
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="skeleton w-full max-w-md h-96 mx-4 rounded-md" />
-      </div>
-    )
-  }
+    const id = setTimeout(() => setShowConfetti(false), 3500);
+    return () => clearTimeout(id);
+  }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Success Animation */}
-      <div className="bg-gradient-to-b from-brand-primary to-brand-secondary px-5 pt-12 pb-16">
+    <div className="min-h-screen bg-[#FAF7F4] flex flex-col pb-10">
+      {showConfetti && <Confetti />}
+
+      {/* Full-screen hero */}
+      <div className="flex-1 flex flex-col items-center justify-center px-6 pt-16 pb-8">
+        <AnimatedCheck />
+
         <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ type: "spring", duration: 0.6 }}
-          className="flex flex-col items-center text-white"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.9 }}
+          className="text-center mt-6"
         >
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.3, type: "spring" }}
-            className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center mb-4"
-          >
-            <CheckCircle size={48} className="text-white" />
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="text-3xl font-bold"
-          >
-            Payment Successful!
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.7 }}
-            className="text-white/80 mt-2 text-center"
-          >
-            Your order has been placed successfully
-          </motion.p>
+          <h1 className="text-2xl font-bold text-gray-900">Order Confirmed!</h1>
+          <p className="text-gray-500 text-sm mt-2">
+            Your food is being prepared with love 🍽️
+          </p>
         </motion.div>
-      </div>
 
-      <div className="px-4 -mt-8 space-y-4">
-        {/* Order Summary */}
+        {/* Order details card */}
         {order && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.8 }}
-            className="bg-white rounded-md shadow-sm border border-gray-100 p-5"
+            transition={{ delay: 1.1, type: "spring", stiffness: 220 }}
+            className="w-full mt-6 bg-white rounded-3xl p-5 shadow-lg border border-gray-50"
           >
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
-              <span className="text-sm text-gray-500">Order ID</span>
-              <span className="font-medium text-gray-900">{order.id.slice(-6).toUpperCase()}</span>
-            </div>
-
-            <div className="py-4 space-y-2">
-              {order.items.slice(0, 3).map((item, i) => (
-                <div key={i} className="flex justify-between text-sm">
-                  <span className="text-gray-600">
-                    {item.quantity} {item.name}
-                  </span>
-                  <span className="text-gray-900">?{item.quantity * item.unitPrice}</span>
-                </div>
-              ))}
-              {order.items.length > 3 && (
-                <p className="text-sm text-gray-500">
-                  +{order.items.length - 3} more items
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Order ID</p>
+                <p className="text-sm font-bold text-gray-900 font-mono">
+                  #{order.id?.slice(-8).toUpperCase()}
                 </p>
-              )}
-            </div>
-
-            <div className="pt-4 border-t border-gray-100 space-y-2">
-              <div className="flex justify-between text-sm text-gray-500">
-                <span>Subtotal</span>
-                <span>Rs {order.subtotal}</span>
               </div>
-              <div className="flex justify-between text-sm text-gray-500">
-                <span>Tax</span>
-                <span>Rs {order.tax}</span>
-              </div>
-              <div className="flex justify-between font-bold text-lg text-gray-900">
-                <span>Total</span>
-                <span>Rs {order.total}</span>
+              <div className="text-right">
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Total Paid</p>
+                <p className="text-lg font-bold text-[#1A3C5E]">{formatCurrency(order.total)}</p>
               </div>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between text-sm">
-              <span className="text-gray-500">Payment Method</span>
-              <span className="font-medium text-gray-900 capitalize">{order.paymentMethod}</span>
+            {/* Estimated time */}
+            <div className="bg-[#FFF8EC] rounded-2xl p-4 mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Estimated ready in</p>
+                <p className="text-2xl font-bold text-[#E8A020]">25–30 min</p>
+              </div>
+              <EstimatedCountdown minutes={28} />
             </div>
+
+            {/* Items preview */}
+            {order.order_items?.slice(0, 3).map((item: any, i: number) => (
+              <div key={i} className="flex justify-between items-center py-2 border-t border-gray-50 first:border-t-0">
+                <span className="text-sm text-gray-700">
+                  {item.quantity}× {item.menu_item?.name ?? item.name ?? "Item"}
+                </span>
+                <span className="text-sm font-semibold text-gray-900">
+                  {formatCurrency((item.unit_price ?? 0) * (item.quantity ?? 1))}
+                </span>
+              </div>
+            ))}
+            {(order.order_items?.length ?? 0) > 3 && (
+              <p className="text-xs text-gray-400 mt-2 text-center">
+                +{order.order_items.length - 3} more item{order.order_items.length - 3 !== 1 ? "s" : ""}
+              </p>
+            )}
           </motion.div>
         )}
-
-        {/* Quick Actions */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1 }}
-          className="bg-white rounded-md shadow-sm border border-gray-100 p-5"
-        >
-          <h3 className="font-semibold text-gray-900 mb-4">What would you like to do next?</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <motion.button
-              whileTap={{ scale: 0.98 }}
-              onClick={handleGoHome}
-              className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
-            >
-              <Home size={24} className="text-brand-primary" />
-              <span className="text-sm font-medium text-gray-700">Go Home</span>
-            </motion.button>
-
-            <motion.button
-              whileTap={{ scale: 0.98 }}
-              onClick={handleViewOrders}
-              className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
-            >
-              <ShoppingBag size={24} className="text-brand-primary" />
-              <span className="text-sm font-medium text-gray-700">View Orders</span>
-            </motion.button>
-          </div>
-        </motion.div>
-
-        {/* Rating Modal */}
-        <AnimatePresence>
-          {showRating && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50"
-            >
-              <motion.div
-                initial={{ y: "100%" }}
-                animate={{ y: 0 }}
-                exit={{ y: "100%" }}
-                transition={{ type: "spring", damping: 25 }}
-                className="bg-white rounded-t-2xl sm:rounded-md w-full max-w-lg p-6"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Rate your experience</h3>
-                  <button
-                    onClick={handleSkip}
-                    className="p-2 text-gray-400 hover:text-gray-600"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                {/* Star Rating */}
-                <div className="flex items-center justify-center gap-2 mb-6">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <motion.button
-                      key={star}
-                      whileTap={{ scale: 0.9 }}
-                      onMouseEnter={() => setHoverRating(star)}
-                      onMouseLeave={() => setHoverRating(0)}
-                      onClick={() => setRating(star)}
-                      className="p-1"
-                    >
-                      <Star
-                        size={32}
-                        className={cn(
-                          "transition-colors",
-                          star <= (hoverRating || rating)
-                            ? "fill-yellow-400 text-yellow-400"
-                            : "text-gray-300"
-                        )}
-                      />
-                    </motion.button>
-                  ))}
-                </div>
-
-                {/* Review Text */}
-                <textarea
-                  value={reviewText}
-                  onChange={(e) => setReviewText(e.target.value)}
-                  placeholder="Write a review (optional, min 10 chars if filled)"
-                  className="w-full p-3 border border-gray-200 rounded-xl resize-none focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20 outline-none"
-                  rows={3}
-                />
-
-                {/* Photo Upload */}
-                <div className="mt-4">
-                  <p className="text-sm text-gray-500 mb-2">Add photos (optional)</p>
-                  <div className="flex gap-2">
-                    {photos.length < 3 && (
-                      <button onClick={() => toast.info("Photo upload is disabled in demo mode")} className="w-16 h-16 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center text-gray-400 hover:border-brand-primary hover:text-brand-primary transition-colors">
-                        <Camera size={20} />
-                      </button>
-                    )}
-                    {photos.map((photo, i) => (
-                      <div key={i} className="w-16 h-16 rounded-xl overflow-hidden">
-                        <img src={photo} alt="" className="w-full h-full object-cover" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-3 mt-6">
-                  <button
-                    onClick={handleSkip}
-                    className="flex-1 py-3 border border-gray-200 rounded-xl font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-                  >
-                    Skip
-                  </button>
-                  <motion.button
-                    whileTap={{ scale: 0.98 }}
-                    onClick={handleSubmitRating}
-                    disabled={rating === 0 || submitting}
-                    className="flex-1 py-3 bg-brand-primary text-white rounded-xl font-medium hover:bg-brand-primary/90 transition-colors disabled:opacity-50"
-                  >
-                    {submitting ? "Submitting..." : "Submit Review"}
-                  </motion.button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
+
+      {/* Actions */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.4 }}
+        className="px-6 space-y-3"
+      >
+        {order && (
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => router.push(`/customer/order/${order.id}`)}
+            className="w-full bg-[#1A3C5E] text-white font-bold py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 relative overflow-hidden"
+          >
+            {/* Pulse ring */}
+            <motion.span
+              animate={{ scale: [1, 1.6], opacity: [0.4, 0] }}
+              transition={{ repeat: Infinity, duration: 1.5 }}
+              className="absolute inset-0 rounded-2xl border-2 border-white/30"
+            />
+            <MapPin size={17} />
+            Track Order
+            <ChevronRight size={17} />
+          </motion.button>
+        )}
+
+        <motion.button
+          whileTap={{ scale: 0.97 }}
+          onClick={() => router.push("/customer/home")}
+          className="w-full bg-white text-[#1A3C5E] font-bold py-4 rounded-2xl border-2 border-gray-100 shadow-sm flex items-center justify-center gap-2"
+        >
+          Back to Home
+        </motion.button>
+
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <Star size={13} className="text-[#E8A020] fill-[#E8A020]" />
+          <p className="text-xs text-gray-400">Enjoying DineLuxe? Leave a review after your meal</p>
+        </div>
+      </motion.div>
     </div>
-  )
+  );
 }

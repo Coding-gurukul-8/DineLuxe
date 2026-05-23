@@ -1,23 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { DayPicker } from "react-day-picker";
-import "react-day-picker/dist/style.css";
 import { toast } from "sonner";
 import {
   Calendar, Clock, Users, CheckCircle2,
-  ChevronLeft, ChevronRight, MapPin, FileText, Loader2,
+  ChevronLeft, ChevronRight, MapPin, FileText, Loader2, Minus, Plus,
 } from "lucide-react";
 import { PageWrapper } from "@/components/layout/PageWrapper";
-import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/shared/StatusBadge";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface Branch { id: string; name: string; address: string; city: string; is_active: boolean }
 interface Restaurant { id: string; name: string; cuisine_type: string; logo_url: string; branches: Branch[] }
 interface Booking {
@@ -25,53 +21,97 @@ interface Booking {
   people_count: number; status: string; notes?: string;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-const HOURS = Array.from({ length: 15 }, (_, i) => {
-  const h = i + 9; // 09:00 – 23:00
-  return `${String(h).padStart(2, "0")}`;
-});
-const MINUTES = ["00", "15", "30", "45"];
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const TIME_SLOTS = [
+  "09:00","09:30","10:00","10:30","11:00","11:30",
+  "12:00","12:30","13:00","13:30","14:00","14:30",
+  "18:00","18:30","19:00","19:30","20:00","20:30","21:00","21:30","22:00",
+];
 
-function toISO(date: Date) {
-  return date.toISOString().split("T")[0];
+function toISO(date: Date) { return date.toISOString().split("T")[0]; }
+
+const STEPS = ["Branch", "Date & Time", "Guests", "Confirm"] as const;
+type Step = 0 | 1 | 2 | 3;
+
+// ── CSS-only Confetti ─────────────────────────────────────────────────────────
+function Confetti() {
+  const particles = Array.from({ length: 28 }, (_, i) => ({
+    id: i,
+    color: ["#E8A020","#1A3C5E","#C0392B","#27AE60","#F0B840","#2A5C8E"][i % 6],
+    x: Math.random() * 100,
+    delay: Math.random() * 0.8,
+    size: 6 + Math.random() * 8,
+    duration: 1.2 + Math.random() * 1,
+  }));
+  return (
+    <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+      {particles.map((p) => (
+        <motion.div
+          key={p.id}
+          initial={{ y: -20, x: `${p.x}vw`, opacity: 1, rotate: 0, scale: 1 }}
+          animate={{ y: "110vh", opacity: 0, rotate: 720, scale: 0.5 }}
+          transition={{ duration: p.duration, delay: p.delay, ease: "easeIn" }}
+          className="absolute top-0 rounded-sm"
+          style={{ width: p.size, height: p.size, backgroundColor: p.color }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── Animated SVG Checkmark ────────────────────────────────────────────────────
+function AnimatedCheck() {
+  return (
+    <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+      <motion.circle
+        cx="40" cy="40" r="36"
+        stroke="#27AE60" strokeWidth="4" fill="none"
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 1 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+      />
+      <motion.path
+        d="M24 40 L35 51 L56 29"
+        stroke="#27AE60" strokeWidth="4"
+        strokeLinecap="round" strokeLinejoin="round" fill="none"
+        initial={{ pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 0.5, delay: 0.5, ease: "easeOut" }}
+      />
+    </svg>
+  );
 }
 
 // ── Step indicator ────────────────────────────────────────────────────────────
-const STEPS = ["Branch", "Date & Time", "Guests", "Confirm"] as const;
-
-function StepBar({ current }: { current: number }) {
+function StepBar({ current }: { current: Step }) {
   return (
-    <div className="flex items-center gap-0 mb-8">
+    <div className="flex items-center mb-8">
       {STEPS.map((label, idx) => (
         <div key={label} className="flex items-center flex-1 last:flex-none">
           <div className="flex flex-col items-center">
-            <div
-              className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all",
-                idx < current
-                  ? "bg-brand-primary text-white"
-                  : idx === current
-                  ? "bg-brand-primary text-white ring-4 ring-brand-primary/20"
-                  : "bg-gray-100 text-gray-400"
-              )}
+            <motion.div
+              animate={{
+                backgroundColor: idx <= current ? "#E8A020" : "#F3F4F6",
+                scale: idx === current ? 1.15 : 1,
+              }}
+              transition={{ type: "spring", stiffness: 300 }}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+              style={{ color: idx <= current ? "white" : "#9CA3AF" }}
             >
               {idx < current ? <CheckCircle2 size={16} /> : idx + 1}
-            </div>
-            <span
-              className={cn(
-                "text-[10px] mt-1 font-medium whitespace-nowrap",
-                idx <= current ? "text-brand-primary" : "text-gray-400"
-              )}
-            >
+            </motion.div>
+            <span className={cn(
+              "text-[10px] mt-1 font-semibold whitespace-nowrap",
+              idx <= current ? "text-[#E8A020]" : "text-gray-400"
+            )}>
               {label}
             </span>
           </div>
           {idx < STEPS.length - 1 && (
-            <div
-              className={cn(
-                "h-0.5 flex-1 mx-1 mb-5 transition-all",
-                idx < current ? "bg-brand-primary" : "bg-gray-100"
-              )}
+            <motion.div
+              animate={{ backgroundColor: idx < current ? "#E8A020" : "#F3F4F6" }}
+              transition={{ duration: 0.4 }}
+              className="h-0.5 flex-1 mx-1 mb-5 rounded-full"
             />
           )}
         </div>
@@ -80,367 +120,305 @@ function StepBar({ current }: { current: number }) {
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
-export default function CustomerBookingPage() {
-  const router = useRouter();
-
-  // form state
-  const [step, setStep] = useState(0);
-  const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
-  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
-  const [selectedHour, setSelectedHour] = useState("19");
-  const [selectedMinute, setSelectedMinute] = useState("00");
-  const [peopleCount, setPeopleCount] = useState(2);
-  const [notes, setNotes] = useState("");
-
-  // Date bounds: today → today + 30 days
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const maxDate = new Date(today);
-  maxDate.setDate(maxDate.getDate() + 30);
-
-  // ── Nearby restaurants ───────────────────────────────────────────────────
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-  useEffect(() => {
-    navigator.geolocation?.getCurrentPosition(
-      (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => setCoords({ lat: 20.5937, lng: 78.9629 })
-    );
-  }, []);
-
-  const { data: restaurants = [], isLoading: loadingRestaurants } = useQuery<Restaurant[]>({
-    queryKey: ["restaurants", "nearby", coords],
-    queryFn: () =>
-      apiClient.get<Restaurant[]>(
-        `/restaurants/nearby?lat=${coords!.lat}&lng=${coords!.lng}&radius=50`
-      ),
-    enabled: !!coords,
-  });
-
-  // ── Submit booking ───────────────────────────────────────────────────────
-  const { mutate: createBooking, isPending: isSubmitting } = useMutation({
-    mutationFn: () => {
-      if (!selectedBranch || !selectedDate) throw new Error("Missing fields");
-      return apiClient.post<Booking>("/bookings", {
-        branch_id: selectedBranch.id,
-        people_count: peopleCount,
-        booking_date: toISO(selectedDate),
-        booking_time: `${selectedHour}:${selectedMinute}`,
-        notes: notes.trim() || undefined,
-      });
-    },
-    onSuccess: (booking) => {
-      toast.success("Booking confirmed!");
-      router.push(`/customer/booking/${booking.id}`);
-    },
-    onError: (err: Error) => toast.error(err.message || "Booking failed"),
-  });
-
-  // ── Step validation ──────────────────────────────────────────────────────
-  const canNext =
-    (step === 0 && !!selectedBranch) ||
-    (step === 1 && !!selectedDate) ||
-    (step === 2 && peopleCount >= 1) ||
-    step === 3;
-
-  const goNext = () => setStep((s) => Math.min(s + 1, 3));
-  const goBack = () => setStep((s) => Math.max(s - 1, 0));
-
-  const slideVariants = {
-    enter: { x: 40, opacity: 0 },
-    center: { x: 0, opacity: 1 },
-    exit: { x: -40, opacity: 0 },
-  };
-
+// ── Mini Calendar ─────────────────────────────────────────────────────────────
+function MiniCalendar({ selected, onSelect }: { selected: Date | null; onSelect: (d: Date) => void }) {
+  const [viewDate, setViewDate] = useState(new Date());
+  const today = new Date(); today.setHours(0,0,0,0);
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthName = viewDate.toLocaleString("default", { month: "long", year: "numeric" });
+  const cells: (Date | null)[] = [
+    ...Array(firstDay).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1)),
+  ];
   return (
-    <div className="min-h-screen bg-gray-50 pb-24">
-      {/* Header */}
-      <div className="bg-brand-primary px-4 pt-12 pb-8 text-white">
-        <button onClick={() => step === 0 ? router.back() : goBack()} className="mb-4 flex items-center gap-1 text-white/70 hover:text-white text-sm">
-          <ChevronLeft size={16} /> Back
-        </button>
-        <h1 className="text-2xl font-bold">Reserve a Table</h1>
-        <p className="text-white/70 text-sm mt-1">Book your dining experience</p>
+    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+      <div className="flex items-center justify-between mb-4">
+        <motion.button whileTap={{ scale: 0.9 }} onClick={() => setViewDate(new Date(year, month - 1, 1))}
+          className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+          <ChevronLeft size={16} className="text-gray-600" />
+        </motion.button>
+        <span className="text-sm font-bold text-gray-900">{monthName}</span>
+        <motion.button whileTap={{ scale: 0.9 }} onClick={() => setViewDate(new Date(year, month + 1, 1))}
+          className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+          <ChevronRight size={16} className="text-gray-600" />
+        </motion.button>
       </div>
-
-      <div className="px-4 -mt-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <StepBar current={step} />
-
-          <AnimatePresence mode="wait">
-            {/* ── Step 0: Branch selection ─────────────────────────────────── */}
-            {step === 0 && (
-              <motion.div key="step-0" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.2 }}>
-                <h2 className="text-lg font-semibold text-gray-900 mb-1 flex items-center gap-2">
-                  <MapPin size={18} className="text-brand-primary" /> Choose a Restaurant
-                </h2>
-                <p className="text-sm text-gray-500 mb-4">Showing restaurants near you</p>
-
-                {loadingRestaurants ? (
-                  <div className="space-y-3">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="skeleton h-20 rounded-xl" />
-                    ))}
-                  </div>
-                ) : restaurants.length === 0 ? (
-                  <p className="text-center py-10 text-gray-400">No restaurants found nearby</p>
-                ) : (
-                  <div className="space-y-3">
-                    {restaurants.map((r) => {
-                      const branch = r.branches?.find((b) => b.is_active) ?? r.branches?.[0];
-                      if (!branch) return null;
-                      const isSelected = selectedBranch?.id === branch.id;
-                      return (
-                        <button
-                          key={r.id}
-                          onClick={() => { setSelectedRestaurant(r); setSelectedBranch(branch); }}
-                          className={cn(
-                            "w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left",
-                            isSelected
-                              ? "border-brand-primary bg-brand-primary/5"
-                              : "border-gray-100 hover:border-gray-200"
-                          )}
-                        >
-                          <div className="w-12 h-12 rounded-lg bg-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
-                            {r.logo_url ? (
-                              <img src={r.logo_url} alt={r.name} className="w-full h-full object-cover" />
-                            ) : (
-                              <span className="text-lg font-bold text-gray-400">{r.name[0]}</span>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-gray-900 truncate">{r.name}</p>
-                            <p className="text-xs text-gray-500 truncate">{r.cuisine_type}</p>
-                            <p className="text-xs text-gray-400 truncate flex items-center gap-1 mt-0.5">
-                              <MapPin size={10} />{branch.address}, {branch.city}
-                            </p>
-                          </div>
-                          {isSelected && (
-                            <CheckCircle2 size={20} className="text-brand-primary shrink-0" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            {/* ── Step 1: Date & Time ──────────────────────────────────────── */}
-            {step === 1 && (
-              <motion.div key="step-1" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.2 }}>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                  <Calendar size={18} className="text-brand-primary" /> Date & Time
-                </h2>
-
-                {/* Day picker */}
-                <div className="flex justify-center mb-4">
-                  <DayPicker
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={setSelectedDate}
-                    disabled={{ before: today, after: maxDate }}
-                    modifiersClassNames={{
-                      selected: "rdp-day_selected",
-                      today: "rdp-day_today",
-                    }}
-                    className="rounded-xl"
-                    styles={{
-                      caption: { color: "#1A3C5E" },
-                    }}
-                  />
-                </div>
-
-                {/* Time selector */}
-                <div>
-                  <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
-                    <Clock size={14} className="text-brand-primary" /> Select time
-                  </p>
-                  <div className="flex gap-3">
-                    <div className="flex-1">
-                      <label className="text-xs text-gray-500 mb-1 block">Hour</label>
-                      <select
-                        value={selectedHour}
-                        onChange={(e) => setSelectedHour(e.target.value)}
-                        className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-                      >
-                        {HOURS.map((h) => (
-                          <option key={h} value={h}>{h}:00</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-xs text-gray-500 mb-1 block">Minute</label>
-                      <select
-                        value={selectedMinute}
-                        onChange={(e) => setSelectedMinute(e.target.value)}
-                        className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-                      >
-                        {MINUTES.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  {selectedDate && (
-                    <p className="mt-3 text-center text-sm text-brand-primary font-medium">
-                      {selectedDate.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} at {selectedHour}:{selectedMinute}
-                    </p>
-                  )}
-                </div>
-              </motion.div>
-            )}
-
-            {/* ── Step 2: Guests + Notes ───────────────────────────────────── */}
-            {step === 2 && (
-              <motion.div key="step-2" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.2 }}>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                  <Users size={18} className="text-brand-primary" /> Party Details
-                </h2>
-
-                {/* Stepper */}
-                <div className="flex items-center justify-center gap-6 bg-gray-50 rounded-2xl p-6 mb-6">
-                  <button
-                    onClick={() => setPeopleCount((n) => Math.max(1, n - 1))}
-                    className="w-12 h-12 rounded-full border-2 border-gray-200 bg-white flex items-center justify-center text-xl font-bold text-gray-700 hover:bg-gray-100 transition-colors active:scale-95"
-                  >
-                    −
-                  </button>
-                  <div className="text-center">
-                    <p className="text-5xl font-bold text-brand-primary">{peopleCount}</p>
-                    <p className="text-sm text-gray-500 mt-1">{peopleCount === 1 ? "Guest" : "Guests"}</p>
-                  </div>
-                  <button
-                    onClick={() => setPeopleCount((n) => Math.min(20, n + 1))}
-                    className="w-12 h-12 rounded-full border-2 border-gray-200 bg-white flex items-center justify-center text-xl font-bold text-gray-700 hover:bg-gray-100 transition-colors active:scale-95"
-                  >
-                    +
-                  </button>
-                </div>
-
-                {/* Quick presets */}
-                <div className="flex gap-2 justify-center mb-6">
-                  {[1, 2, 4, 6, 8].map((n) => (
-                    <button
-                      key={n}
-                      onClick={() => setPeopleCount(n)}
-                      className={cn(
-                        "w-10 h-10 rounded-full text-sm font-semibold transition-all",
-                        peopleCount === n
-                          ? "bg-brand-primary text-white"
-                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                      )}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5 block">
-                    <FileText size={14} className="text-brand-primary" /> Special requests (optional)
-                  </label>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Allergies, occasion, seating preferences…"
-                    rows={3}
-                    className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
-                  />
-                </div>
-              </motion.div>
-            )}
-
-            {/* ── Step 3: Confirmation summary ─────────────────────────────── */}
-            {step === 3 && (
-              <motion.div key="step-3" variants={slideVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.2 }}>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                  <CheckCircle2 size={18} className="text-brand-primary" /> Review Booking
-                </h2>
-
-                <div className="space-y-3">
-                  {[
-                    {
-                      icon: <MapPin size={16} className="text-brand-primary" />,
-                      label: "Restaurant",
-                      value: `${selectedRestaurant?.name} — ${selectedBranch?.address}, ${selectedBranch?.city}`,
-                    },
-                    {
-                      icon: <Calendar size={16} className="text-brand-primary" />,
-                      label: "Date",
-                      value: selectedDate?.toLocaleDateString("en-IN", {
-                        weekday: "long", day: "numeric", month: "long", year: "numeric",
-                      }),
-                    },
-                    {
-                      icon: <Clock size={16} className="text-brand-primary" />,
-                      label: "Time",
-                      value: `${selectedHour}:${selectedMinute}`,
-                    },
-                    {
-                      icon: <Users size={16} className="text-brand-primary" />,
-                      label: "Guests",
-                      value: `${peopleCount} ${peopleCount === 1 ? "person" : "people"}`,
-                    },
-                    ...(notes
-                      ? [{ icon: <FileText size={16} className="text-brand-primary" />, label: "Notes", value: notes }]
-                      : []),
-                  ].map(({ icon, label, value }) => (
-                    <div key={label} className="flex gap-3 p-3 bg-gray-50 rounded-xl">
-                      <div className="shrink-0 mt-0.5">{icon}</div>
-                      <div>
-                        <p className="text-xs text-gray-500">{label}</p>
-                        <p className="text-sm font-medium text-gray-900">{value}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <p className="mt-4 text-xs text-center text-gray-400">
-                  By confirming, you agree to our reservation policy. A confirmation will be sent once the restaurant accepts your booking.
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Navigation buttons */}
-          <div className="flex gap-3 mt-6">
-            {step > 0 && (
-              <Button
-                variant="outline"
-                onClick={goBack}
-                className="flex-1 rounded-xl h-12"
-                disabled={isSubmitting}
-              >
-                <ChevronLeft size={16} className="mr-1" /> Back
-              </Button>
-            )}
-            {step < 3 ? (
-              <Button
-                onClick={goNext}
-                disabled={!canNext}
-                className="flex-1 h-12 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90"
-              >
-                Continue <ChevronRight size={16} className="ml-1" />
-              </Button>
-            ) : (
-              <Button
-                onClick={() => createBooking()}
-                disabled={isSubmitting}
-                className="flex-1 h-12 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90"
-              >
-                {isSubmitting ? (
-                  <><Loader2 size={16} className="mr-2 animate-spin" /> Booking…</>
-                ) : (
-                  <><CheckCircle2 size={16} className="mr-2" /> Confirm Booking</>
-                )}
-              </Button>
-            )}
-          </div>
-        </div>
+      <div className="grid grid-cols-7 gap-1 mb-2">
+        {["Su","Mo","Tu","We","Th","Fr","Sa"].map((d) => (
+          <div key={d} className="text-center text-[10px] font-semibold text-gray-400">{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((date, i) => {
+          if (!date) return <div key={i} />;
+          const isPast = date < today;
+          const isSelected = selected && toISO(date) === toISO(selected);
+          const isToday = toISO(date) === toISO(today);
+          return (
+            <motion.button
+              key={i} whileTap={{ scale: 0.85 }} disabled={!!isPast}
+              onClick={() => onSelect(date)}
+              className={cn(
+                "aspect-square rounded-full text-xs font-medium transition-all flex items-center justify-center",
+                isPast ? "text-gray-200 cursor-not-allowed" :
+                isSelected ? "bg-[#E8A020] text-white shadow-md ring-2 ring-[#E8A020]/30" :
+                isToday ? "border-2 border-[#E8A020] text-[#E8A020]" :
+                "text-gray-700 hover:bg-gray-100"
+              )}
+            >
+              {date.getDate()}
+            </motion.button>
+          );
+        })}
       </div>
     </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export default function BookingPage() {
+  const router = useRouter();
+  const [step, setStep] = useState<Step>(0);
+  const [selectedBranch, setSelectedBranch] = useState<(Branch & { restaurantName?: string }) | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [guestCount, setGuestCount] = useState(2);
+  const [notes, setNotes] = useState("");
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
+
+  const { data: restaurants = [], isLoading: restsLoading } = useQuery({
+    queryKey: ["restaurants"],
+    queryFn: () => apiClient.get<Restaurant[]>("/restaurants"),
+    enabled: step === 0,
+  });
+
+  const allBranches = restaurants.flatMap((r) =>
+    r.branches.filter((b) => b.is_active).map((b) => ({ ...b, restaurantName: r.name }))
+  );
+
+  const { mutate: createBooking, isPending } = useMutation({
+    mutationFn: () =>
+      apiClient.post<Booking>("/bookings", {
+        branchId: selectedBranch!.id,
+        booking_date: toISO(selectedDate!),
+        booking_time: selectedTime!,
+        people_count: guestCount,
+        notes: notes || undefined,
+      }),
+    onSuccess: (booking) => {
+      setConfirmedBooking(booking);
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 3000);
+      setStep(3);
+    },
+    onError: () => toast.error("Could not create booking. Please try again."),
+  });
+
+  function goNext() {
+    if (step === 2) { createBooking(); return; }
+    setStep((s) => (s + 1) as Step);
+  }
+  function goBack() { setStep((s) => Math.max(0, s - 1) as Step); }
+
+  const canProceed = [
+    !!selectedBranch,
+    !!selectedDate && !!selectedTime,
+    guestCount >= 1,
+    true,
+  ][step];
+
+  return (
+    <PageWrapper>
+      {showConfetti && <Confetti />}
+
+      <div className="flex items-center gap-3 mb-6">
+        {step > 0 && step < 3 && (
+          <motion.button whileTap={{ scale: 0.9 }} onClick={goBack}
+            className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
+            <ChevronLeft size={18} className="text-gray-700" />
+          </motion.button>
+        )}
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Book a Table</h1>
+          <p className="text-xs text-gray-500">{STEPS[step]}</p>
+        </div>
+      </div>
+
+      <StepBar current={step} />
+
+      <AnimatePresence mode="wait">
+
+        {/* Step 0: Branch */}
+        {step === 0 && (
+          <motion.div key="s0" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="space-y-3">
+            <p className="text-sm text-gray-500 mb-4">Choose a restaurant location</p>
+            {restsLoading
+              ? [1,2,3].map((n) => <div key={n} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)
+              : allBranches.map((branch) => (
+                <motion.button key={branch.id} whileTap={{ scale: 0.98 }}
+                  onClick={() => setSelectedBranch(branch)}
+                  className={cn(
+                    "w-full text-left p-4 rounded-2xl border-2 transition-all",
+                    selectedBranch?.id === branch.id
+                      ? "border-[#E8A020] bg-[#E8A020]/5 shadow-md"
+                      : "border-gray-100 bg-white"
+                  )}>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-bold text-gray-900 text-sm">{branch.restaurantName}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{branch.name}</p>
+                      <div className="flex items-center gap-1 mt-1.5 text-xs text-gray-400">
+                        <MapPin size={11} /><span>{branch.address}, {branch.city}</span>
+                      </div>
+                    </div>
+                    {selectedBranch?.id === branch.id && (
+                      <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 400 }}>
+                        <CheckCircle2 size={20} className="text-[#E8A020]" />
+                      </motion.div>
+                    )}
+                  </div>
+                </motion.button>
+              ))
+            }
+          </motion.div>
+        )}
+
+        {/* Step 1: Date & Time */}
+        {step === 1 && (
+          <motion.div key="s1" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="space-y-5">
+            <MiniCalendar selected={selectedDate} onSelect={setSelectedDate} />
+            {selectedDate && (
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+                <p className="text-sm font-bold text-gray-800 mb-3">Select a time</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {TIME_SLOTS.map((slot) => {
+                    const isPast = selectedDate && toISO(selectedDate) === toISO(new Date()) &&
+                      slot <= new Date().toTimeString().slice(0,5);
+                    return (
+                      <motion.button key={slot} whileTap={{ scale: 0.92 }} disabled={!!isPast}
+                        onClick={() => setSelectedTime(slot)}
+                        className={cn(
+                          "py-2 rounded-xl text-xs font-semibold border-2 transition-all",
+                          isPast ? "border-gray-100 text-gray-300 line-through bg-gray-50 cursor-not-allowed" :
+                          selectedTime === slot
+                            ? "border-[#E8A020] bg-[#E8A020] text-white shadow-md"
+                            : "border-gray-200 text-gray-700 bg-white hover:border-[#E8A020]/50"
+                        )}>
+                        {slot}
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Step 2: Guests */}
+        {step === 2 && (
+          <motion.div key="s2" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="space-y-6">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+              <p className="text-sm font-bold text-gray-800 mb-5">Number of Guests</p>
+              <div className="flex items-center justify-center gap-6">
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => setGuestCount((n) => Math.max(1, n - 1))}
+                  className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
+                  <Minus size={18} className="text-gray-700" />
+                </motion.button>
+                <AnimatePresence mode="wait">
+                  <motion.span key={guestCount}
+                    initial={{ opacity: 0, y: -12, scale: 0.8 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 12, scale: 0.8 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 22 }}
+                    className="text-5xl font-bold text-[#1A3C5E] w-16 text-center tabular-nums">
+                    {guestCount}
+                  </motion.span>
+                </AnimatePresence>
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => setGuestCount((n) => Math.min(20, n + 1))}
+                  className="w-12 h-12 rounded-full bg-[#E8A020] flex items-center justify-center shadow-md">
+                  <Plus size={18} className="text-white" />
+                </motion.button>
+              </div>
+              <p className="text-center text-xs text-gray-400 mt-4">
+                {guestCount === 1 ? "Just you" : `Party of ${guestCount}`}
+              </p>
+            </div>
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+              <label className="text-sm font-bold text-gray-800 block mb-2">Special requests (optional)</label>
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+                placeholder="Dietary requirements, special occasion, seating preference…"
+                rows={3}
+                className="w-full text-sm bg-gray-50 rounded-xl border border-gray-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#E8A020]/40 resize-none" />
+            </div>
+          </motion.div>
+        )}
+
+        {/* Step 3: Confirmed */}
+        {step === 3 && (
+          <motion.div key="s3" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-5">
+            <div className="flex flex-col items-center py-6">
+              <AnimatedCheck />
+              <motion.h2 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }}
+                className="text-xl font-bold text-gray-900 mt-4">Booking Confirmed!</motion.h2>
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1 }}
+                className="text-sm text-gray-500 mt-1">See you soon 🎉</motion.p>
+            </div>
+            {confirmedBooking && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }}
+                className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <MapPin size={15} className="text-[#E8A020]" />
+                  <span className="font-semibold text-gray-900">{selectedBranch?.name}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Calendar size={15} className="text-gray-400" />
+                  <span>{selectedDate?.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Clock size={15} className="text-gray-400" />
+                  <span>{selectedTime}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Users size={15} className="text-gray-400" />
+                  <span>{guestCount} guest{guestCount !== 1 ? "s" : ""}</span>
+                </div>
+                {notes && (
+                  <div className="flex items-start gap-2 text-sm text-gray-600">
+                    <FileText size={15} className="text-gray-400 mt-0.5" />
+                    <span>{notes}</span>
+                  </div>
+                )}
+              </motion.div>
+            )}
+            <motion.button whileTap={{ scale: 0.97 }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}
+              onClick={() => router.push("/customer/home")}
+              className="w-full bg-[#1A3C5E] text-white font-bold py-4 rounded-2xl shadow-lg">
+              Back to Home
+            </motion.button>
+          </motion.div>
+        )}
+
+      </AnimatePresence>
+
+      {step < 3 && (
+        <motion.div layout className="mt-8">
+          <motion.button whileTap={{ scale: 0.97 }} disabled={!canProceed || isPending} onClick={goNext}
+            className={cn(
+              "w-full py-4 rounded-2xl font-bold text-white text-base shadow-lg transition-all",
+              canProceed ? "bg-[#E8A020] shadow-[#E8A020]/30" : "bg-gray-200 cursor-not-allowed"
+            )}>
+            {isPending ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 size={18} className="animate-spin" />Confirming…
+              </span>
+            ) : step === 2 ? "Confirm Booking" : "Continue"}
+          </motion.button>
+        </motion.div>
+      )}
+    </PageWrapper>
   );
 }

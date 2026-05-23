@@ -1,231 +1,230 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { motion, AnimatePresence, useMotionValue, useTransform } from "framer-motion";
+import type { PanInfo } from "framer-motion";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Trash2, Plus, Minus, ShoppingBag, ChevronLeft, Loader2, Tag } from "lucide-react";
 import { PageWrapper } from "@/components/layout/PageWrapper";
-import { EmptyState } from "@/components/shared/EmptyState";
-import { FormError } from "@/components/shared/FormError";
-import { Button } from "@/components/ui/button";
 import { useCart } from "@/hooks/useCart";
+import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
-import { handleApiError } from "@/lib/handle-error";
-import type { Order } from "@/types/api";
-import {
-  Plus, Minus, Trash2, ShoppingCart, ChevronRight, AlertCircle, Loader2,
-} from "lucide-react";
+import { formatCurrency, cn } from "@/lib/utils";
 
-const TAX_RATE = 0.05; // 5% GST
+function AnimatedPrice({ value }: { value: number }) {
+  return (
+    <AnimatePresence mode="wait">
+      <motion.span key={value}
+        initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+        transition={{ type: "spring", stiffness: 400, damping: 28 }}
+        className="tabular-nums">
+        {formatCurrency(value)}
+      </motion.span>
+    </AnimatePresence>
+  );
+}
+
+function CartItem({
+  item, onQtyChange, onRemove,
+}: {
+  item: { id: string; name: string; price: number; quantity: number; image_url?: string };
+  onQtyChange: (id: string, qty: number) => void;
+  onRemove: (id: string) => void;
+}) {
+  const x = useMotionValue(0);
+  const deleteOpacity = useTransform(x, [-80, -20], [1, 0]);
+  const itemOpacity = useTransform(x, [-80, 0], [0.6, 1]);
+  const [removing, setRemoving] = useState(false);
+
+  function handleDragEnd(_: unknown, info: PanInfo) {
+    if (info.offset.x < -70) { setRemoving(true); setTimeout(() => onRemove(item.id), 320); }
+  }
+
+  return (
+    <AnimatePresence>
+      {!removing && (
+        <motion.div layout exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+          transition={{ duration: 0.28, ease: "easeInOut" }}
+          className="relative overflow-hidden rounded-2xl">
+          <motion.div style={{ opacity: deleteOpacity }}
+            className="absolute inset-0 bg-[#C0392B] rounded-2xl flex items-center justify-end pr-5">
+            <Trash2 size={22} className="text-white" />
+          </motion.div>
+          <motion.div drag="x" dragConstraints={{ left: -90, right: 0 }} dragElastic={0.15}
+            onDragEnd={handleDragEnd} style={{ x, opacity: itemOpacity }}
+            className="relative z-10 bg-white rounded-2xl p-4 flex items-center gap-3 shadow-sm border border-gray-50 cursor-grab active:cursor-grabbing">
+            {item.image_url
+              ? <img src={item.image_url} alt={item.name} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
+              : <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0"><ShoppingBag size={20} className="text-gray-300" /></div>
+            }
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900 truncate">{item.name}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{formatCurrency(item.price)} each</p>
+              <div className="flex items-center gap-2 mt-2">
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => onQtyChange(item.id, item.quantity - 1)}
+                  className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
+                  <Minus size={12} className="text-gray-600" />
+                </motion.button>
+                <AnimatePresence mode="wait">
+                  <motion.span key={item.quantity}
+                    initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                    className="text-sm font-bold text-gray-900 w-5 text-center tabular-nums">
+                    {item.quantity}
+                  </motion.span>
+                </AnimatePresence>
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => onQtyChange(item.id, item.quantity + 1)}
+                  className="w-7 h-7 rounded-full bg-[#E8A020] flex items-center justify-center shadow-sm">
+                  <Plus size={12} className="text-white" />
+                </motion.button>
+              </div>
+            </div>
+            <div className="text-right text-sm font-bold text-gray-900 flex-shrink-0">
+              <AnimatedPrice value={item.price * item.quantity} />
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+type OrderState = "idle" | "processing" | "confirmed";
+
+function PlaceOrderButton({ state, onClick }: { state: OrderState; onClick: () => void }) {
+  const labels: Record<OrderState, string> = { idle: "Place Order", processing: "Placing Order…", confirmed: "Order Placed!" };
+  const colors: Record<OrderState, string> = { idle: "bg-[#E8A020]", processing: "bg-[#E8A020]/80", confirmed: "bg-green-500" };
+  return (
+    <motion.button layout whileTap={state === "idle" ? { scale: 0.97 } : {}}
+      onClick={state === "idle" ? onClick : undefined} disabled={state !== "idle"}
+      className={cn("w-full py-4 rounded-2xl font-bold text-white text-base shadow-lg transition-colors flex items-center justify-center gap-2", colors[state])}>
+      <AnimatePresence mode="wait">
+        <motion.span key={state} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="flex items-center gap-2">
+          {state === "processing" && <Loader2 size={18} className="animate-spin" />}
+          {state === "confirmed" && <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 400 }}>✓</motion.span>}
+          {labels[state]}
+        </motion.span>
+      </AnimatePresence>
+    </motion.button>
+  );
+}
 
 export default function CartPage() {
   const router = useRouter();
-
-  // Zustand store — must use individual selectors, NOT object destructure
-  // (useCart() is a Zustand store created with create(), not a plain hook)
-  const items      = useCart((s) => s.items);
-  const branchId   = useCart((s) => s.branchId);
-  const tableId    = useCart((s) => s.tableId);
-  const updateQty  = useCart((s) => s.updateQuantity);
+  const qc = useQueryClient();
+  const { branchId } = useAuth();
+  const items = useCart((s) => s.items);
+  const updateItem = useCart((s) => s.updateItemQuantity);
   const removeItem = useCart((s) => s.removeItem);
-  const clearCart  = useCart((s) => s.clearCart);
-  const getTotal   = useCart((s) => s.total);
-  const getCount   = useCart((s) => s.itemCount);
+  const clearCart = useCart((s) => s.clearCart);
+  const cartTotal = useCart((s) => s.total);
+  const cartRestaurantId = useCart((s) => s.restaurantId);
+  const cartBranchId = useCart((s) => s.branchId);
+  const [orderState, setOrderState] = useState<OrderState>("idle");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoApplied, setPromoApplied] = useState(false);
 
-  const [formError, setFormError] = useState<string | null>(null);
+  const tax = cartTotal() * 0.05;
+  const discount = promoApplied ? cartTotal() * 0.1 : 0;
+  const grandTotal = cartTotal() + tax - discount;
 
-  const subtotal   = getTotal();
-  const tax        = subtotal * TAX_RATE;
-  const grandTotal = subtotal + tax;
-  const totalCount = getCount();
-
-  // ── Place order ─────────────────────────────────────────────────────────
-  const { mutate: placeOrder, isPending } = useMutation({
-    mutationFn: () => {
-      if (!branchId) throw new Error("No branch linked. Scan a QR code first.");
-      if (items.length === 0) throw new Error("Your cart is empty.");
-
-      return apiClient.post<Order>("/orders", {
-        branch_id:  branchId,
-        table_id:   tableId ?? undefined,
-        order_type: "dine_in",   // underscore — matches backend OrderType enum
-        items: items.map((i) => ({
-          menu_item_id: i.id,
-          quantity:     i.quantity,
-          notes:        i.notes ?? undefined,
-        })),
-      });
-    },
-    onSuccess: (order) => {
+  const { mutate: placeOrder } = useMutation({
+    mutationFn: () => apiClient.post("/orders", {
+      branch_id: cartBranchId ?? branchId,
+      restaurant_id: cartRestaurantId,
+      order_type: "dine_in",
+      items: items.map((i) => ({ menu_item_id: i.id, quantity: i.quantity, unit_price: i.price })),
+    }),
+    onMutate: () => setOrderState("processing"),
+    onSuccess: (order: any) => {
+      setOrderState("confirmed");
       clearCart();
-      toast.success("Order placed!");
-      router.push(`/customer/order/${order.id}`);
+      qc.invalidateQueries({ queryKey: ["customer", "active-orders"] });
+      setTimeout(() => router.push(`/customer/payment/${order.id}`), 900);
     },
-    onError: (err) => {
-      setFormError(handleApiError(err));
-    },
+    onError: () => { setOrderState("idle"); toast.error("Could not place order. Please try again."); },
   });
 
-  // ── Empty cart ───────────────────────────────────────────────────────────
-  if (totalCount === 0) {
+  if (items.length === 0 && orderState !== "confirmed") {
     return (
-      <PageWrapper title="Your Cart" subtitle="Review and manage your order">
-        <EmptyState
-          variant="cart"
-          title="Your cart is empty"
-          message="Add delicious items from the menu"
-          action={{
-            label: "Explore Menu",
-            onClick: () => router.push("/customer/menu"),
-          }}
-        />
+      <PageWrapper>
+        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+          <motion.div initial={{ scale: 0, rotate: -10 }} animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 280 }}
+            className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mb-5">
+            <ShoppingBag size={36} className="text-gray-300" />
+          </motion.div>
+          <h2 className="text-lg font-bold text-gray-800 mb-2">Your cart is empty</h2>
+          <p className="text-sm text-gray-500 mb-6">Add items from a restaurant to get started</p>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={() => router.push("/customer/home")}
+            className="bg-[#E8A020] text-white font-bold px-8 py-3 rounded-2xl shadow-lg">
+            Explore Menu
+          </motion.button>
+        </div>
       </PageWrapper>
     );
   }
 
   return (
-    <PageWrapper
-      title="Your Cart"
-      subtitle={`${totalCount} item${totalCount !== 1 ? "s" : ""}`}
-    >
-      {/* ── Item list ─────────────────────────────────────────────────── */}
-      <div className="space-y-3">
+    <PageWrapper>
+      <div className="flex items-center gap-3 mb-6">
+        <motion.button whileTap={{ scale: 0.9 }} onClick={() => router.back()}
+          className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
+          <ChevronLeft size={18} className="text-gray-700" />
+        </motion.button>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Your Cart</h1>
+          <p className="text-xs text-gray-500">{items.length} item{items.length !== 1 ? "s" : ""}</p>
+        </div>
+      </div>
+
+      <div className="space-y-3 mb-6">
         <AnimatePresence initial={false}>
           {items.map((item) => (
-            <motion.div
-              key={item.id}
-              layout
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, x: -80 }}
-              transition={{ duration: 0.2 }}
-              className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center gap-3"
-            >
-              {/* Thumbnail */}
-              {item.image_url ? (
-                <img
-                  src={item.image_url}
-                  alt={item.name}
-                  className="w-16 h-16 rounded-lg object-cover shrink-0"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 text-2xl">
-                  🍽
-                </div>
-              )}
-
-              {/* Details */}
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-900 text-sm line-clamp-1">
-                  {item.name}
-                </p>
-                {item.notes && (
-                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
-                    Note: {item.notes}
-                  </p>
-                )}
-                <p className="font-bold text-gray-900 mt-1">
-                  ₹{(item.price * item.quantity).toFixed(0)}
-                </p>
-                <p className="text-xs text-gray-400">₹{item.price} each</p>
-              </div>
-
-              {/* Qty controls */}
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  onClick={() => updateQty(item.id, item.quantity - 1)}
-                  className="w-8 h-8 rounded-lg border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors"
-                  aria-label="Decrease quantity"
-                >
-                  {item.quantity === 1 ? (
-                    <Trash2 size={14} className="text-red-400" />
-                  ) : (
-                    <Minus size={14} className="text-gray-600" />
-                  )}
-                </button>
-
-                <motion.span
-                  key={item.quantity}
-                  initial={{ scale: 1.3 }}
-                  animate={{ scale: 1 }}
-                  className="w-8 text-center font-semibold text-gray-900 text-sm"
-                >
-                  {item.quantity}
-                </motion.span>
-
-                <button
-                  onClick={() => updateQty(item.id, item.quantity + 1)}
-                  className="w-8 h-8 rounded-lg bg-brand-primary text-white flex items-center justify-center hover:bg-brand-primary/90 transition-colors"
-                  aria-label="Increase quantity"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-            </motion.div>
+            <CartItem key={item.id} item={item}
+              onQtyChange={(id, qty) => { if (qty <= 0) removeItem(id); else updateItem(id, qty); }}
+              onRemove={removeItem} />
           ))}
         </AnimatePresence>
       </div>
 
-      {/* Clear cart link */}
-      <button
-        onClick={clearCart}
-        className="text-sm text-red-500 flex items-center gap-1 hover:underline"
-      >
-        <Trash2 size={14} /> Clear cart
-      </button>
-
-      {/* ── Order summary ──────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 space-y-3">
-        <h2 className="font-semibold text-gray-900">Order Summary</h2>
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between text-gray-500">
-            <span>Subtotal</span>
-            <span>₹{subtotal.toFixed(2)}</span>
+      <motion.div layout className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm mb-4">
+        <div className="flex gap-2">
+          <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
+            <Tag size={15} className="text-gray-400" />
+            <input value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+              placeholder="Promo code"
+              className="text-sm bg-transparent focus:outline-none flex-1 placeholder-gray-400" />
           </div>
-          <div className="flex justify-between text-gray-500">
-            <span>GST (5%)</span>
-            <span>₹{tax.toFixed(2)}</span>
-          </div>
-          <div className="border-t border-gray-100 pt-2 flex justify-between text-base font-bold text-gray-900">
-            <span>Total</span>
-            <span>₹{grandTotal.toFixed(2)}</span>
-          </div>
+          <motion.button whileTap={{ scale: 0.95 }}
+            onClick={() => { if (promoCode.trim()) { setPromoApplied(true); toast.success("Promo applied! 10% off"); } }}
+            className="bg-[#1A3C5E] text-white text-sm font-bold px-4 rounded-xl">
+            Apply
+          </motion.button>
         </div>
-      </div>
-
-      {/* ── No-branch warning ──────────────────────────────────────────── */}
-      {!branchId && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-3 text-sm">
-          <AlertCircle size={16} className="shrink-0" />
-          <span>No branch linked. Scan a QR code to continue.</span>
-        </div>
-      )}
-
-      {/* ── API error (shown after failed mutate) ──────────────────────── */}
-      <FormError error={formError} />
-
-      {/* ── Place order CTA ────────────────────────────────────────────── */}
-      <Button
-        className="w-full py-4 text-base font-semibold"
-        disabled={isPending || !branchId}
-        onClick={() => {
-          setFormError(null);
-          placeOrder();
-        }}
-      >
-        {isPending ? (
-          <>
-            <Loader2 size={16} className="animate-spin" />
-            Placing Order…
-          </>
-        ) : (
-          <>
-            Place Order · ₹{grandTotal.toFixed(0)}
-            <ChevronRight size={18} />
-          </>
+        {promoApplied && (
+          <motion.p initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-xs text-green-600 font-semibold mt-2">
+            ✓ 10% discount applied
+          </motion.p>
         )}
-      </Button>
+      </motion.div>
+
+      <motion.div layout className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm mb-6 space-y-3">
+        <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><AnimatedPrice value={cartTotal()} /></div>
+        <div className="flex justify-between text-sm text-gray-600"><span>Taxes & fees (5%)</span><AnimatedPrice value={tax} /></div>
+        {promoApplied && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-between text-sm text-green-600 font-medium">
+            <span>Promo discount</span><span>-{formatCurrency(discount)}</span>
+          </motion.div>
+        )}
+        <div className="border-t border-gray-100 pt-3 flex justify-between text-base font-bold text-gray-900">
+          <span>Total</span><AnimatedPrice value={grandTotal} />
+        </div>
+      </motion.div>
+
+      <PlaceOrderButton state={orderState} onClick={() => placeOrder()} />
     </PageWrapper>
   );
 }

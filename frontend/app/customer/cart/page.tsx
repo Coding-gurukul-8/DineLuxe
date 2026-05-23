@@ -1,195 +1,230 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { useRouter } from "next/navigation"
-import { PageWrapper } from "@/components/layout/PageWrapper"
-import { Button } from "@/components/ui/button"
-import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, CheckCircle } from "lucide-react"
-import { useCart } from "@/hooks/useCart"
-import ThemeToggle from "@/components/ui/ThemeToggle"
-import { toast } from "sonner"
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence, useMotionValue, useTransform } from "framer-motion";
+import type { PanInfo } from "framer-motion";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Trash2, Plus, Minus, ShoppingBag, ChevronLeft, Loader2, Tag } from "lucide-react";
+import { PageWrapper } from "@/components/layout/PageWrapper";
+import { useCart } from "@/hooks/useCart";
+import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api-client";
+import { formatCurrency, cn } from "@/lib/utils";
 
-export default function CustomerCartPage() {
-  const router = useRouter()
-  const { items: cartItems, tableId, updateQuantity, removeItem, total, clearCart } = useCart()
-  const [isBooking, setIsBooking] = useState(false)
+function AnimatedPrice({ value }: { value: number }) {
+  return (
+    <AnimatePresence mode="wait">
+      <motion.span key={value}
+        initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+        transition={{ type: "spring", stiffness: 400, damping: 28 }}
+        className="tabular-nums">
+        {formatCurrency(value)}
+      </motion.span>
+    </AnimatePresence>
+  );
+}
 
-  const handleQuantityChange = (itemId: string, delta: number) => {
-    const item = cartItems.find(i => i.id === itemId)
-    if (item) {
-      updateQuantity(itemId, Math.max(0, item.quantity + delta))
-    }
-  }
+function CartItem({
+  item, onQtyChange, onRemove,
+}: {
+  item: { id: string; name: string; price: number; quantity: number; image_url?: string };
+  onQtyChange: (id: string, qty: number) => void;
+  onRemove: (id: string) => void;
+}) {
+  const x = useMotionValue(0);
+  const deleteOpacity = useTransform(x, [-80, -20], [1, 0]);
+  const itemOpacity = useTransform(x, [-80, 0], [0.6, 1]);
+  const [removing, setRemoving] = useState(false);
 
-  const handleRemoveItem = (itemId: string) => {
-    removeItem(itemId)
-  }
-
-  const handleConfirmBooking = async () => {
-    if (!tableId) {
-      toast.error('No table selected. Please select a table first.')
-      router.push('/customer/home')
-      return
-    }
-
-    setIsBooking(true)
-    try {
-      // Mock booking confirmation (in production, POST to /bookings endpoint)
-      toast.success('✓ Booking confirmed! Your table is reserved.')
-      setTimeout(() => {
-        clearCart()
-        router.push('/customer/home')
-      }, 1500)
-    } catch (err) {
-      toast.error('Failed to confirm booking')
-      setIsBooking(false)
-    }
+  function handleDragEnd(_: unknown, info: PanInfo) {
+    if (info.offset.x < -70) { setRemoving(true); setTimeout(() => onRemove(item.id), 320); }
   }
 
   return (
-    <PageWrapper title="Your Order" subtitle={tableId ? `Table: ${tableId}` : "Review before booking"}>
-      <div className="mb-6 flex items-center justify-between">
-        {tableId && (
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg"
-          >
-            <CheckCircle size={18} className="text-green-600" />
-            <span className="text-sm font-medium text-green-700 dark:text-green-300">Table {tableId} Selected</span>
+    <AnimatePresence>
+      {!removing && (
+        <motion.div layout exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+          transition={{ duration: 0.28, ease: "easeInOut" }}
+          className="relative overflow-hidden rounded-2xl">
+          <motion.div style={{ opacity: deleteOpacity }}
+            className="absolute inset-0 bg-[#C0392B] rounded-2xl flex items-center justify-end pr-5">
+            <Trash2 size={22} className="text-white" />
           </motion.div>
-        )}
-        <ThemeToggle />
+          <motion.div drag="x" dragConstraints={{ left: -90, right: 0 }} dragElastic={0.15}
+            onDragEnd={handleDragEnd} style={{ x, opacity: itemOpacity }}
+            className="relative z-10 bg-white rounded-2xl p-4 flex items-center gap-3 shadow-sm border border-gray-50 cursor-grab active:cursor-grabbing">
+            {item.image_url
+              ? <img src={item.image_url} alt={item.name} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
+              : <div className="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0"><ShoppingBag size={20} className="text-gray-300" /></div>
+            }
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900 truncate">{item.name}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{formatCurrency(item.price)} each</p>
+              <div className="flex items-center gap-2 mt-2">
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => onQtyChange(item.id, item.quantity - 1)}
+                  className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
+                  <Minus size={12} className="text-gray-600" />
+                </motion.button>
+                <AnimatePresence mode="wait">
+                  <motion.span key={item.quantity}
+                    initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                    className="text-sm font-bold text-gray-900 w-5 text-center tabular-nums">
+                    {item.quantity}
+                  </motion.span>
+                </AnimatePresence>
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => onQtyChange(item.id, item.quantity + 1)}
+                  className="w-7 h-7 rounded-full bg-[#E8A020] flex items-center justify-center shadow-sm">
+                  <Plus size={12} className="text-white" />
+                </motion.button>
+              </div>
+            </div>
+            <div className="text-right text-sm font-bold text-gray-900 flex-shrink-0">
+              <AnimatedPrice value={item.price * item.quantity} />
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+type OrderState = "idle" | "processing" | "confirmed";
+
+function PlaceOrderButton({ state, onClick }: { state: OrderState; onClick: () => void }) {
+  const labels: Record<OrderState, string> = { idle: "Place Order", processing: "Placing Order…", confirmed: "Order Placed!" };
+  const colors: Record<OrderState, string> = { idle: "bg-[#E8A020]", processing: "bg-[#E8A020]/80", confirmed: "bg-green-500" };
+  return (
+    <motion.button layout whileTap={state === "idle" ? { scale: 0.97 } : {}}
+      onClick={state === "idle" ? onClick : undefined} disabled={state !== "idle"}
+      className={cn("w-full py-4 rounded-2xl font-bold text-white text-base shadow-lg transition-colors flex items-center justify-center gap-2", colors[state])}>
+      <AnimatePresence mode="wait">
+        <motion.span key={state} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="flex items-center gap-2">
+          {state === "processing" && <Loader2 size={18} className="animate-spin" />}
+          {state === "confirmed" && <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 400 }}>✓</motion.span>}
+          {labels[state]}
+        </motion.span>
+      </AnimatePresence>
+    </motion.button>
+  );
+}
+
+export default function CartPage() {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const { branchId } = useAuth();
+  const items = useCart((s) => s.items);
+  const updateItem = useCart((s) => s.updateItemQuantity);
+  const removeItem = useCart((s) => s.removeItem);
+  const clearCart = useCart((s) => s.clearCart);
+  const cartTotal = useCart((s) => s.total);
+  const cartRestaurantId = useCart((s) => s.restaurantId);
+  const cartBranchId = useCart((s) => s.branchId);
+  const [orderState, setOrderState] = useState<OrderState>("idle");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoApplied, setPromoApplied] = useState(false);
+
+  const tax = cartTotal() * 0.05;
+  const discount = promoApplied ? cartTotal() * 0.1 : 0;
+  const grandTotal = cartTotal() + tax - discount;
+
+  const { mutate: placeOrder } = useMutation({
+    mutationFn: () => apiClient.post("/orders", {
+      branch_id: cartBranchId ?? branchId,
+      restaurant_id: cartRestaurantId,
+      order_type: "dine_in",
+      items: items.map((i) => ({ menu_item_id: i.id, quantity: i.quantity, unit_price: i.price })),
+    }),
+    onMutate: () => setOrderState("processing"),
+    onSuccess: (order: any) => {
+      setOrderState("confirmed");
+      clearCart();
+      qc.invalidateQueries({ queryKey: ["customer", "active-orders"] });
+      setTimeout(() => router.push(`/customer/payment/${order.id}`), 900);
+    },
+    onError: () => { setOrderState("idle"); toast.error("Could not place order. Please try again."); },
+  });
+
+  if (items.length === 0 && orderState !== "confirmed") {
+    return (
+      <PageWrapper>
+        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+          <motion.div initial={{ scale: 0, rotate: -10 }} animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 280 }}
+            className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mb-5">
+            <ShoppingBag size={36} className="text-gray-300" />
+          </motion.div>
+          <h2 className="text-lg font-bold text-gray-800 mb-2">Your cart is empty</h2>
+          <p className="text-sm text-gray-500 mb-6">Add items from a restaurant to get started</p>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={() => router.push("/customer/home")}
+            className="bg-[#E8A020] text-white font-bold px-8 py-3 rounded-2xl shadow-lg">
+            Explore Menu
+          </motion.button>
+        </div>
+      </PageWrapper>
+    );
+  }
+
+  return (
+    <PageWrapper>
+      <div className="flex items-center gap-3 mb-6">
+        <motion.button whileTap={{ scale: 0.9 }} onClick={() => router.back()}
+          className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
+          <ChevronLeft size={18} className="text-gray-700" />
+        </motion.button>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Your Cart</h1>
+          <p className="text-xs text-gray-500">{items.length} item{items.length !== 1 ? "s" : ""}</p>
+        </div>
       </div>
 
-      {cartItems.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center py-12"
-        >
-          <div className="w-20 h-20 bg-gray-100 dark:bg-surface-800 rounded-full flex items-center justify-center mx-auto mb-4">
-            <ShoppingBag size={32} className="text-gray-400" />
+      <div className="space-y-3 mb-6">
+        <AnimatePresence initial={false}>
+          {items.map((item) => (
+            <CartItem key={item.id} item={item}
+              onQtyChange={(id, qty) => { if (qty <= 0) removeItem(id); else updateItem(id, qty); }}
+              onRemove={removeItem} />
+          ))}
+        </AnimatePresence>
+      </div>
+
+      <motion.div layout className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm mb-4">
+        <div className="flex gap-2">
+          <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 border border-gray-200">
+            <Tag size={15} className="text-gray-400" />
+            <input value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+              placeholder="Promo code"
+              className="text-sm bg-transparent focus:outline-none flex-1 placeholder-gray-400" />
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Your cart is empty</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Add some delicious items to get started</p>
-          <Button
-            onClick={() => router.push("/customer/menu")}
-            className="bg-brand-primary hover:bg-brand-primary/90 text-white"
-          >
-            Browse Menu
-          </Button>
-        </motion.div>
-      ) : (
-        <div className="space-y-6">
-          {/* Cart Items */}
-          <div className="space-y-3">
-            <AnimatePresence>
-              {cartItems.map((item) => (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="bg-white dark:bg-surface-800 rounded-md p-4 border border-gray-100 dark:border-surface-700 flex items-center gap-4"
-                >
-                  {/* Image placeholder */}
-                  <div className="w-20 h-20 bg-gray-100 dark:bg-surface-700 rounded-xl flex items-center justify-center shrink-0">
-                    <ShoppingBag size={24} className="text-gray-400" />
-                  </div>
-
-                  {/* Details */}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-gray-900 dark:text-white truncate">{item.name}</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">₹{item.price}</p>
-                  </div>
-
-                  {/* Quantity controls */}
-                  <div className="flex items-center gap-2">
-                    <motion.button
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => handleQuantityChange(item.id, -1)}
-                      className="w-8 h-8 bg-gray-100 dark:bg-surface-700 rounded-lg flex items-center justify-center hover:bg-gray-200 dark:hover:bg-surface-600 transition-colors"
-                    >
-                      <Minus size={14} />
-                    </motion.button>
-                    <span className="w-8 text-center font-medium text-gray-900 dark:text-white">{item.quantity}</span>
-                    <motion.button
-                      whileTap={{ scale: 0.9 }}
-                      onClick={() => handleQuantityChange(item.id, 1)}
-                      className="w-8 h-8 bg-gray-100 dark:bg-surface-700 rounded-lg flex items-center justify-center hover:bg-gray-200 dark:hover:bg-surface-600 transition-colors"
-                    >
-                      <Plus size={14} />
-                    </motion.button>
-                  </div>
-
-                  {/* Price */}
-                  <div className="text-right min-w-15">
-                    <p className="font-semibold text-gray-900 dark:text-white">₹{(item.price * item.quantity).toFixed(2)}</p>
-                  </div>
-
-                  {/* Remove */}
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => handleRemoveItem(item.id)}
-                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                  >
-                    <Trash2 size={18} />
-                  </motion.button>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-
-          {/* Price Breakdown */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white dark:bg-surface-800 rounded-md p-6 border border-gray-100 dark:border-surface-700 space-y-3"
-          >
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Subtotal</span>
-              <span className="text-gray-900 dark:text-white">₹{total().toFixed(2)}</span>
-            </div>
-            <div className="border-t border-gray-100 dark:border-surface-700 pt-3 flex items-center justify-between">
-              <span className="font-semibold text-gray-900 dark:text-white">Total</span>
-              <span className="text-xl font-bold text-gray-900 dark:text-white">₹{total().toFixed(2)}</span>
-            </div>
-          </motion.div>
-
-          {/* Booking Info */}
-          {tableId && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="bg-blue-50 dark:bg-blue-900/20 rounded-md p-4 border border-blue-200 dark:border-blue-800"
-            >
-              <p className="text-sm text-blue-700 dark:text-blue-300">
-                ✓ Your table ({tableId}) will be reserved for 2 hours after confirming your order.
-              </p>
-            </motion.div>
-          )}
-
-          {/* Confirm Booking Button */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-          >
-            <Button
-              onClick={handleConfirmBooking}
-              disabled={isBooking || !tableId}
-              className="w-full h-14 bg-brand-primary hover:bg-brand-primary/90 disabled:opacity-50 text-white font-semibold text-lg rounded-xl"
-            >
-              {isBooking ? 'Confirming...' : 'Confirm Booking'}
-              {!isBooking && <ArrowRight size={20} className="ml-2" />}
-            </Button>
-          </motion.div>
+          <motion.button whileTap={{ scale: 0.95 }}
+            onClick={() => { if (promoCode.trim()) { setPromoApplied(true); toast.success("Promo applied! 10% off"); } }}
+            className="bg-[#1A3C5E] text-white text-sm font-bold px-4 rounded-xl">
+            Apply
+          </motion.button>
         </div>
-      )}
+        {promoApplied && (
+          <motion.p initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-xs text-green-600 font-semibold mt-2">
+            ✓ 10% discount applied
+          </motion.p>
+        )}
+      </motion.div>
+
+      <motion.div layout className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm mb-6 space-y-3">
+        <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><AnimatedPrice value={cartTotal()} /></div>
+        <div className="flex justify-between text-sm text-gray-600"><span>Taxes & fees (5%)</span><AnimatedPrice value={tax} /></div>
+        {promoApplied && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-between text-sm text-green-600 font-medium">
+            <span>Promo discount</span><span>-{formatCurrency(discount)}</span>
+          </motion.div>
+        )}
+        <div className="border-t border-gray-100 pt-3 flex justify-between text-base font-bold text-gray-900">
+          <span>Total</span><AnimatedPrice value={grandTotal} />
+        </div>
+      </motion.div>
+
+      <PlaceOrderButton state={orderState} onClick={() => placeOrder()} />
     </PageWrapper>
-  )
+  );
 }
