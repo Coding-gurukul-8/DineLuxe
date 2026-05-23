@@ -14,7 +14,7 @@
  */
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -173,6 +173,18 @@ export const useCart = create<CartState>()(
     {
       // ← spec requires underscore key "dineluxe_cart"
       name: "dineluxe_cart",
+      // Use a lazy localStorage getter so the store is safe to import in SSR
+      // contexts (Next.js server render, middleware). The actual read/write only
+      // happens in the browser after hydration.
+      storage: createJSONStorage(() =>
+        typeof window !== "undefined" ? window.localStorage : ({
+          getItem: () => null,
+          setItem: () => {},
+          removeItem: () => {},
+        } as unknown as Storage)
+      ),
+      // Prevent Zustand from calling localStorage during SSR initialisation.
+      skipHydration: true,
     }
   )
 );
