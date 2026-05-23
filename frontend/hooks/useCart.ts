@@ -176,13 +176,24 @@ export const useCart = create<CartState>()(
       // Use a lazy localStorage getter so the store is safe to import in SSR
       // contexts (Next.js server render, middleware). The actual read/write only
       // happens in the browser after hydration.
-      storage: createJSONStorage(() =>
-        typeof window !== "undefined" ? window.localStorage : ({
+      storage: createJSONStorage(() => {
+        // In Next.js 15, client components are pre-rendered on the server with a
+        // partial window mock where localStorage exists but getItem is NOT a real
+        // function. We must verify the API is callable before using it.
+        if (
+          typeof window !== "undefined" &&
+          typeof window.localStorage?.getItem === "function" &&
+          typeof window.localStorage?.setItem === "function"
+        ) {
+          return window.localStorage;
+        }
+        // Fall back to a no-op shim for SSR / broken environments.
+        return {
           getItem: () => null,
           setItem: () => {},
           removeItem: () => {},
-        } as unknown as Storage)
-      ),
+        } as unknown as Storage;
+      }),
       // Prevent Zustand from calling localStorage during SSR initialisation.
       skipHydration: true,
     }

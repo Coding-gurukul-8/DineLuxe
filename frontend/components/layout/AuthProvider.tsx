@@ -2,7 +2,6 @@
 import { ensureSafeBrowserStorage } from "@/lib/safe-browser-storage";
 import { createContext, useContext, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useCart } from "@/hooks/useCart";
 import type { AuthUser } from "@/types/auth";
 
 interface AuthContextValue {
@@ -18,13 +17,12 @@ const AuthContext = createContext<AuthContextValue>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  ensureSafeBrowserStorage();
   const { user, loading, signOut } = useAuth();
 
-  // Rehydrate the Zustand cart store from localStorage on the client.
-  // skipHydration: true in useCart prevents localStorage access during SSR.
+  // Ensure localStorage is safe to use on first client render.
+  // Kept in useEffect so it never runs during SSR prerendering.
   useEffect(() => {
-    useCart.persist.rehydrate();
+    ensureSafeBrowserStorage();
   }, []);
 
   return (

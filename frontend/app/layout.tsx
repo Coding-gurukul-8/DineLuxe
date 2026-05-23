@@ -5,6 +5,7 @@ import { QueryProvider }   from "@/components/layout/QueryProvider";
 import { AuthProvider }    from "@/components/layout/AuthProvider";
 import { BrandingProvider } from "@/components/layout/BrandingProvider";
 import { ThemeProvider }   from "@/components/layout/ThemeProvider";
+import { CartHydrator }    from "@/components/layout/CartHydrator";
 import { Toaster }         from "@/components/ui/sonner";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <AuthProvider>
             <BrandingProvider>
               <ThemeProvider>
+                <CartHydrator />
                 {children}
                 <Toaster richColors position="top-right" />
               </ThemeProvider>
