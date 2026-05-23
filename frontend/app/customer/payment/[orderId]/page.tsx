@@ -64,7 +64,7 @@ function QRCode({ orderId }: { orderId: string }) {
       </div>
       {/* Scan line */}
       <motion.div
-        className="absolute left-3 right-3 h-0.5 bg-gradient-to-r from-transparent via-[#E8A020] to-transparent"
+        className="absolute left-3 right-3 h-0.5 bg-linear-to-r from-transparent via-[#E8A020] to-transparent"
         animate={{ top: ["12px", "180px", "12px"] }}
         transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
       />
@@ -126,7 +126,7 @@ function SplitBill({ total }: { total: number }) {
       <div className="grid grid-cols-2 gap-2">
         {Array.from({ length: count }, (_, i) => (
           <div key={i} className="flex items-center gap-2 bg-gray-50 rounded-xl p-2">
-            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
             <span className="text-xs text-gray-600 font-medium">Person {i + 1}</span>
             <span className="text-xs font-bold text-gray-900 ml-auto">{formatCurrency(perPerson)}</span>
           </div>
@@ -200,7 +200,7 @@ export default function PaymentPage({ params }: Props) {
           return (
             <motion.button key={m.id} whileTap={{ scale: 0.95 }} onClick={() => setActiveMethod(m.id)}
               className={cn(
-                "flex-shrink-0 flex flex-col items-center gap-1 px-4 py-3 rounded-2xl border-2 transition-all text-xs font-semibold",
+                "shrink-0 flex flex-col items-center gap-1 px-4 py-3 rounded-2xl border-2 transition-all text-xs font-semibold",
                 activeMethod === m.id ? "border-[#E8A020] bg-[#E8A020]/8 text-[#E8A020]" : "border-gray-100 bg-white text-gray-500"
               )}>
               <Icon size={18} />
