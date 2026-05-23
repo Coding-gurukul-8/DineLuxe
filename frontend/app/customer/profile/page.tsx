@@ -67,7 +67,7 @@ function MenuLink({ label, icon: Icon, onClick, danger = false }: {
       className="w-full flex items-center gap-3 py-3.5 px-4 bg-white rounded-2xl shadow-sm border border-gray-50 text-left"
     >
       <div className={cn(
-        "w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0",
+        "w-8 h-8 rounded-xl flex items-center justify-center shrink-0",
         danger ? "bg-red-50" : "bg-gray-50"
       )}>
         <Icon size={16} className={danger ? "text-[#C0392B]" : "text-gray-500"} />
@@ -129,7 +129,7 @@ export default function ProfilePage() {
           {user?.profile_pic_url ? (
             <img src={user.profile_pic_url} alt={user.name} className="w-24 h-24 rounded-full object-cover" />
           ) : (
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#1A3C5E] to-[#2A5C8E] flex items-center justify-center text-white text-2xl font-bold">
+            <div className="w-24 h-24 rounded-full bg-linear-to-br from-[#1A3C5E] to-[#2A5C8E] flex items-center justify-center text-white text-2xl font-bold">
               {initials}
             </div>
           )}
@@ -163,7 +163,7 @@ export default function ProfilePage() {
           initial={{ opacity: 0, y: 12 }}
           animate={statsInView ? { opacity: 1, y: 0 } : {}}
           transition={{ delay: 0.2 }}
-          className="bg-gradient-to-r from-[#1A3C5E] to-[#2A5C8E] rounded-2xl p-4 mb-6"
+          className="bg-linear-to-r from-[#1A3C5E] to-[#2A5C8E] rounded-2xl p-4 mb-6"
         >
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -174,7 +174,7 @@ export default function ProfilePage() {
           </div>
           <div className="h-2 bg-white/10 rounded-full overflow-hidden">
             <motion.div
-              className="h-full rounded-full bg-gradient-to-r from-[#E8A020] to-[#F0B840]"
+              className="h-full rounded-full bg-linear-to-r from-[#E8A020] to-[#F0B840]"
               initial={{ width: 0 }}
               animate={statsInView ? { width: `${loyaltyData.progressPercent ?? 0}%` } : {}}
               transition={{ duration: 1.2, delay: 0.4, ease: "easeOut" }}
@@ -215,7 +215,7 @@ export default function ProfilePage() {
                 onClick={() => router.push(`/customer/order/${order.id}`)}
                 className="w-full bg-white rounded-2xl p-4 shadow-sm border border-gray-50 flex items-center gap-3 text-left"
               >
-                <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
                   <ShoppingBag size={18} className="text-gray-400" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -224,7 +224,7 @@ export default function ProfilePage() {
                   </p>
                   <p className="text-xs text-gray-400">{formatDate(order.created_at)}</p>
                 </div>
-                <div className="text-right flex-shrink-0">
+                <div className="text-right shrink-0">
                   <p className="text-sm font-bold text-gray-900">{formatCurrency(order.total)}</p>
                   <StatusBadge status={order.status} size="sm" />
                 </div>

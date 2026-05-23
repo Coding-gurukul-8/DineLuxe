@@ -266,11 +266,11 @@ export default function RestaurantPage({ params }: Props) {
           {restaurant.banner_url ? (
             <img src={restaurant.banner_url} alt={restaurant.name} className="w-full h-full object-cover" />
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-[#1A3C5E] via-[#2A5C8E] to-[#E8A020]/60" />
+            <div className="w-full h-full bg-linear-to-br from-[#1A3C5E] via-[#2A5C8E] to-[#E8A020]/60" />
           )}
         </motion.div>
         {/* gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+        <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/20 to-transparent" />
 
         {/* Back button */}
         <motion.div style={{ opacity: heroOpacity }} className="absolute top-12 left-4 z-10">
@@ -356,7 +356,7 @@ export default function RestaurantPage({ params }: Props) {
             ) : (
               <>
                 {/* Category pill nav */}
-                <div className="sticky top-[49px] z-20 bg-white border-b border-gray-50 px-4 py-2.5 flex gap-2 overflow-x-auto scrollbar-hide">
+                <div className="sticky top-12.25 z-20 bg-white border-b border-gray-50 px-4 py-2.5 flex gap-2 overflow-x-auto scrollbar-hide">
                   {categories.map((cat) => (
                     <motion.button
                       key={cat.id}

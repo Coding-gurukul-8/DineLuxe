@@ -8,6 +8,8 @@ export interface AuthUser {
   forcePasswordChange?: boolean
   restaurantId?: string
   branchId?: string
+  profile_pic_url?: string | null
+  phone?: string | null
 }
 
 export interface AuthTokens {
