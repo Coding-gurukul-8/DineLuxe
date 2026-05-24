@@ -1,219 +1,316 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { usePathname, useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/useAuth"
 import {
-  LayoutDashboard,
-  Utensils,
-  Users,
-  Calendar,
-  Settings,
-  BarChart3,
-  Store,
-  ChefHat,
-  ClipboardList,
-  CreditCard,
-  QrCode,
-  MessageSquare,
-  Shield,
-  ChevronLeft,
-  ChevronRight,
-  LogOut,
-  Heart,
-  Package,
-  Palette,
+  LayoutDashboard, Utensils, Users, Calendar, Settings,
+  BarChart3, Store, ChefHat, ClipboardList, CreditCard,
+  QrCode, Shield, ChevronLeft, ChevronRight, LogOut,
+  Heart, Package, Palette, Sun, Moon,
 } from "lucide-react"
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface NavItem {
   label: string
   href: string
   icon: React.ReactNode
   roles: string[]
+  section: string
 }
 
-const navItems: NavItem[] = [
-  // Super Admin
-  { label: "Dashboard", href: "/admin/dashboard", icon: <LayoutDashboard size={20} />, roles: ["super_admin"] },
-  { label: "Restaurants", href: "/admin/restaurants", icon: <Store size={20} />, roles: ["super_admin"] },
-  { label: "Customers", href: "/admin/customers", icon: <Users size={20} />, roles: ["super_admin"] },
-  { label: "Reports", href: "/admin/reports", icon: <BarChart3 size={20} />, roles: ["super_admin"] },
-  { label: "Platform Health", href: "/admin/platform-health", icon: <Shield size={20} />, roles: ["super_admin"] },
-  { label: "Settings", href: "/admin/settings", icon: <Settings size={20} />, roles: ["super_admin"] },
+// ── Nav config ─────────────────────────────────────────────────────────────────
+// Each role's items are cleanly separated with section headers.
 
-  // Owner
-  { label: "Dashboard", href: "/owner/dashboard", icon: <LayoutDashboard size={20} />, roles: ["owner"] },
-  { label: "Branches", href: "/owner/branches", icon: <Store size={20} />, roles: ["owner"] },
-  { label: "Menu", href: "/owner/menu", icon: <Utensils size={20} />, roles: ["owner"] },
-  { label: "Staff", href: "/owner/staff", icon: <Users size={20} />, roles: ["owner"] },
-  { label: "Bookings", href: "/owner/bookings", icon: <Calendar size={20} />, roles: ["owner"] },
-  { label: "Customers", href: "/owner/customers", icon: <Users size={20} />, roles: ["owner"] },
-  { label: "Reports", href: "/owner/reports", icon: <BarChart3 size={20} />, roles: ["owner"] },
-  { label: "Branding", href: "/owner/branding", icon: <Settings size={20} />, roles: ["owner"] },
-  { label: "Settings", href: "/owner/settings", icon: <Settings size={20} />, roles: ["owner"] },
+const NAV_ITEMS: NavItem[] = [
+  // ── Super Admin ──────────────────────────────────────────────────────────────
+  { label: "Dashboard",       href: "/admin/dashboard",       icon: <LayoutDashboard size={18} />, roles: ["super_admin"], section: "Platform" },
+  { label: "Restaurants",     href: "/admin/restaurants",     icon: <Store size={18} />,           roles: ["super_admin"], section: "Platform" },
+  { label: "Customers",       href: "/admin/customers",       icon: <Users size={18} />,           roles: ["super_admin"], section: "Platform" },
+  { label: "Reports",         href: "/admin/reports",         icon: <BarChart3 size={18} />,       roles: ["super_admin"], section: "Analytics" },
+  { label: "Platform Health", href: "/admin/platform-health", icon: <Shield size={18} />,         roles: ["super_admin"], section: "Analytics" },
+  { label: "Settings",        href: "/admin/settings",        icon: <Settings size={18} />,        roles: ["super_admin"], section: "System" },
 
-  // Staff (Manager, Host, Waiter, Chef, Cashier)
-  { label: "Dashboard", href: "/staff/manager/dashboard", icon: <LayoutDashboard size={20} />, roles: ["manager"] },
-  { label: "Dashboard", href: "/staff/host", icon: <LayoutDashboard size={20} />, roles: ["host"] },
-  { label: "Dashboard", href: "/staff/waiter", icon: <LayoutDashboard size={20} />, roles: ["waiter"] },
-  { label: "Dashboard", href: "/staff/chef/kitchen", icon: <LayoutDashboard size={20} />, roles: ["chef"] },
-  { label: "Dashboard", href: "/staff/cashier", icon: <LayoutDashboard size={20} />, roles: ["cashier"] },
-  { label: "Floor Map", href: "/staff/host/floor", icon: <QrCode size={20} />, roles: ["manager", "host"] },
-  { label: "Queue", href: "/staff/host/queue", icon: <ClipboardList size={20} />, roles: ["manager", "host"] },
-  { label: "Orders", href: "/staff/waiter", icon: <Utensils size={20} />, roles: ["manager", "waiter"] },
-  { label: "Kitchen", href: "/staff/chef/kitchen", icon: <ChefHat size={20} />, roles: ["manager", "chef"] },
-  { label: "POS", href: "/staff/cashier", icon: <CreditCard size={20} />, roles: ["manager", "cashier"] },
-  { label: "Reports", href: "/staff/manager", icon: <BarChart3 size={20} />, roles: ["manager"] },
+  // ── Owner ────────────────────────────────────────────────────────────────────
+  { label: "Dashboard",  href: "/owner/dashboard",  icon: <LayoutDashboard size={18} />, roles: ["owner"], section: "Overview" },
+  { label: "Branches",   href: "/owner/branches",   icon: <Store size={18} />,           roles: ["owner"], section: "Operations" },
+  { label: "Menu",       href: "/owner/menu",        icon: <Utensils size={18} />,        roles: ["owner"], section: "Operations" },
+  { label: "Inventory",  href: "/owner/inventory",   icon: <Package size={18} />,         roles: ["owner"], section: "Operations" },
+  { label: "Bookings",   href: "/owner/bookings",    icon: <Calendar size={18} />,        roles: ["owner"], section: "Operations" },
+  { label: "Customers",  href: "/owner/customers",   icon: <Heart size={18} />,           roles: ["owner"], section: "Insights" },
+  { label: "Reports",    href: "/owner/reports",     icon: <BarChart3 size={18} />,       roles: ["owner"], section: "Insights" },
+  { label: "Branding",   href: "/owner/branding",    icon: <Palette size={18} />,         roles: ["owner"], section: "Settings" },
+  { label: "Settings",   href: "/owner/settings",    icon: <Settings size={18} />,        roles: ["owner"], section: "Settings" },
+
+  // ── Manager ──────────────────────────────────────────────────────────────────
+  { label: "Dashboard",  href: "/staff/manager/dashboard", icon: <LayoutDashboard size={18} />, roles: ["manager"], section: "Overview" },
+  { label: "Floor Map",  href: "/staff/host/floor",        icon: <QrCode size={18} />,          roles: ["manager"], section: "Operations" },
+  { label: "Queue",      href: "/staff/host/queue",        icon: <ClipboardList size={18} />,   roles: ["manager"], section: "Operations" },
+  { label: "Orders",     href: "/staff/waiter",            icon: <Utensils size={18} />,        roles: ["manager"], section: "Operations" },
+  { label: "Kitchen",    href: "/staff/chef/kitchen",      icon: <ChefHat size={18} />,         roles: ["manager"], section: "Operations" },
+  { label: "POS",        href: "/staff/cashier",           icon: <CreditCard size={18} />,      roles: ["manager"], section: "Operations" },
+  { label: "Reports",    href: "/staff/manager",           icon: <BarChart3 size={18} />,       roles: ["manager"], section: "Analytics" },
+
+  // ── Host ─────────────────────────────────────────────────────────────────────
+  { label: "Dashboard",  href: "/staff/host",        icon: <LayoutDashboard size={18} />, roles: ["host"], section: "Overview" },
+  { label: "Floor Map",  href: "/staff/host/floor",  icon: <QrCode size={18} />,          roles: ["host"], section: "Operations" },
+  { label: "Queue",      href: "/staff/host/queue",  icon: <ClipboardList size={18} />,   roles: ["host"], section: "Operations" },
+
+  // ── Waiter ───────────────────────────────────────────────────────────────────
+  { label: "Orders",     href: "/staff/waiter",      icon: <Utensils size={18} />,        roles: ["waiter"], section: "Overview" },
+
+  // ── Chef ─────────────────────────────────────────────────────────────────────
+  { label: "Kitchen",    href: "/staff/chef/kitchen", icon: <ChefHat size={18} />,        roles: ["chef"], section: "Overview" },
+
+  // ── Cashier ──────────────────────────────────────────────────────────────────
+  { label: "POS",        href: "/staff/cashier",     icon: <CreditCard size={18} />,      roles: ["cashier"], section: "Overview" },
 ]
 
-const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/admin/dashboard", icon: <LayoutDashboard size={18} />, roles: ["super_admin"], section: "Platform" },
-  { label: "Restaurants", href: "/admin/restaurants", icon: <Store size={18} />, roles: ["super_admin"], section: "Platform" },
-  { label: "Customers", href: "/admin/customers", icon: <Users size={18} />, roles: ["super_admin"], section: "Platform" },
-  { label: "Reports", href: "/admin/reports", icon: <BarChart3 size={18} />, roles: ["super_admin"], section: "Analytics" },
-  { label: "Platform Health", href: "/admin/platform-health", icon: <Shield size={18} />, roles: ["super_admin"], section: "Analytics" },
-  { label: "Settings", href: "/admin/settings", icon: <Settings size={18} />, roles: ["super_admin"], section: "System" },
+// ── Dark-mode hook (reads/writes localStorage) ────────────────────────────────
 
-  { label: "Dashboard", href: "/owner/dashboard", icon: <LayoutDashboard size={18} />, roles: ["owner"], section: "Overview" },
-  { label: "Branches", href: "/owner/branches", icon: <Store size={18} />, roles: ["owner"], section: "Operations" },
-  { label: "Menu", href: "/owner/menu", icon: <Utensils size={18} />, roles: ["owner"], section: "Operations" },
-  { label: "Inventory", href: "/owner/inventory", icon: <Package size={18} />, roles: ["owner"], section: "Operations" },
-  { label: "Staff", href: "/owner/staff", icon: <Users size={18} />, roles: ["owner"], section: "Operations" },
-  { label: "Bookings", href: "/owner/bookings", icon: <Calendar size={18} />, roles: ["owner"], section: "Operations" },
-  { label: "Customers", href: "/owner/customers", icon: <Heart size={18} />, roles: ["owner"], section: "Insights" },
-  { label: "Reports", href: "/owner/reports", icon: <BarChart3 size={18} />, roles: ["owner"], section: "Insights" },
-  { label: "Branding", href: "/owner/branding", icon: <Palette size={18} />, roles: ["owner"], section: "Settings" },
-  { label: "Settings", href: "/owner/settings", icon: <Settings size={18} />, roles: ["owner"], section: "Settings" },
+function useDarkMode() {
+  const [dark, setDark] = useState(false)
+  const [mounted, setMounted] = useState(false)
 
-  { label: "Dashboard", href: "/staff/manager/dashboard", icon: <LayoutDashboard size={18} />, roles: ["manager"], section: "Overview" },
-  { label: "Dashboard", href: "/staff/host", icon: <LayoutDashboard size={18} />, roles: ["host"], section: "Overview" },
-  { label: "Dashboard", href: "/staff/waiter", icon: <LayoutDashboard size={18} />, roles: ["waiter"], section: "Overview" },
-  { label: "Dashboard", href: "/staff/chef/kitchen", icon: <LayoutDashboard size={18} />, roles: ["chef"], section: "Overview" },
-  { label: "Dashboard", href: "/staff/cashier", icon: <LayoutDashboard size={18} />, roles: ["cashier"], section: "Overview" },
-  { label: "Floor Map", href: "/staff/host/floor", icon: <QrCode size={18} />, roles: ["manager", "host"], section: "Operations" },
-  { label: "Queue", href: "/staff/host/queue", icon: <ClipboardList size={18} />, roles: ["manager", "host"], section: "Operations" },
-  { label: "Orders", href: "/staff/waiter", icon: <Utensils size={18} />, roles: ["manager", "waiter"], section: "Operations" },
-  { label: "Kitchen", href: "/staff/chef/kitchen", icon: <ChefHat size={18} />, roles: ["manager", "chef"], section: "Operations" },
-  { label: "POS", href: "/staff/cashier", icon: <CreditCard size={18} />, roles: ["manager", "cashier"], section: "Operations" },
-  { label: "Reports", href: "/staff/manager", icon: <BarChart3 size={18} />, roles: ["manager"], section: "Analytics" },
-]
+  useEffect(() => {
+    try {
+      const ls = window.localStorage
+      const saved = typeof ls?.getItem === "function" ? ls.getItem("dineluxe-theme") : null
+      const isDark = saved === "dark"
+      setDark(isDark)
+      document.documentElement.classList.toggle("dark", isDark)
+    } catch {}
+    setMounted(true)
+  }, [])
+
+  const toggle = () => {
+    const next = !dark
+    setDark(next)
+    document.documentElement.classList.toggle("dark", next)
+    try {
+      const ls = window.localStorage
+      if (typeof ls?.setItem === "function") ls.setItem("dineluxe-theme", next ? "dark" : "light")
+    } catch {}
+  }
+
+  return { dark, toggle, mounted }
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
-  const [pathname, setPathname] = useState("")
+  const pathname = usePathname()
+  const router = useRouter()
   const { user, role, signOut } = useAuth()
+  const { dark, toggle: toggleDark, mounted: darkMounted } = useDarkMode()
 
-  useEffect(() => {
-    const updatePath = () => setPathname(window.location.pathname)
-    updatePath()
-    window.addEventListener("popstate", updatePath)
-    return () => window.removeEventListener("popstate", updatePath)
-  }, [])
+  const filteredItems = role
+    ? NAV_ITEMS.filter((item) => item.roles.includes(role))
+    : []
 
-
-  const filteredNavItems = role ? navItems.filter((item) => item.roles.includes(role)) : []
+  // Group by section for section headers when expanded
+  const sections: Record<string, NavItem[]> = {}
+  for (const item of filteredItems) {
+    if (!sections[item.section]) sections[item.section] = []
+    sections[item.section].push(item)
+  }
 
   const handleLogout = async () => {
     await signOut()
     window.location.assign("/auth/login")
   }
 
+  const isActive = (href: string) =>
+    pathname === href || pathname.startsWith(href + "/")
+
+  const initials = (user?.name || user?.email || "?")
+    .split(" ")
+    .map((w: string) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2)
+
   return (
     <motion.aside
-      className={cn(
-        "fixed left-0 top-0 h-screen bg-white border-r border-gray-100 z-40 flex flex-col transition-all duration-300",
-        collapsed ? "w-16" : "w-64"
-      )}
+      animate={{ width: collapsed ? 64 : 256 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      className="fixed left-0 top-0 h-screen bg-white dark:bg-gray-900 border-r border-gray-100 dark:border-gray-800 z-40 flex flex-col overflow-hidden"
     >
-      {/* Logo */}
+      {/* ── Logo ──────────────────────────────────────────────────────── */}
       <div className={cn(
-        "h-16 flex items-center border-b border-gray-100",
-        collapsed ? "justify-center px-2" : "px-4"
+        "h-16 flex items-center border-b border-gray-100 dark:border-gray-800 shrink-0",
+        collapsed ? "justify-center px-2" : "px-4 gap-3"
       )}>
-        {collapsed ? (
-          <div className="w-8 h-8 bg-brand-primary rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">D</span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-brand-primary rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">D</span>
-            </div>
-            <span className="font-semibold text-gray-900">DineLuxe</span>
-          </div>
-        )}
+        <div className="w-8 h-8 bg-[#1A3C5E] rounded-lg flex items-center justify-center shrink-0">
+          <span className="text-[#E8A020] font-bold text-sm">D</span>
+        </div>
+        <AnimatePresence>
+          {!collapsed && (
+            <motion.span
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -8 }}
+              transition={{ duration: 0.18 }}
+              className="font-semibold text-gray-900 dark:text-white truncate"
+            >
+              DineLuxe
+            </motion.span>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
-        {filteredNavItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
-          return (
-            <motion.button
-              key={item.href}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => window.location.assign(item.href)}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-brand-primary text-white"
-                  : "text-gray-600 hover:bg-gray-50",
-                collapsed && "justify-center"
-              )}
-              title={collapsed ? item.label : undefined}
-            >
-              {item.icon}
-              {!collapsed && <span>{item.label}</span>}
-            </motion.button>
-          )
-        })}
+      {/* ── Nav ───────────────────────────────────────────────────────── */}
+      <nav className="flex-1 py-3 px-2 overflow-y-auto overflow-x-hidden space-y-0.5 scrollbar-thin">
+        {collapsed
+          ? /* Flat list when collapsed */
+            filteredItems.map((item) => (
+              <NavButton
+                key={item.href}
+                item={item}
+                active={isActive(item.href)}
+                collapsed
+                onClick={() => router.push(item.href)}
+              />
+            ))
+          : /* Sectioned list when expanded */
+            Object.entries(sections).map(([section, items]) => (
+              <div key={section} className="mb-1">
+                <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 select-none">
+                  {section}
+                </p>
+                {items.map((item) => (
+                  <NavButton
+                    key={item.href}
+                    item={item}
+                    active={isActive(item.href)}
+                    collapsed={false}
+                    onClick={() => router.push(item.href)}
+                  />
+                ))}
+              </div>
+            ))
+        }
       </nav>
 
-      {/* Bottom section */}
+      {/* ── Bottom ────────────────────────────────────────────────────── */}
       <div className={cn(
-        "border-t border-gray-100 py-3 px-2",
-        collapsed && "flex flex-col items-center"
+        "border-t border-gray-100 dark:border-gray-800 py-3 px-2 space-y-1 shrink-0",
       )}>
         {/* User info */}
         {!collapsed && (
-          <div className="px-3 py-2 mb-2">
-            <p className="text-sm font-medium text-gray-900 truncate">
-              {user?.name || user?.email || "Team member"}
-            </p>
-
-            <p className="text-xs text-gray-500 capitalize">{role?.replace("_", " ")}</p>
+          <div className="px-3 py-2 rounded-xl bg-gray-50 dark:bg-gray-800 mb-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-[#1A3C5E] flex items-center justify-center shrink-0">
+                <span className="text-white text-[10px] font-bold">{initials}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">
+                  {user?.name || user?.email || "Team member"}
+                </p>
+                <p className="text-[10px] text-gray-400 capitalize leading-tight">
+                  {role?.replace(/_/g, " ")}
+                </p>
+              </div>
+            </div>
           </div>
         )}
+
+        {/* Dark mode toggle */}
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={toggleDark}
+          title={collapsed ? (dark ? "Light mode" : "Dark mode") : undefined}
+          className={cn(
+            "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors",
+            "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800",
+            collapsed && "justify-center"
+          )}
+        >
+          {darkMounted
+            ? dark
+              ? <Sun size={18} className="text-[#E8A020]" />
+              : <Moon size={18} />
+            : <Moon size={18} />
+          }
+          {!collapsed && (
+            <span>{dark ? "Light mode" : "Dark mode"}</span>
+          )}
+        </motion.button>
 
         {/* Logout */}
         <motion.button
           whileTap={{ scale: 0.95 }}
           onClick={handleLogout}
+          title={collapsed ? "Logout" : undefined}
           className={cn(
-            "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors",
+            "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors",
+            "text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40",
             collapsed && "justify-center"
           )}
-          title={collapsed ? "Logout" : undefined}
         >
-          <LogOut size={20} />
-          {!collapsed && <span>Logout</span>}
+          <LogOut size={18} />
+          {!collapsed && <span>Sign out</span>}
         </motion.button>
 
         {/* Collapse toggle */}
         <motion.button
           whileTap={{ scale: 0.95 }}
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => setCollapsed((c) => !c)}
           className={cn(
-            "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-50 transition-colors mt-1",
+            "w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors",
+            "text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800",
             collapsed && "justify-center"
           )}
         >
-          {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-          {!collapsed && <span>Collapse</span>}
+          {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          {!collapsed && <span className="text-xs">Collapse</span>}
         </motion.button>
       </div>
     </motion.aside>
   )
 }
+
+// ── NavButton ─────────────────────────────────────────────────────────────────
+
+function NavButton({
+  item, active, collapsed, onClick,
+}: {
+  item: NavItem
+  active: boolean
+  collapsed: boolean
+  onClick: () => void
+}) {
+  return (
+    <motion.button
+      whileTap={{ scale: 0.97 }}
+      onClick={onClick}
+      title={collapsed ? item.label : undefined}
+      className={cn(
+        "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150",
+        active
+          ? "bg-[#1A3C5E] text-white shadow-sm"
+          : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
+        collapsed && "justify-center"
+      )}
+    >
+      <span className={cn("shrink-0", active ? "text-white" : "text-gray-400 dark:text-gray-500 group-hover:text-gray-600")}>
+        {item.icon}
+      </span>
+      {!collapsed && (
+        <span className="truncate">{item.label}</span>
+      )}
+      {active && !collapsed && (
+        <motion.div
+          layoutId="sidebar-indicator"
+          className="ml-auto w-1.5 h-1.5 rounded-full bg-[#E8A020]"
+        />
+      )}
+    </motion.button>
+  )
+}
+
+export default Sidebar

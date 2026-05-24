@@ -9,14 +9,16 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { ApiError } from "@repo/shared"
 import { signup } from "@/lib/auth-client"
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter"
-import { Loader2, User, Mail, Lock, ShieldCheck, Eye, EyeOff, CheckCircle2, Check, Key } from "lucide-react"
+import {
+  Loader2, User, Mail, Lock, ShieldCheck,
+  Eye, EyeOff, CheckCircle2, Check,
+} from "lucide-react"
 
 const adminSignupSchema = z
   .object({
     firstName:       z.string().min(1, "First name is required"),
     lastName:        z.string().min(1, "Last name is required"),
     email:           z.string().email("Enter a valid email"),
-    inviteCode:      z.string().min(1, "Invite code is required"),
     password:        z.string().min(8, "Password must be at least 8 characters"),
     confirmPassword: z.string().min(1, "Please confirm your password"),
   })
@@ -109,7 +111,6 @@ export function AdminSignupForm() {
   const getErrorMessage = (err: unknown): string => {
     if (err instanceof ApiError) {
       if (err.statusCode === 409) return "An account with this email already exists."
-      if (err.statusCode === 403) return "Invalid invite code. Please contact your platform administrator."
       return err.message || "An unexpected error occurred. Please try again."
     }
     return "An unexpected error occurred. Please try again."
@@ -123,7 +124,6 @@ export function AdminSignupForm() {
         lastName: data.lastName,
         email: data.email,
         password: data.password,
-        inviteCode: data.inviteCode,
       })
       setIsSuccess(true)
       setTimeout(() => router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}&portal=admin`), 800)
@@ -137,7 +137,7 @@ export function AdminSignupForm() {
   return (
     <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-4">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {/* Progress indicator (single step, admin is one form) */}
+        {/* Progress bar */}
         <motion.div variants={itemVariants} className="mb-2">
           <div className="h-1 rounded-full bg-[#1A3C5E]/8 overflow-hidden">
             <div className="h-full w-full rounded-full bg-[#E8A020]/50" />
@@ -150,7 +150,7 @@ export function AdminSignupForm() {
           className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-[#1A3C5E]/4 border border-[#1A3C5E]/8">
           <ShieldCheck size={16} className="text-[#E8A020] shrink-0" />
           <p className="text-xs text-[#1A3C5E]/60">
-            Admin accounts require a valid invite code issued by your platform administrator.
+            Platform admin account — grants full system access.
           </p>
         </motion.div>
 
@@ -166,11 +166,6 @@ export function AdminSignupForm() {
             error={errors.email?.message} disabled={isSubmitting} registration={register("email")} />
         </motion.div>
 
-        <motion.div variants={itemVariants}>
-          <FloatingInput id="adm-invite" label="Invite code" icon={<Key size={17} />}
-            error={errors.inviteCode?.message} disabled={isSubmitting} registration={register("inviteCode")} />
-        </motion.div>
-
         <motion.div variants={itemVariants} className="space-y-1">
           <FloatingInput id="adm-password" label="Password" type={showPassword ? "text" : "password"}
             icon={<Lock size={17} />} error={errors.password?.message} disabled={isSubmitting}
@@ -178,7 +173,8 @@ export function AdminSignupForm() {
             suffix={
               <button type="button" onClick={() => setShowPassword((v) => !v)}
                 className="text-[#1A3C5E]/30 hover:text-[#E8A020] transition-colors p-1" tabIndex={-1}>
-                <motion.div key={showPassword ? "h" : "s"} initial={{ opacity: 0, rotate: -15 }} animate={{ opacity: 1, rotate: 0 }} transition={{ duration: 0.2 }}>
+                <motion.div key={showPassword ? "h" : "s"} initial={{ opacity: 0, rotate: -15 }}
+                  animate={{ opacity: 1, rotate: 0 }} transition={{ duration: 0.2 }}>
                   {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                 </motion.div>
               </button>
@@ -194,7 +190,8 @@ export function AdminSignupForm() {
             suffix={
               <button type="button" onClick={() => setShowConfirm((v) => !v)}
                 className="text-[#1A3C5E]/30 hover:text-[#E8A020] transition-colors p-1" tabIndex={-1}>
-                <motion.div key={showConfirm ? "h" : "s"} initial={{ opacity: 0, rotate: -15 }} animate={{ opacity: 1, rotate: 0 }} transition={{ duration: 0.2 }}>
+                <motion.div key={showConfirm ? "h" : "s"} initial={{ opacity: 0, rotate: -15 }}
+                  animate={{ opacity: 1, rotate: 0 }} transition={{ duration: 0.2 }}>
                   {showConfirm ? <EyeOff size={17} /> : <Eye size={17} />}
                 </motion.div>
               </button>
