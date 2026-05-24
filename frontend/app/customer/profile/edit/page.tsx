@@ -224,7 +224,7 @@ export default function EditProfilePage() {
     try {
       const formData = new FormData();
       formData.append("file", avatarFile);
-      const res = await apiClient.upload<{ url: string }>("/users/me/avatar", formData);
+      const res = await apiClient.postForm<{ url: string }>("/users/me/avatar", formData);
       toast.success("Photo updated");
       setAvatarPreview(null);
       setAvatarFile(null);
