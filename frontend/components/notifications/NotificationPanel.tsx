@@ -29,6 +29,17 @@ export interface Notification {
   created_at: string
 }
 
+type NotificationsResponse = {
+  data: Notification[]
+  count?: number
+}
+
+function normalizeNotifications(payload: NotificationsResponse | Notification[] | null | undefined): Notification[] {
+  if (Array.isArray(payload)) return payload
+  if (payload && Array.isArray(payload.data)) return payload.data
+  return []
+}
+
 // ── Icon resolver ─────────────────────────────────────────────────────────────
 
 function NotificationIcon({ type }: { type: string }) {
@@ -67,7 +78,10 @@ export function NotificationPanel({ isOpen, onClose }: NotificationPanelProps) {
 
   const { data: notifications = [], isLoading } = useQuery<Notification[]>({
     queryKey: ["notifications"],
-    queryFn: () => apiClient.get<Notification[]>("/notifications"),
+    queryFn: async () => {
+      const result = await apiClient.get<NotificationsResponse | Notification[]>("/notifications")
+      return normalizeNotifications(result)
+    },
     refetchInterval: 60_000,
     enabled: isOpen,   // only poll while open; TopBar drives the badge count separately
   })

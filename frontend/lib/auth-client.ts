@@ -24,6 +24,54 @@ type SignupInput = {
   password: string
 }
 
+type SuperAdminSignupInput = {
+  firstName: string
+  lastName: string
+  email: string
+  password: string
+  phone?: string
+}
+
+type RestaurantRegisterInput = {
+  owner: {
+    firstName: string
+    lastName: string
+    email: string
+    phone: string
+    dob: string
+    password: string
+  }
+  restaurant: {
+    name: string
+    cuisineTypes: string[]
+    description?: string
+    gstNumber?: string
+    contactEmail?: string
+    contactPhone?: string
+    website?: string
+  }
+  branch: {
+    name: string
+    addressLine1: string
+    addressLine2?: string
+    city: string
+    state: string
+    pincode: string
+    phone?: string
+    seatingCapacity: number
+  }
+}
+
+type RestaurantRegisterResponse = {
+  restaurant: unknown
+  branch: unknown
+}
+
+function cleanOptionalString(value?: string | null): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
 // ── Profile mapping ───────────────────────────────────────────────────────────
 
 export function mapProfileToAuthUser(profile: AuthProfile): AuthUser {
@@ -81,6 +129,55 @@ export async function signup(input: SignupInput) {
   // Role is not written here — the account is unverified. setUserRole() is
   // called by verifyOtp() once the email is confirmed and we have a real user.
   return result
+}
+
+export async function signupSuperAdmin(input: SuperAdminSignupInput) {
+  const payload = {
+    email: input.email,
+    password: input.password,
+    first_name: input.firstName,
+    last_name: input.lastName,
+    ...(input.phone ? { phone: input.phone } : {}),
+  }
+
+  return apiClient.post<{ id: string; email: string; name: string; role: string }>(
+    "/admin/signup",
+    payload
+  )
+}
+
+export async function registerRestaurant(input: RestaurantRegisterInput) {
+  const payload = {
+    owner: {
+      first_name: input.owner.firstName,
+      last_name: input.owner.lastName,
+      email: input.owner.email,
+      phone: input.owner.phone,
+      dob: input.owner.dob,
+      password: input.owner.password,
+    },
+    restaurant: {
+      name: input.restaurant.name,
+      cuisine_types: input.restaurant.cuisineTypes,
+      description: cleanOptionalString(input.restaurant.description),
+      gst_number: cleanOptionalString(input.restaurant.gstNumber),
+      contact_email: cleanOptionalString(input.restaurant.contactEmail),
+      contact_phone: cleanOptionalString(input.restaurant.contactPhone),
+      website: cleanOptionalString(input.restaurant.website),
+    },
+    branch: {
+      name: input.branch.name,
+      address_line1: input.branch.addressLine1,
+      address_line2: cleanOptionalString(input.branch.addressLine2),
+      city: input.branch.city,
+      state: input.branch.state,
+      pincode: input.branch.pincode,
+      phone: cleanOptionalString(input.branch.phone),
+      seating_capacity: input.branch.seatingCapacity,
+    },
+  }
+
+  return apiClient.post<RestaurantRegisterResponse>("/restaurants/register", payload)
 }
 
 export async function resendSignupOtp(email?: string) {

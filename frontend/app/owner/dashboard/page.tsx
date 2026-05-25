@@ -291,15 +291,17 @@ export default function OwnerDashboard() {
     refetch,
   } = useQuery<OverviewData>({
     queryKey: ["analytics", "overview", restaurantId],
-    queryFn: () => apiClient.get<OverviewData>(`/analytics/overview${restaurantId ? `?restaurant_id=${restaurantId}` : ""}`),
+    queryFn: () => apiClient.get<OverviewData>(`/analytics/restaurant/${restaurantId}/overview`),
     staleTime: 30_000,
     refetchInterval: 60_000,
+    enabled: Boolean(restaurantId),
   });
 
   const { data: hourlyRaw } = useQuery<HourlyData>({
-    queryKey: ["analytics", "hourly", restaurantId],
-    queryFn: () => apiClient.get<HourlyData>(`/analytics/hourly${restaurantId ? `?restaurant_id=${restaurantId}` : ""}`),
+    queryKey: ["analytics", "hourly", branchId],
+    queryFn: () => apiClient.get<HourlyData>(`/analytics/branch/${branchId}/hourly`),
     staleTime: 60_000,
+    enabled: Boolean(branchId),
   });
 
   const hourlyData = (hourlyRaw?.hours ?? []).map((h) => ({

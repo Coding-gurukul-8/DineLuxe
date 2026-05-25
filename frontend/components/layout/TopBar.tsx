@@ -14,6 +14,17 @@ interface TopBarProps {
   className?: string
 }
 
+type NotificationsResponse = {
+  data: Notification[]
+  count?: number
+}
+
+function normalizeNotifications(payload: NotificationsResponse | Notification[] | null | undefined): Notification[] {
+  if (Array.isArray(payload)) return payload
+  if (payload && Array.isArray(payload.data)) return payload.data
+  return []
+}
+
 function useDarkMode() {
   const [dark, setDark] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -51,7 +62,10 @@ export function TopBar({ onMenuClick, className }: TopBarProps) {
 
   const { data: notifications = [] } = useQuery<Notification[]>({
     queryKey: ["notifications"],
-    queryFn: () => apiClient.get<Notification[]>("/notifications"),
+    queryFn: async () => {
+      const result = await apiClient.get<NotificationsResponse | Notification[]>("/notifications")
+      return normalizeNotifications(result)
+    },
     refetchInterval: 60_000,
     enabled: !!user,
   })

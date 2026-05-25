@@ -7,19 +7,26 @@ import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { ApiError } from "@repo/shared"
-import { signup } from "@/lib/auth-client"
+import { signupSuperAdmin } from "@/lib/auth-client"
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter"
 import {
   Loader2, User, Mail, Lock, ShieldCheck,
   Eye, EyeOff, CheckCircle2, Check,
 } from "lucide-react"
 
+const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+  .regex(/[0-9]/, "Password must contain at least one number")
+  .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character")
+
 const adminSignupSchema = z
   .object({
     firstName:       z.string().min(1, "First name is required"),
     lastName:        z.string().min(1, "Last name is required"),
     email:           z.string().email("Enter a valid email"),
-    password:        z.string().min(8, "Password must be at least 8 characters"),
+    password:        passwordSchema,
     confirmPassword: z.string().min(1, "Please confirm your password"),
   })
   .refine((d) => d.password === d.confirmPassword, {
@@ -119,14 +126,14 @@ export function AdminSignupForm() {
   const onSubmit = async (data: AdminSignupFormValues) => {
     setIsSubmitting(true); setError(null)
     try {
-      await signup({
+      await signupSuperAdmin({
         firstName: data.firstName,
         lastName: data.lastName,
         email: data.email,
         password: data.password,
       })
       setIsSuccess(true)
-      setTimeout(() => router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}&portal=admin`), 800)
+      setTimeout(() => router.push("/auth/admin"), 800)
     } catch (err) {
       setError(getErrorMessage(err))
     } finally {

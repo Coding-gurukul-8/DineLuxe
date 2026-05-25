@@ -5,8 +5,7 @@ import { ROLES } from "@/lib/constants";
 import type { Role } from "@/lib/constants";
 import type { AuthUser } from "@/types/auth";
 import type { AuthProfile } from "@/types/auth";
-import { apiClient } from "@/lib/api-client";
-import { clearAuthTokens, getAccessToken } from "@/lib/auth-storage";
+import { clearAuthTokens, getAccessToken, setUserRole } from "@/lib/auth-storage";
 import { logout as authLogout, mapProfileToAuthUser } from "@/lib/auth-client";
 
 export function useAuth() {
@@ -33,15 +32,12 @@ export function useAuth() {
       return;
     }
 
-    apiClient
-      .get<AuthProfile>("/users/me")
+    fetchProfile(accessToken)
       .then((profile) => {
         setUserData(mapProfileToAuthUser(profile));
       })
       .catch(() => {
-        // Token is expired or invalid; api-client will have already attempted
-        // a refresh via /auth/refresh and redirected on failure if needed.
-        // Clearing here handles any residual local state.
+        // Token is expired or invalid; clear local state so RouteGuard can redirect.
         clearAuthTokens();
         setUserData(null);
       })
@@ -61,6 +57,7 @@ export function useAuth() {
     if (userData) {
       setRole(userData.role);
       setIsAuthenticated(true);
+      setUserRole(userData.role);
     } else {
       setRole(null);
       setIsAuthenticated(false);
@@ -118,4 +115,34 @@ export function useAuth() {
     // Null placeholder — Supabase session not used in this auth model.
     session: null,
   };
+}
+
+// ── Profile fetch (bypass apiClient retry hang) ─────────────────────────────
+
+function resolveApiBase(base?: string): string {
+  if (!base) return "/api/v1";
+  const trimmed = base.replace(/\/+$/, "");
+  if (trimmed.endsWith("/api/v1")) return trimmed;
+  if (trimmed.endsWith("/api")) return `${trimmed}/v1`;
+  return trimmed;
+}
+
+async function fetchProfile(accessToken: string): Promise<AuthProfile> {
+  const apiBase = resolveApiBase(process.env.NEXT_PUBLIC_API_URL?.trim());
+  const res = await fetch(`${apiBase}/users/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Profile fetch failed (${res.status})`);
+  }
+
+  const payload = await res.json().catch(() => null);
+  if (!payload) throw new Error("Profile response missing");
+
+  // Backend returns ApiResponse<{...}> → extract .data if present.
+  const data = (payload as { data?: AuthProfile }).data ?? payload;
+  if (!data || typeof data !== "object") throw new Error("Profile response invalid");
+
+  return data as AuthProfile;
 }
