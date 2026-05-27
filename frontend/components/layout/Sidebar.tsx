@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
+import { useQuery } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/useAuth"
+import { apiClient } from "@/lib/api-client"
 import {
   LayoutDashboard, Utensils, Users, Calendar, Settings,
   BarChart3, Store, ChefHat, ClipboardList, CreditCard,
@@ -22,8 +24,13 @@ interface NavItem {
   section: string
 }
 
+interface BrandingData {
+  app_name: string
+  logo_url?: string | null
+  primary_color?: string | null
+}
+
 // ── Nav config ─────────────────────────────────────────────────────────────────
-// Each role's items are cleanly separated with section headers.
 
 const NAV_ITEMS: NavItem[] = [
   // ── Super Admin ──────────────────────────────────────────────────────────────
@@ -69,7 +76,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "POS",        href: "/staff/cashier",     icon: <CreditCard size={18} />,      roles: ["cashier"], section: "Overview" },
 ]
 
-// ── Dark-mode hook (reads/writes localStorage) ────────────────────────────────
+// ── Dark-mode hook ────────────────────────────────────────────────────────────
 
 function useDarkMode() {
   const [dark, setDark] = useState(false)
@@ -99,6 +106,50 @@ function useDarkMode() {
   return { dark, toggle, mounted }
 }
 
+// ── BrandLogo ─────────────────────────────────────────────────────────────────
+// Renders the logo area: image if available, initial-letter box otherwise.
+
+function BrandLogo({
+  branding,
+  isLoading,
+  fallbackName,
+}: {
+  branding?: BrandingData | null
+  isLoading: boolean
+  fallbackName?: string
+}) {
+  const [imgError, setImgError] = useState(false)
+
+  if (isLoading) {
+    return (
+      <div className="w-8 h-8 rounded-lg bg-gray-200 dark:bg-gray-700 animate-pulse shrink-0" />
+    )
+  }
+
+  const showImg = branding?.logo_url && !imgError
+
+  if (showImg) {
+    return (
+      <img
+        src={branding!.logo_url!}
+        className="w-8 h-8 rounded-lg object-cover shrink-0"
+        alt="logo"
+        onError={() => setImgError(true)}
+      />
+    )
+  }
+
+  // Fall back to styled initial-letter box
+  const displayName = branding?.app_name || fallbackName || "Restaurant"
+  const initial = displayName.trim()[0]?.toUpperCase() ?? "R"
+
+  return (
+    <div className="w-8 h-8 bg-[#1A3C5E] rounded-lg flex items-center justify-center shrink-0">
+      <span className="text-[#E8A020] font-bold text-sm">{initial}</span>
+    </div>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function Sidebar() {
@@ -108,11 +159,22 @@ export function Sidebar() {
   const { user, role, signOut } = useAuth()
   const { dark, toggle: toggleDark, mounted: darkMounted } = useDarkMode()
 
+  const restaurantId = user?.restaurantId
+
+  // Fetch restaurant branding — only when restaurantId is available
+  const { data: branding, isLoading: brandingLoading } = useQuery<BrandingData>({
+    queryKey: ["branding", restaurantId],
+    queryFn: () =>
+      apiClient.get<BrandingData>(`/restaurants/${restaurantId}/branding`),
+    enabled: !!restaurantId,
+    staleTime: 5 * 60 * 1000, // 5 min — branding rarely changes
+    retry: false,             // don't spam on 404 / permission errors
+  })
+
   const filteredItems = role
     ? NAV_ITEMS.filter((item) => item.roles.includes(role))
     : []
 
-  // Group by section for section headers when expanded
   const sections: Record<string, NavItem[]> = {}
   for (const item of filteredItems) {
     if (!sections[item.section]) sections[item.section] = []
@@ -134,6 +196,8 @@ export function Sidebar() {
     .toUpperCase()
     .slice(0, 2)
 
+  const displayAppName = branding?.app_name ?? "Restaurant"
+
   return (
     <motion.aside
       animate={{ width: collapsed ? 64 : 256 }}
@@ -145,9 +209,11 @@ export function Sidebar() {
         "h-16 flex items-center border-b border-gray-100 dark:border-gray-800 shrink-0",
         collapsed ? "justify-center px-2" : "px-4 gap-3"
       )}>
-        <div className="w-8 h-8 bg-[#1A3C5E] rounded-lg flex items-center justify-center shrink-0">
-          <span className="text-[#E8A020] font-bold text-sm">D</span>
-        </div>
+        <BrandLogo
+          branding={branding}
+          isLoading={!!restaurantId && brandingLoading}
+          fallbackName={user?.name}
+        />
         <AnimatePresence>
           {!collapsed && (
             <motion.span
@@ -157,7 +223,11 @@ export function Sidebar() {
               transition={{ duration: 0.18 }}
               className="font-semibold text-gray-900 dark:text-white truncate"
             >
-              DineLuxe
+              {brandingLoading && restaurantId ? (
+                <span className="inline-block w-24 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+              ) : (
+                displayAppName
+              )}
             </motion.span>
           )}
         </AnimatePresence>
@@ -166,8 +236,7 @@ export function Sidebar() {
       {/* ── Nav ───────────────────────────────────────────────────────── */}
       <nav className="flex-1 py-3 px-2 overflow-y-auto overflow-x-hidden space-y-0.5 scrollbar-thin">
         {collapsed
-          ? /* Flat list when collapsed */
-            filteredItems.map((item) => (
+          ? filteredItems.map((item) => (
               <NavButton
                 key={item.href}
                 item={item}
@@ -176,8 +245,7 @@ export function Sidebar() {
                 onClick={() => router.push(item.href)}
               />
             ))
-          : /* Sectioned list when expanded */
-            Object.entries(sections).map(([section, items]) => (
+          : Object.entries(sections).map(([section, items]) => (
               <div key={section} className="mb-1">
                 <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 select-none">
                   {section}

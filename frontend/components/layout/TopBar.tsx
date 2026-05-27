@@ -53,6 +53,40 @@ function useDarkMode() {
   return { dark, toggle, mounted }
 }
 
+// ── UserAvatar ────────────────────────────────────────────────────────────────
+// Shows a profile picture if available; falls back to initials box gracefully.
+
+function UserAvatar({
+  profilePicUrl,
+  initials,
+  size = "sm",
+}: {
+  profilePicUrl?: string | null
+  initials: string
+  size?: "sm" | "md"
+}) {
+  const [imgError, setImgError] = useState(false)
+  const dimension = size === "sm" ? "w-7 h-7" : "w-8 h-8"
+  const textSize = size === "sm" ? "text-[10px]" : "text-xs"
+
+  if (profilePicUrl && !imgError) {
+    return (
+      <img
+        src={profilePicUrl}
+        className={cn(dimension, "rounded-lg object-cover shrink-0")}
+        alt="Profile"
+        onError={() => setImgError(true)}
+      />
+    )
+  }
+
+  return (
+    <div className={cn(dimension, "rounded-lg bg-[#1A3C5E] flex items-center justify-center shrink-0")}>
+      <span className={cn("text-white font-bold font-mono", textSize)}>{initials}</span>
+    </div>
+  )
+}
+
 export function TopBar({ onMenuClick, className }: TopBarProps) {
   const { user, role, signOut } = useAuth()
   const bellRef = useRef<HTMLButtonElement>(null)
@@ -178,9 +212,11 @@ export function TopBar({ onMenuClick, className }: TopBarProps) {
               showUserMenu ? "bg-gray-100 dark:bg-gray-800" : "hover:bg-gray-50 dark:hover:bg-gray-800"
             )}
           >
-            <div className="w-7 h-7 rounded-lg bg-[#1A3C5E] flex items-center justify-center shrink-0">
-              <span className="text-white text-[10px] font-bold font-mono">{initials}</span>
-            </div>
+            <UserAvatar
+              profilePicUrl={user?.profile_pic_url}
+              initials={initials}
+              size="sm"
+            />
             <div className="hidden sm:block text-left">
               <p className="text-xs font-medium text-gray-800 dark:text-gray-100 leading-tight truncate max-w-25">
                 {user?.name || "Account"}
@@ -207,13 +243,21 @@ export function TopBar({ onMenuClick, className }: TopBarProps) {
                 transition={{ duration: 0.15, ease: "easeOut" }}
                 className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 overflow-hidden z-50"
               >
-                <div className="px-4 py-3 border-b border-gray-50 dark:border-gray-800">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                    {user?.name || user?.email || "Team member"}
-                  </p>
-                  <p className="text-xs text-gray-400 capitalize mt-0.5">
-                    {role?.replace(/_/g, " ") || "Signed in"}
-                  </p>
+                {/* Dropdown header with profile pic */}
+                <div className="px-4 py-3 border-b border-gray-50 dark:border-gray-800 flex items-center gap-3">
+                  <UserAvatar
+                    profilePicUrl={user?.profile_pic_url}
+                    initials={initials}
+                    size="md"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                      {user?.name || user?.email || "Team member"}
+                    </p>
+                    <p className="text-xs text-gray-400 capitalize mt-0.5">
+                      {role?.replace(/_/g, " ") || "Signed in"}
+                    </p>
+                  </div>
                 </div>
                 <div className="py-1.5">
                   <button
