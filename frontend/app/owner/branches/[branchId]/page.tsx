@@ -15,6 +15,7 @@ import {
   Pencil,
   RefreshCw,
   Clock,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
@@ -53,6 +54,13 @@ interface LiveStats {
   active_orders: number;
   staff_on_duty: number;
   revenue_today: number;
+}
+
+interface Table {
+  id: string;
+  table_number: string | number;
+  capacity: number;
+  status: string;
 }
 
 // ── KPI Grid ──────────────────────────────────────────────────────────────────
@@ -130,6 +138,13 @@ export default function BranchDetailPage() {
     enabled: !!branchId,
     refetchInterval: 30_000,
     staleTime: 0,
+  });
+
+  // ── Tables list ────────────────────────────────────────────────────────────
+  const { data: tables, isLoading: tablesLoading } = useQuery<Table[]>({
+    queryKey: ["branch-tables", branchId],
+    queryFn: () => apiClient.get<Table[]>(`/branches/${branchId}/tables`),
+    enabled: !!branchId,
   });
 
   const isLoading = branchLoading || statsLoading;
@@ -278,6 +293,62 @@ export default function BranchDetailPage() {
                 <span>Updated {formatDateTime(branch.updated_at)}</span>
               </div>
             </div>
+          </div>
+
+          {/* Tables section */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1A3C5E]/10 text-[#1A3C5E]">
+                  <LayoutGrid size={18} />
+                </span>
+                <div>
+                  <h2 className="font-semibold text-gray-900">Tables</h2>
+                  <p className="text-xs text-gray-400">
+                    Configure the floor layout and table positions
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() =>
+                  router.push(`/staff/host/floor?branchId=${branchId}`)
+                }
+                className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-[#1A3C5E] rounded-lg hover:bg-[#15304d] transition"
+              >
+                <ExternalLink size={14} />
+                Manage Tables / Floor Layout
+              </button>
+            </div>
+
+            {/* Summary card */}
+            {tablesLoading ? (
+              <div className="h-16 rounded-lg bg-gray-50 animate-pulse" />
+            ) : (
+              <div className="flex items-center justify-between rounded-lg bg-gray-50 border border-gray-100 px-5 py-4">
+                <div className="flex items-center gap-3 text-sm text-gray-700">
+                  <LayoutGrid size={16} className="text-gray-400 shrink-0" />
+                  <span>
+                    <span className="font-semibold text-gray-900">
+                      {tables?.length ?? stats?.total_tables ?? 0}
+                    </span>{" "}
+                    table
+                    {(tables?.length ?? stats?.total_tables ?? 0) !== 1
+                      ? "s"
+                      : ""}{" "}
+                    configured
+                  </span>
+                </div>
+                <button
+                  onClick={() =>
+                    router.push(`/staff/host/floor?branchId=${branchId}`)
+                  }
+                  className="text-sm font-medium text-[#1A3C5E] hover:underline flex items-center gap-1"
+                >
+                  Edit Floor Layout
+                  <ExternalLink size={13} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -111,18 +111,29 @@ export default function EditBranchPage() {
   });
 
   // Pre-fill form once branch loads.
-  // The backend stores a combined `address` string. We place it in address_line1
-  // since we cannot reliably split it, and leave address_line2 blank. The user
-  // can correct the split before saving.
+  // The backend stores a combined `address` string like:
+  //   "123 Main St, Floor 2, Mumbai, Maharashtra, 400001"
+  // We split by comma and treat the last 3 parts as pincode / state / city,
+  // with everything before that becoming address_line1.
   useEffect(() => {
     if (!branch) return;
+
+    const parts = (branch.address ?? "").split(",").map((s) => s.trim());
+    const pincode = parts.length >= 1 ? parts[parts.length - 1] : "";
+    const state   = parts.length >= 2 ? parts[parts.length - 2] : "";
+    const city    = parts.length >= 3 ? parts[parts.length - 3] : "";
+    const addressLine1 =
+      parts.length >= 4
+        ? parts.slice(0, parts.length - 3).join(", ")
+        : branch.address ?? "";
+
     reset({
       name: branch.name ?? "",
-      address_line1: branch.address ?? "",
+      address_line1: addressLine1,
       address_line2: "",
-      city: "",
-      state: "",
-      pincode: "",
+      city,
+      state,
+      pincode,
       phone: branch.phone ?? "",
       seating_capacity: branch.seating_capacity ?? undefined,
     });
