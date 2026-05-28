@@ -60,8 +60,8 @@ function CustomerSheet({
 }) {
   const displayName =
     customer.name ??
-    `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim() ||
-    "—";
+    (`${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim() ||
+      "—");
 
   return (
     <div
@@ -198,7 +198,9 @@ export default function CustomersPage() {
       })
       .map((c) => ({
         ...c,
-        display_name: c.name ?? `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "—",
+        display_name:
+          c.name ??
+          (`${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "—"),
         phone: c.phone ?? null,
         order_count: c.order_count ?? 0,
       }));

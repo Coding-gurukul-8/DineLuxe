@@ -369,7 +369,7 @@ export default function ShiftsPage() {
             <p className="text-sm">No staff found for this branch</p>
           </div>
         ) : (
-          <table className="w-full min-w-[700px]">
+          <table className="w-full min-w-175">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60">
                 {/* Staff column header */}
