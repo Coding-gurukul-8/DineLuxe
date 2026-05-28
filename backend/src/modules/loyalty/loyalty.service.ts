@@ -243,3 +243,129 @@ export async function getHistory(
   if (error) throw error;
   return { data: data ?? [], count: count ?? 0 };
 }
+
+// ─── Tier helpers ──────────────────────────────────────────────────────────────
+
+function resolveTier(totalEarned: number): { tier: string; next_tier: string | null; points_to_next: number | null } {
+  if (totalEarned >= 5000) return { tier: 'platinum', next_tier: null, points_to_next: null };
+  if (totalEarned >= 2000) return { tier: 'gold',     next_tier: 'platinum', points_to_next: 5000 - totalEarned };
+  if (totalEarned >= 500)  return { tier: 'silver',   next_tier: 'gold',     points_to_next: 2000 - totalEarned };
+  return                          { tier: 'bronze',   next_tier: 'silver',   points_to_next: 500  - totalEarned };
+}
+
+// ─── getCustomerLoyalty ────────────────────────────────────────────────────────
+// Returns points_balance, tier, next_tier, and recent transaction history.
+
+export async function getCustomerLoyalty(userId: string) {
+  const { data: accounts, error: accErr } = await supabaseAdmin
+    .from('loyalty_accounts')
+    .select('id, restaurant_id, points_balance, total_earned')
+    .eq('user_id', userId);
+
+  if (accErr) throw accErr;
+
+  const points_balance = (accounts ?? []).reduce((s, a) => s + (a.points_balance ?? 0), 0);
+  const total_earned   = (accounts ?? []).reduce((s, a) => s + (a.total_earned   ?? 0), 0);
+  const tierInfo       = resolveTier(total_earned);
+
+  let history: any[] = [];
+  if (accounts?.length) {
+    const accountIds = accounts.map((a) => a.id);
+    const { data: txns } = await supabaseAdmin
+      .from('loyalty_transactions')
+      .select('*')
+      .in('loyalty_account_id', accountIds)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    history = txns ?? [];
+  }
+
+  return {
+    user_id:       userId,
+    points_balance,
+    total_earned,
+    tier:          tierInfo.tier,
+    next_tier:     tierInfo.next_tier,
+    points_to_next_tier: tierInfo.points_to_next,
+    accounts:      accounts ?? [],
+    history,
+  };
+}
+
+// ─── awardPoints ──────────────────────────────────────────────────────────────
+// Calculate and award points (1 point per ₹10 spent).
+// Wraps the existing `earn` function; requires restaurantId resolved from orderId.
+
+export async function awardPoints(
+  userId: string,
+  orderId: string,
+  amount: number,
+): Promise<{ points_earned: number; new_balance: number }> {
+  // Resolve restaurantId from the order's branch
+  const { data: order, error: orderErr } = await supabaseAdmin
+    .from('orders')
+    .select('branch_id')
+    .eq('id', orderId)
+    .single();
+
+  if (orderErr || !order) throw Object.assign(new Error('Order not found'), { status: 404 });
+
+  const { data: branch, error: branchErr } = await supabaseAdmin
+    .from('branches')
+    .select('restaurant_id')
+    .eq('id', order.branch_id)
+    .single();
+
+  if (branchErr || !branch?.restaurant_id) {
+    throw Object.assign(new Error('Could not resolve restaurant for order'), { status: 422 });
+  }
+
+  return earn(userId, orderId, amount, branch.restaurant_id);
+}
+
+// ─── redeemPoints ─────────────────────────────────────────────────────────────
+// Deduct points and validate sufficient balance.
+// Wraps the existing `redeem` function; restaurantId resolved from orderId.
+
+export async function redeemPoints(
+  userId: string,
+  points: number,
+  orderId: string,
+): Promise<{ discount_amount: number; new_balance: number }> {
+  // Resolve restaurantId from the order's branch
+  const { data: order, error: orderErr } = await supabaseAdmin
+    .from('orders')
+    .select('branch_id')
+    .eq('id', orderId)
+    .single();
+
+  if (orderErr || !order) throw Object.assign(new Error('Order not found'), { status: 404 });
+
+  const { data: branch, error: branchErr } = await supabaseAdmin
+    .from('branches')
+    .select('restaurant_id')
+    .eq('id', order.branch_id)
+    .single();
+
+  if (branchErr || !branch?.restaurant_id) {
+    throw Object.assign(new Error('Could not resolve restaurant for order'), { status: 422 });
+  }
+
+  // Validate sufficient balance before delegating
+  const { data: accounts } = await supabaseAdmin
+    .from('loyalty_accounts')
+    .select('points_balance')
+    .eq('user_id', userId)
+    .eq('restaurant_id', branch.restaurant_id)
+    .maybeSingle();
+
+  const currentBalance = accounts?.points_balance ?? 0;
+  if (currentBalance < points) {
+    throw Object.assign(
+      new Error(`Insufficient points. Balance: ${currentBalance}, requested: ${points}`),
+      { status: 422 },
+    );
+  }
+
+  return redeem(userId, orderId, points, branch.restaurant_id);
+}

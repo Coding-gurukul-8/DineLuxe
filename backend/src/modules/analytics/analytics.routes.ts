@@ -9,6 +9,7 @@ import {
   getStaffingRecommendation,
   getRestaurantOverview,
   getBranchHourly,
+  getRestaurantAnalytics,
 } from './analytics.controller';
 
 const router: import('express').Router = Router();
@@ -62,6 +63,15 @@ router.get(
   '/branch/:branchId/hourly',
   requireRole('owner', 'admin', 'super_admin'),
   getBranchHourly,
+);
+
+// ── Restaurant period analytics (owner + admin) ───────────────────────────────
+// GET /analytics/restaurant/:restaurantId/analytics?period=7d|30d|90d
+// Returns: { revenue_by_day, orders_by_day, avg_order_value, top_items }
+router.get(
+  '/restaurant/:restaurantId/analytics',
+  requireRole('owner', 'admin', 'super_admin'),
+  getRestaurantAnalytics,
 );
 
 export default router;

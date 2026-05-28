@@ -11,6 +11,9 @@ import {
   handleUpdateLocation,
   handleGetActiveDelivery,
   handleGetEarnings,
+  handleGetDeliveryStatus,
+  handleGetActiveDeliveriesForBranch,
+  handleCompleteDelivery,
 } from './delivery.controller';
 
 const router: import('express').Router = Router();
@@ -72,5 +75,19 @@ router.patch(
   }),
   handleUpdateDeliveryStatus
 );
+
+// GET /delivery/:id/status — manager/owner views full delivery status with partner info
+router.get('/:id/status', requireRole('manager', 'owner', 'admin'), handleGetDeliveryStatus);
+
+// GET /delivery/branch/:branchId/active — list all active deliveries for a branch
+router.get(
+  '/branch/:branchId/active',
+  injectTenant,
+  requireRole('manager', 'owner', 'admin'),
+  handleGetActiveDeliveriesForBranch
+);
+
+// POST /delivery/:id/complete — manager/owner force-completes a delivery
+router.post('/:id/complete', injectTenant, requireRole('manager', 'owner'), handleCompleteDelivery);
 
 export default router;

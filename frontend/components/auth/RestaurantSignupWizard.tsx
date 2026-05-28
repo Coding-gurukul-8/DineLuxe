@@ -163,8 +163,8 @@ function cleanOptional(value?: string): string | undefined {
   return trimmed ? trimmed : undefined
 }
 
-export function RestaurantSignupWizard() {
-  const [step, setStep]       = useState(0)
+export function RestaurantSignupWizard({ initialStep = 0 }: { initialStep?: number } = {}) {
+  const [step, setStep]       = useState(Math.max(0, Math.min(initialStep, 3)))
   const [direction, setDir]   = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)

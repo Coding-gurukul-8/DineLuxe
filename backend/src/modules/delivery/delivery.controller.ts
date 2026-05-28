@@ -7,6 +7,9 @@ import {
   updatePartnerLocation,
   getActiveDelivery,
   getPartnerEarnings,
+  getDeliveryStatus,
+  getActiveDeliveriesForBranch,
+  completeDelivery,
 } from './delivery.service';
 
 export async function handleAssignDelivery(req: Request, res: Response, next: NextFunction) {
@@ -72,6 +75,33 @@ export async function handleGetEarnings(req: Request, res: Response, next: NextF
   try {
     const earnings = await getPartnerEarnings(req.user!.id);
     res.json(success(earnings));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleGetDeliveryStatus(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await getDeliveryStatus(req.params.id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleGetActiveDeliveriesForBranch(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await getActiveDeliveriesForBranch(req.params.branchId);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleCompleteDelivery(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await completeDelivery(req.params.id);
+    res.json(success(data, 'Delivery completed'));
   } catch (err) {
     next(err);
   }

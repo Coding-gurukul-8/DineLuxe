@@ -268,3 +268,83 @@ export async function getBranchHourly(branchId: string) {
 
   return { hours };
 }
+// ─── Restaurant Analytics (period-based) ─────────────────────────────────────
+// GET /analytics/restaurant/:restaurantId/analytics?period=7d|30d|90d
+// Returns: { revenue_by_day, orders_by_day, avg_order_value, top_items }
+
+export async function getRestaurantAnalytics(
+  restaurantId: string,
+  period: string = '30d',
+) {
+  const days = period === '7d' ? 7 : period === '90d' ? 90 : 30;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  // Fetch paid payments joined to orders for this restaurant within the period
+  const { data: payments, error: payErr } = await supabaseAdmin
+    .from('payments')
+    .select('amount, created_at, order_id, orders!inner(restaurant_id)')
+    .eq('status', 'completed')
+    .eq('orders.restaurant_id', restaurantId)
+    .gte('created_at', since);
+
+  if (payErr) throw payErr;
+
+  // Group revenue and order count by day
+  const revenueByDay: Record<string, number> = {};
+  const ordersByDay:  Record<string, number> = {};
+
+  for (const p of payments ?? []) {
+    const date = (p.created_at as string).split('T')[0];
+    revenueByDay[date] = (revenueByDay[date] ?? 0) + (p.amount ?? 0);
+    ordersByDay[date]  = (ordersByDay[date]  ?? 0) + 1;
+  }
+
+  const revenue_by_day = Object.entries(revenueByDay)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, amount]) => ({ date, amount: Math.round(amount * 100) / 100 }));
+
+  const orders_by_day = Object.entries(ordersByDay)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, count]) => ({ date, count }));
+
+  const totalRevenue    = revenue_by_day.reduce((s, r) => s + r.amount, 0);
+  const totalOrders     = orders_by_day.reduce((s, o) => s + o.count, 0);
+  const avg_order_value = totalOrders > 0
+    ? Math.round((totalRevenue / totalOrders) * 100) / 100
+    : 0;
+
+  // Top items by order count for this restaurant in the period
+  const { data: orderItems, error: itemErr } = await supabaseAdmin
+    .from('order_items')
+    .select('menu_item_id, quantity, menu_items(name), orders!inner(restaurant_id, created_at)')
+    .eq('orders.restaurant_id', restaurantId)
+    .gte('orders.created_at', since);
+
+  if (itemErr) throw itemErr;
+
+  const itemMap: Record<string, { name: string; count: number }> = {};
+  for (const row of (orderItems as any[]) ?? []) {
+    const id   = row.menu_item_id;
+    const name = row.menu_items?.name ?? 'Unknown';
+    if (!itemMap[id]) itemMap[id] = { name, count: 0 };
+    itemMap[id].count += row.quantity ?? 1;
+  }
+
+  const top_items = Object.values(itemMap)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+    .map(({ name, count }) => ({ name, count }));
+
+  return {
+    period,
+    since,
+    revenue_by_day,
+    orders_by_day,
+    avg_order_value,
+    top_items,
+    summary: {
+      total_revenue: Math.round(totalRevenue * 100) / 100,
+      total_orders:  totalOrders,
+    },
+  };
+}

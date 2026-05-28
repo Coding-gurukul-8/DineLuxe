@@ -119,8 +119,8 @@ type StepKey = "profile" | "contact" | "password"
 const STEPS: StepKey[] = ["profile", "contact", "password"]
 
 // ── Main component ────────────────────────────────────────────────────────────
-export function SignupWizard() {
-  const [stepIndex, setStepIndex] = useState(0)
+export function SignupWizard({ initialStep = 0 }: { initialStep?: number } = {}) {
+  const [stepIndex, setStepIndex] = useState(Math.max(0, Math.min(initialStep, 2)))
   const [direction, setDirection] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)

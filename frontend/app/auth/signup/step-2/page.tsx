@@ -1,5 +1,5 @@
-import RouteShell from '@/components/shared/RouteShell'
+import { SignupWizard } from "@/components/auth/SignupWizard"
 
-export default function Page() {
-  return <RouteShell />
+export default function SignupStep2Page() {
+  return <SignupWizard initialStep={1} />
 }

@@ -1,5 +1,5 @@
-import RouteShell from '@/components/shared/RouteShell'
+import { RestaurantSignupWizard } from "@/components/auth/RestaurantSignupWizard"
 
-export default function Page() {
-  return <RouteShell />
+export default function OnboardingPage() {
+  return <RestaurantSignupWizard initialStep={0} />
 }
