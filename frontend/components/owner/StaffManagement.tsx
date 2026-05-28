@@ -5,17 +5,20 @@
  *
  * Fixes vs. the old implementation
  * ─────────────────────────────────
- * 1. Role enum uses "delivery" (API contract) not "delivery_partner".
- * 2. Bottom-of-file `type RoleBadge` alias removed — it shadowed the imported
- *    RoleBadge *component* and caused TypeScript to silently infer the wrong
- *    type for the `role` prop.
- * 3. Mapping helper `toRoleBadgeRole()` bridges "delivery" → "delivery_partner"
- *    so the existing RoleBadge component (which only knows delivery_partner)
- *    still renders correctly.
- * 4. All API paths match the backend spec:
- *      GET  /staff/branch/:branchId
+ * 1. When `branchId` is null (owner with no assigned branch), show a branch
+ *    selector so the owner can pick which branch's staff to view. The old code
+ *    set `selectedBranch = branchId ?? ""` which made `enabled: !!selectedBranch`
+ *    permanently false — the query never fired and the table stayed empty forever.
+ * 2. Added `enabled: !!restaurantId && !!selectedBranch` guard so the fetch
+ *    never fires unauthenticated.
+ * 3. Added "View" link column that navigates to /owner/staff/{staffId}.
+ * 4. Role enum uses "delivery" (API contract) not "delivery_partner".
+ * 5. `toRoleBadgeRole()` bridges "delivery" → "delivery_partner" so the existing
+ *    RoleBadge component still renders correctly.
+ * 6. All API paths match the backend spec:
+ *      GET  /branches                      (branch selector)
+ *      GET  /staff/branch/:branchId        (staff list)
  *      POST /staff/create
- *      GET  /staff/:id          (edit pre-fetch)
  *      PATCH /staff/:id
  *      PATCH /staff/:id/toggle-access
  */
@@ -38,27 +41,24 @@ import {
   Mail,
   CalendarDays,
   Hash,
+  ExternalLink,
+  GitBranch,
+  AlertCircle,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiError } from "@repo/shared";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { RoleBadge } from "@/components/shared/RoleBadge";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { SkeletonCard } from "@/components/shared/SkeletonCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { maskPhone, formatDate, cn } from "@/lib/utils";
 import { useDebounce } from "@/hooks/useDebounce";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-/**
- * Role values match what the backend accepts:
- *   manager | waiter | cashier | host | chef | delivery
- *
- * Note: "delivery" (not "delivery_partner") is the API contract value.
- * The RoleBadge component uses "delivery_partner" internally; see
- * `toRoleBadgeRole()` below for the mapping.
- */
 const STAFF_ROLES = [
   { value: "manager",  label: "Manager" },
   { value: "waiter",   label: "Waiter" },
@@ -90,7 +90,6 @@ interface StaffMember {
   branch_id: string;
 }
 
-/** Computed display shape for DataTable (extends Record<string, unknown>). */
 interface StaffRow extends Record<string, unknown> {
   id: string;
   employee_id?: string;
@@ -105,11 +104,12 @@ interface StaffRow extends Record<string, unknown> {
   branch_id: string;
 }
 
+interface BranchOption {
+  id: string;
+  name: string;
+}
+
 // ── RoleBadge compatibility bridge ─────────────────────────────────────────────
-//
-// The shared RoleBadge component uses "delivery_partner" in its props union.
-// The API (and our StaffRole type) uses "delivery".
-// This helper maps between the two so we never pass an unrecognised value.
 
 type RoleBadgeRole =
   | "super_admin"
@@ -130,14 +130,7 @@ function toRoleBadgeRole(role: StaffRole): RoleBadgeRole {
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
-const API_ROLES = [
-  "manager",
-  "waiter",
-  "cashier",
-  "host",
-  "chef",
-  "delivery",
-] as const;
+const API_ROLES = ["manager", "waiter", "cashier", "host", "chef", "delivery"] as const;
 
 const createSchema = z.object({
   first_name: z.string().min(1, "First name is required"),
@@ -157,9 +150,71 @@ const editSchema = z.object({
 type CreateForm = z.infer<typeof createSchema>;
 type EditForm   = z.infer<typeof editSchema>;
 
-// ── Query key ──────────────────────────────────────────────────────────────────
+// ── Query keys ─────────────────────────────────────────────────────────────────
 
-const staffKey = (branchId: string) => ["staff", "branch", branchId] as const;
+const staffKey    = (branchId: string) => ["staff", "branch", branchId] as const;
+const branchesKey = (restaurantId: string) => ["branches", restaurantId] as const;
+
+// ── Branch selector ────────────────────────────────────────────────────────────
+// Rendered when the owner has no assigned branchId from the auth token.
+
+function BranchSelector({
+  restaurantId,
+  onSelect,
+}: {
+  restaurantId: string;
+  onSelect: (branchId: string) => void;
+}) {
+  const { data: branches = [], isLoading, isError } = useQuery<BranchOption[]>({
+    queryKey: branchesKey(restaurantId),
+    queryFn: () => apiClient.get<BranchOption[]>("/branches"),
+    enabled: !!restaurantId,
+    staleTime: 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        <SkeletonCard variant="list-item" count={3} />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+        <AlertCircle size={16} />
+        Failed to load branches. Please refresh.
+      </div>
+    );
+  }
+
+  if (branches.length === 0) {
+    return (
+      <div className="py-10 text-center text-sm text-gray-400">
+        No branches found for your restaurant.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+        <GitBranch size={15} />
+        <span>Select a branch to manage its staff:</span>
+      </div>
+      {branches.map((branch) => (
+        <button
+          key={branch.id}
+          onClick={() => onSelect(branch.id)}
+          className="w-full text-left px-4 py-3 bg-white border border-gray-200 rounded-xl hover:border-[#1A3C5E] hover:bg-[#1A3C5E]/5 transition text-sm font-medium text-gray-800"
+        >
+          {branch.name}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Create Staff Modal
@@ -186,7 +241,6 @@ function CreateStaffModal({
       apiClient.post("/staff/create", {
         ...data,
         branch_id: branchId,
-        // omit phone if blank so the backend treats it as optional
         phone: data.phone?.trim() || undefined,
       }),
     onSuccess: () => {
@@ -196,7 +250,6 @@ function CreateStaffModal({
     },
     onError: (err) => {
       if (err instanceof ApiError && err.statusCode === 409) {
-        // ← 409 Conflict: email already exists
         setError("email", { message: "Email already exists in the system" });
       } else {
         toast.error("Failed to create staff member");
@@ -207,7 +260,6 @@ function CreateStaffModal({
   return (
     <SlideOver title="Add Staff Member" onClose={onClose}>
       <form onSubmit={handleSubmit((d) => createStaff(d))} className="space-y-4">
-        {/* Name row */}
         <div className="grid grid-cols-2 gap-3">
           <Field label="First Name" error={errors.first_name?.message} required>
             <input
@@ -225,7 +277,6 @@ function CreateStaffModal({
           </Field>
         </div>
 
-        {/* Email */}
         <Field label="Email" error={errors.email?.message} required>
           <input
             {...register("email")}
@@ -235,7 +286,6 @@ function CreateStaffModal({
           />
         </Field>
 
-        {/* Phone */}
         <Field label="Phone" error={errors.phone?.message}>
           <input
             {...register("phone")}
@@ -245,7 +295,6 @@ function CreateStaffModal({
           />
         </Field>
 
-        {/* Role */}
         <Field label="Role" error={errors.role?.message} required>
           <select {...register("role")} className={inputCls(!!errors.role)}>
             <option value="">Select a role…</option>
@@ -257,9 +306,8 @@ function CreateStaffModal({
           </select>
         </Field>
 
-        {/* Branch info */}
         <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
-          Staff will be assigned to your current branch automatically.
+          Staff will be assigned to the selected branch automatically.
         </p>
 
         <SubmitButton loading={isSubmitting}>Invite Staff Member</SubmitButton>
@@ -298,7 +346,6 @@ function EditStaffModal({
   });
 
   const { mutate: updateStaff } = useMutation({
-    // PATCH /staff/:id  — body: { first_name?, last_name?, role?, phone? }
     mutationFn: (data: EditForm) =>
       apiClient.patch(`/staff/${staff.id}`, {
         first_name: data.first_name,
@@ -320,7 +367,6 @@ function EditStaffModal({
       subtitle={`${staff.first_name} ${staff.last_name}`}
       onClose={onClose}
     >
-      {/* Read-only identity block */}
       <div className="grid grid-cols-2 gap-3 p-3 bg-gray-50 rounded-xl mb-5">
         {staff.employee_id && (
           <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -343,16 +389,10 @@ function EditStaffModal({
       <form onSubmit={handleSubmit((d) => updateStaff(d))} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="First Name" error={errors.first_name?.message} required>
-            <input
-              {...register("first_name")}
-              className={inputCls(!!errors.first_name)}
-            />
+            <input {...register("first_name")} className={inputCls(!!errors.first_name)} />
           </Field>
           <Field label="Last Name" error={errors.last_name?.message} required>
-            <input
-              {...register("last_name")}
-              className={inputCls(!!errors.last_name)}
-            />
+            <input {...register("last_name")} className={inputCls(!!errors.last_name)} />
           </Field>
         </div>
 
@@ -388,7 +428,8 @@ function EditStaffModal({
 // ══════════════════════════════════════════════════════════════════════════════
 
 export function StaffManagement() {
-  const { branchId } = useAuth();
+  const { branchId, restaurantId } = useAuth();
+  const router = useRouter();
   const qc = useQueryClient();
 
   const [search, setSearch]             = useState("");
@@ -397,35 +438,39 @@ export function StaffManagement() {
   const [editTarget, setEditTarget]     = useState<StaffMember | null>(null);
   const [toggleTarget, setToggleTarget] = useState<StaffMember | null>(null);
 
+  // FIX: when branchId is null (owner role), let them pick a branch first.
+  const [overrideBranchId, setOverrideBranchId] = useState<string | null>(null);
+  const selectedBranch: string | null = overrideBranchId ?? branchId ?? null;
+
   const debouncedSearch = useDebounce(search, 350);
-  const selectedBranch  = branchId ?? "";
 
   // ── Fetch staff list ─────────────────────────────────────────────────────
   // GET /staff/branch/:branchId
+  // FIX: guard with both restaurantId and selectedBranch — the old code only
+  // checked !!selectedBranch which was always "" (falsy) for owners.
 
   const {
     data: staff = [],
     isLoading,
     isError,
   } = useQuery<StaffMember[]>({
-    queryKey: staffKey(selectedBranch),
-    queryFn:  () =>
+    queryKey: staffKey(selectedBranch ?? ""),
+    queryFn: () =>
       apiClient.get<StaffMember[]>(`/staff/branch/${selectedBranch}`),
-    enabled: !!selectedBranch,
+    enabled: !!restaurantId && !!selectedBranch,
+    staleTime: 30_000,
   });
 
   // ── Toggle access (optimistic) ────────────────────────────────────────────
-  // PATCH /staff/:id/toggle-access
 
   const { mutate: toggleAccess } = useMutation({
     mutationFn: (member: StaffMember) =>
       apiClient.patch(`/staff/${member.id}/toggle-access`, {}),
 
-    // Optimistic update: flip is_active immediately in cache
     onMutate: async (member) => {
-      await qc.cancelQueries({ queryKey: staffKey(selectedBranch) });
-      const prev = qc.getQueryData<StaffMember[]>(staffKey(selectedBranch));
-      qc.setQueryData<StaffMember[]>(staffKey(selectedBranch), (old) =>
+      await qc.cancelQueries({ queryKey: staffKey(selectedBranch ?? "") });
+      const prev = qc.getQueryData<StaffMember[]>(staffKey(selectedBranch ?? ""));
+      qc.setQueryData<StaffMember[]>(staffKey(selectedBranch ?? ""), (old) =>
         old?.map((s) =>
           s.id === member.id ? { ...s, is_active: !s.is_active } : s
         ) ?? []
@@ -433,13 +478,11 @@ export function StaffManagement() {
       return { prev };
     },
 
-    // Roll back on error
     onError: (_err, _member, ctx) => {
-      if (ctx?.prev) qc.setQueryData(staffKey(selectedBranch), ctx.prev);
+      if (ctx?.prev) qc.setQueryData(staffKey(selectedBranch ?? ""), ctx.prev);
       toast.error("Failed to update access");
     },
 
-    // Success toast — note: member.is_active is the PRE-toggle value here
     onSuccess: (_data, member) => {
       toast.success(
         member.is_active
@@ -448,9 +491,8 @@ export function StaffManagement() {
       );
     },
 
-    // Always re-sync with server
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: staffKey(selectedBranch) });
+      qc.invalidateQueries({ queryKey: staffKey(selectedBranch ?? "") });
     },
   });
 
@@ -504,8 +546,6 @@ export function StaffManagement() {
       label: "Role",
       sortable: true,
       render: (row) => (
-        // toRoleBadgeRole maps "delivery" → "delivery_partner" so the existing
-        // RoleBadge component receives a value it recognises.
         <RoleBadge role={toRoleBadgeRole(row.role)} size="sm" />
       ),
     },
@@ -536,7 +576,19 @@ export function StaffManagement() {
       align: "right",
       render: (row) => (
         <div className="flex items-center justify-end gap-1">
-          {/* Edit — opens EditStaffModal */}
+          {/* FIX: "View" link navigates to /owner/staff/{staffId} */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              router.push(`/owner/staff/${row.id}`);
+            }}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-[#1A3C5E] hover:bg-[#1A3C5E]/5 transition"
+            title="View staff profile"
+          >
+            <ExternalLink size={14} />
+          </button>
+
+          {/* Edit */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -548,7 +600,7 @@ export function StaffManagement() {
             <Pencil size={14} />
           </button>
 
-          {/* Toggle access — opens ConfirmDialog */}
+          {/* Toggle access */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -569,16 +621,49 @@ export function StaffManagement() {
     },
   ];
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── No branch selected: show picker ───────────────────────────────────────
+
+  if (!selectedBranch) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">Staff</h3>
+          <p className="text-sm text-gray-400 mt-0.5">
+            You don&apos;t have a default branch — select one to manage its staff.
+          </p>
+        </div>
+        {restaurantId ? (
+          <BranchSelector
+            restaurantId={restaurantId}
+            onSelect={(id) => setOverrideBranchId(id)}
+          />
+        ) : (
+          <div className="py-10 text-center text-sm text-gray-400">
+            Restaurant context not available. Please refresh.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Normal render ─────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-5">
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-bold text-gray-900">Staff</h3>
           <p className="text-sm text-gray-400 mt-0.5">
             {staff.length} member{staff.length !== 1 ? "s" : ""} in this branch
+            {overrideBranchId && (
+              <button
+                onClick={() => setOverrideBranchId(null)}
+                className="ml-2 text-xs text-[#1A3C5E] underline underline-offset-2"
+              >
+                Switch branch
+              </button>
+            )}
           </p>
         </div>
         <button
@@ -590,74 +675,83 @@ export function StaffManagement() {
         </button>
       </div>
 
-      {/* ── Filters ── */}
-      <div className="flex flex-wrap items-center gap-3">
-        {/* Search */}
-        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 w-full max-w-xs">
-          <Search size={15} className="text-gray-400 flex-shrink-0" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, email or role…"
-            className="flex-1 text-sm text-gray-700 bg-transparent focus:outline-none placeholder:text-gray-400"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="text-gray-300 hover:text-gray-500"
-            >
-              <X size={14} />
-            </button>
-          )}
+      {/* Loading skeletons */}
+      {isLoading && (
+        <div className="space-y-3">
+          <SkeletonCard variant="list-item" count={4} />
         </div>
+      )}
 
-        {/* Role filter dropdown */}
-        <select
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-          className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
-        >
-          {ROLE_FILTER_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+      {/* Filters — only shown once loaded */}
+      {!isLoading && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 w-full max-w-xs">
+            <Search size={15} className="text-gray-400 shrink-0" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, email or role…"
+              className="flex-1 text-sm text-gray-700 bg-transparent focus:outline-none placeholder:text-gray-400"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="text-gray-300 hover:text-gray-500"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
 
-        {/* Active / inactive count chips */}
-        <div className="flex items-center gap-2 ml-auto">
-          <span className="text-xs bg-green-50 text-green-700 px-2.5 py-1 rounded-full font-medium">
-            {staff.filter((s) => s.is_active).length} active
-          </span>
-          <span className="text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full font-medium">
-            {staff.filter((s) => !s.is_active).length} inactive
-          </span>
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#1A3C5E]/20"
+          >
+            {ROLE_FILTER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-xs bg-green-50 text-green-700 px-2.5 py-1 rounded-full font-medium">
+              {staff.filter((s) => s.is_active).length} active
+            </span>
+            <span className="text-xs bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full font-medium">
+              {staff.filter((s) => !s.is_active).length} inactive
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* ── Error state ── */}
+      {/* Error state */}
       {isError && (
-        <div className="py-8 text-center text-sm text-red-500">
+        <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+          <AlertCircle size={16} />
           Failed to load staff. Please refresh.
         </div>
       )}
 
-      {/* ── DataTable ── */}
-      <DataTable<StaffRow>
-        columns={columns}
-        data={rows}
-        loading={isLoading}
-        pageSize={15}
-        keyField="id"
-        emptyTitle="No staff found"
-        emptyDesc={
-          search || roleFilter
-            ? "Try adjusting your search or filter"
-            : "Add your first staff member to get started"
-        }
-      />
+      {/* DataTable */}
+      {!isLoading && (
+        <DataTable<StaffRow>
+          columns={columns}
+          data={rows}
+          loading={false}
+          pageSize={15}
+          keyField="id"
+          emptyTitle="No staff found"
+          emptyDesc={
+            search || roleFilter
+              ? "Try adjusting your search or filter"
+              : "Add your first staff member to get started"
+          }
+        />
+      )}
 
-      {/* ── Create modal ── */}
+      {/* Create modal */}
       {showCreate && (
         <CreateStaffModal
           branchId={selectedBranch}
@@ -665,7 +759,7 @@ export function StaffManagement() {
         />
       )}
 
-      {/* ── Edit modal ── */}
+      {/* Edit modal */}
       {editTarget && (
         <EditStaffModal
           staff={editTarget}
@@ -674,7 +768,7 @@ export function StaffManagement() {
         />
       )}
 
-      {/* ── Toggle access confirm dialog ── */}
+      {/* Toggle access confirm dialog */}
       <ConfirmDialog
         isOpen={toggleTarget !== null}
         title={toggleTarget?.is_active ? "Revoke Access?" : "Restore Access?"}
@@ -713,8 +807,7 @@ function SlideOver({
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm">
       <div className="bg-white w-full max-w-md shadow-2xl flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <div>
             <h2 className="font-bold text-gray-900">{title}</h2>
             {subtitle && (
@@ -728,8 +821,6 @@ function SlideOver({
             <X size={18} />
           </button>
         </div>
-
-        {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
       </div>
     </div>

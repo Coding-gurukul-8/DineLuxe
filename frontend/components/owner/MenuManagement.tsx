@@ -15,9 +15,12 @@ import {
   Loader2,
   X,
   Check,
+  AlertCircle,
+  GitBranch,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
+import { SkeletonCard } from "@/components/shared/SkeletonCard";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
@@ -41,9 +44,75 @@ interface MenuCategory {
   items: MenuItem[];
 }
 
+interface BranchOption {
+  id: string;
+  name: string;
+}
+
 // ── Query keys ─────────────────────────────────────────────────────────────────
 
 const categoriesKey = (branchId: string) => ["menu", "categories", branchId];
+const branchesKey = (restaurantId: string) => ["branches", restaurantId];
+
+// ── Branch selector (shown when owner has no assigned branch) ──────────────────
+
+function BranchSelector({
+  restaurantId,
+  onSelect,
+}: {
+  restaurantId: string;
+  onSelect: (branchId: string) => void;
+}) {
+  const { data: branches = [], isLoading, isError } = useQuery<BranchOption[]>({
+    queryKey: branchesKey(restaurantId),
+    queryFn: () => apiClient.get<BranchOption[]>("/branches"),
+    enabled: !!restaurantId,
+    staleTime: 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        <SkeletonCard variant="list-item" count={2} />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+        <AlertCircle size={16} />
+        Failed to load branches. Please refresh.
+      </div>
+    );
+  }
+
+  if (branches.length === 0) {
+    return (
+      <div className="py-10 text-center text-sm text-gray-400">
+        No branches found for your restaurant.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+        <GitBranch size={15} />
+        <span>Select a branch to manage its menu:</span>
+      </div>
+      {branches.map((branch) => (
+        <button
+          key={branch.id}
+          onClick={() => onSelect(branch.id)}
+          className="w-full text-left px-4 py-3 bg-white border border-gray-200 rounded-xl hover:border-[#1A3C5E] hover:bg-[#1A3C5E]/5 transition text-sm font-medium text-gray-800"
+        >
+          {branch.name}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // ── Inline "Add Category" form ─────────────────────────────────────────────────
 
@@ -122,7 +191,6 @@ function CategoryRow({
   const [open, setOpen] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<{ type: "cat" | "item"; id: string } | null>(null);
 
-  // Delete category
   const { mutate: deleteCat, isPending: deletingCat } = useMutation({
     mutationFn: (id: string) => apiClient.delete(`/menu/categories/${id}`),
     onSuccess: () => {
@@ -132,7 +200,6 @@ function CategoryRow({
     onError: () => toast.error("Failed to delete category"),
   });
 
-  // Toggle item availability
   const { mutate: toggleStatus } = useMutation({
     mutationFn: ({ id, is_available }: { id: string; is_available: boolean }) =>
       apiClient.patch(`/menu/items/${id}/status`, { is_available }),
@@ -140,7 +207,6 @@ function CategoryRow({
     onError: () => toast.error("Failed to update status"),
   });
 
-  // Delete item
   const { mutate: deleteItem } = useMutation({
     mutationFn: (id: string) => apiClient.delete(`/menu/items/${id}`),
     onSuccess: () => {
@@ -152,7 +218,6 @@ function CategoryRow({
 
   return (
     <>
-      {/* Category header */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div
           className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 transition"
@@ -189,7 +254,6 @@ function CategoryRow({
           </div>
         </div>
 
-        {/* Items */}
         <AnimatePresence initial={false}>
           {open && (
             <motion.div
@@ -205,9 +269,7 @@ function CategoryRow({
                     No items yet.{" "}
                     <button
                       onClick={() =>
-                        router.push(
-                          `/owner/menu/items/new?categoryId=${category.id}`
-                        )
+                        router.push(`/owner/menu/items/new?categoryId=${category.id}`)
                       }
                       className="text-[#1A3C5E] underline underline-offset-2"
                     >
@@ -221,26 +283,20 @@ function CategoryRow({
                     key={item.id}
                     className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/60 transition"
                   >
-                    {/* Image thumbnail */}
                     {item.image_url ? (
                       <img
                         src={item.image_url}
                         alt={item.name}
-                        className="w-10 h-10 rounded-lg object-cover flex-shrink-0 bg-gray-100"
+                        className="w-10 h-10 rounded-lg object-cover shrink-0 bg-gray-100"
                       />
                     ) : (
-                      <div className="w-10 h-10 rounded-lg bg-gray-100 flex-shrink-0" />
+                      <div className="w-10 h-10 rounded-lg bg-gray-100 shrink-0" />
                     )}
 
-                    {/* Name + description */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">
-                        {item.name}
-                      </p>
+                      <p className="text-sm font-medium text-gray-800 truncate">{item.name}</p>
                       {item.description && (
-                        <p className="text-xs text-gray-400 truncate">
-                          {item.description}
-                        </p>
+                        <p className="text-xs text-gray-400 truncate">{item.description}</p>
                       )}
                       {item.dietary_tags?.length > 0 && (
                         <div className="flex gap-1 mt-0.5 flex-wrap">
@@ -256,15 +312,13 @@ function CategoryRow({
                       )}
                     </div>
 
-                    {/* Price */}
-                    <span className="text-sm font-bold text-[#1A3C5E] flex-shrink-0">
+                    <span className="text-sm font-bold text-[#1A3C5E] shrink-0">
                       ₹{item.price.toLocaleString("en-IN")}
                     </span>
 
-                    {/* Status badge */}
                     <span
                       className={cn(
-                        "text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0",
+                        "text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0",
                         item.is_available
                           ? "bg-green-100 text-green-700"
                           : "bg-gray-100 text-gray-500"
@@ -273,9 +327,7 @@ function CategoryRow({
                       {item.is_available ? "Available" : "Unavailable"}
                     </span>
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      {/* Toggle availability */}
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         onClick={() =>
                           toggleStatus({ id: item.id, is_available: !item.is_available })
@@ -285,19 +337,13 @@ function CategoryRow({
                       >
                         {item.is_available ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
-
-                      {/* Edit */}
                       <button
-                        onClick={() =>
-                          router.push(`/owner/menu/items/${item.id}/edit`)
-                        }
+                        onClick={() => router.push(`/owner/menu/items/${item.id}/edit`)}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition"
                         title="Edit item"
                       >
                         <Pencil size={14} />
                       </button>
-
-                      {/* Delete */}
                       <button
                         onClick={() => setDeleteTarget({ type: "item", id: item.id })}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition"
@@ -309,13 +355,10 @@ function CategoryRow({
                   </div>
                 ))}
 
-                {/* Add item shortcut */}
                 <div className="px-4 py-2.5 border-t border-dashed border-gray-100">
                   <button
                     onClick={() =>
-                      router.push(
-                        `/owner/menu/items/new?categoryId=${category.id}`
-                      )
+                      router.push(`/owner/menu/items/new?categoryId=${category.id}`)
                     }
                     className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#1A3C5E] transition"
                   >
@@ -329,7 +372,6 @@ function CategoryRow({
         </AnimatePresence>
       </div>
 
-      {/* Confirm dialog */}
       <ConfirmDialog
         isOpen={deleteTarget !== null}
         title={deleteTarget?.type === "cat" ? "Delete Category?" : "Delete Item?"}
@@ -355,24 +397,56 @@ function CategoryRow({
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function MenuManagement() {
-  const { branchId } = useAuth();
+  const { branchId, restaurantId } = useAuth();
   const router = useRouter();
   const [showAddCategory, setShowAddCategory] = useState(false);
 
-  const selectedBranchId = branchId ?? "";
+  // FIX: when the owner has no assigned branch, let them pick one.
+  // `selectedBranchId` starts as the auth branchId (could be null for owners).
+  const [overrideBranchId, setOverrideBranchId] = useState<string | null>(null);
 
+  // Resolve: prefer explicit override, then auth-provided branchId
+  const selectedBranchId: string | null = overrideBranchId ?? branchId ?? null;
+
+  // FIX: use the correct backend route: GET /menu/branch/:branchId/categories
+  // Guard with `enabled: !!selectedBranchId` so we never fire with an empty string.
   const {
     data: categories = [],
     isLoading,
     isError,
   } = useQuery<MenuCategory[]>({
-    queryKey: categoriesKey(selectedBranchId),
+    queryKey: categoriesKey(selectedBranchId ?? ""),
     queryFn: () =>
-      apiClient.get<MenuCategory[]>(
-        `/menu/branch/${selectedBranchId}/categories`
-      ),
+      apiClient.get<MenuCategory[]>(`/menu/branch/${selectedBranchId}/categories`),
     enabled: !!selectedBranchId,
+    staleTime: 30_000,
   });
+
+  // ── When no branch is selected, show a branch picker ──────────────────────
+  if (!selectedBranchId) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h3 className="text-lg font-bold text-gray-900">Menu</h3>
+          <p className="text-sm text-gray-400 mt-0.5">
+            You don&apos;t have a default branch — select one to manage its menu.
+          </p>
+        </div>
+        {restaurantId ? (
+          <BranchSelector
+            restaurantId={restaurantId}
+            onSelect={(id) => setOverrideBranchId(id)}
+          />
+        ) : (
+          <div className="py-10 text-center text-sm text-gray-400">
+            Restaurant context not available. Please refresh.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Normal render (branch resolved) ───────────────────────────────────────
 
   return (
     <div className="space-y-5">
@@ -382,6 +456,15 @@ export function MenuManagement() {
           <h3 className="text-lg font-bold text-gray-900">Menu</h3>
           <p className="text-sm text-gray-400 mt-0.5">
             {categories.length} categor{categories.length !== 1 ? "ies" : "y"}
+            {/* If the owner manually picked a branch, show a "switch" link */}
+            {overrideBranchId && (
+              <button
+                onClick={() => setOverrideBranchId(null)}
+                className="ml-2 text-xs text-[#1A3C5E] underline underline-offset-2"
+              >
+                Switch branch
+              </button>
+            )}
           </p>
         </div>
 
@@ -399,6 +482,7 @@ export function MenuManagement() {
             <Plus size={15} />
             Category
           </button>
+          {/* FIX: "Add Item" navigates to /owner/menu/items/new */}
           <button
             onClick={() => router.push("/owner/menu/items/new")}
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-[#1A3C5E] text-white rounded-xl hover:bg-[#15304d] transition"
@@ -411,7 +495,7 @@ export function MenuManagement() {
 
       {/* Inline add-category form */}
       <AnimatePresence>
-        {showAddCategory && (
+        {showAddCategory && selectedBranchId && (
           <AddCategoryForm
             branchId={selectedBranchId}
             onDone={() => setShowAddCategory(false)}
@@ -422,18 +506,14 @@ export function MenuManagement() {
       {/* Loading */}
       {isLoading && (
         <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-16 rounded-xl bg-gray-100 animate-pulse"
-            />
-          ))}
+          <SkeletonCard variant="list-item" count={3} />
         </div>
       )}
 
       {/* Error */}
       {isError && (
-        <div className="py-10 text-center text-sm text-red-500">
+        <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+          <AlertCircle size={16} />
           Failed to load menu. Please refresh.
         </div>
       )}

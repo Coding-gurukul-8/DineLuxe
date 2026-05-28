@@ -1,6 +1,23 @@
 "use client";
 
-import { useState, useMemo } from "react";
+/**
+ * ReportsDashboard — owner panel
+ *
+ * Fixes vs. the old implementation
+ * ─────────────────────────────────
+ * 1. All four sub-tab queries now gate on `!!restaurantId` in addition to
+ *    `!!from && !!to`. Previously they fired immediately on mount (before auth
+ *    resolved), which sent unauthenticated requests that returned 401 errors
+ *    and showed the error banner on every page load.
+ * 2. `branchId` null is handled cleanly: when null the query param is omitted
+ *    entirely (backend interprets absence as "all branches for this restaurant")
+ *    rather than appending `branch_id=` (empty string), which some backends
+ *    treat as an invalid UUID.
+ * 3. Added a top-level loading skeleton (SkeletonCard) while `restaurantId`
+ *    is still resolving so the UI doesn't flash an error before auth settles.
+ */
+
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   LineChart,
@@ -28,7 +45,8 @@ import {
 
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { SkeletonCard } from "@/components/shared/SkeletonCard";
+import { formatCurrency } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -54,10 +72,10 @@ interface StaffReport {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: "revenue", label: "Revenue", icon: TrendingUp },
-  { id: "orders", label: "Orders", icon: ShoppingBag },
-  { id: "menu", label: "Menu", icon: UtensilsCrossed },
-  { id: "staff", label: "Staff", icon: Users },
+  { id: "revenue", label: "Revenue",  icon: TrendingUp },
+  { id: "orders",  label: "Orders",   icon: ShoppingBag },
+  { id: "menu",    label: "Menu",     icon: UtensilsCrossed },
+  { id: "staff",   label: "Staff",    icon: Users },
 ] as const;
 
 type Tab = (typeof TABS)[number]["id"];
@@ -74,6 +92,21 @@ function daysAgoISO(n: number) {
   const d = new Date();
   d.setDate(d.getDate() - n);
   return d.toISOString().split("T")[0];
+}
+
+/**
+ * FIX: build a query-string that omits branch_id entirely when null/undefined.
+ * Passing branch_id= (empty string) can cause a UUID parse error on the backend.
+ */
+function buildReportUrl(
+  path: string,
+  branchId: string | null,
+  from: string,
+  to: string
+): string {
+  const params = new URLSearchParams({ from, to });
+  if (branchId) params.set("branch_id", branchId);
+  return `${path}?${params.toString()}`;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -98,29 +131,30 @@ function ErrorBanner({ message }: { message?: string }) {
 // ── Revenue tab ───────────────────────────────────────────────────────────────
 
 function RevenueTab({
+  restaurantId,
   branchId,
   from,
   to,
 }: {
+  restaurantId: string;
   branchId: string | null;
   from: string;
   to: string;
 }) {
+  // FIX: gate on restaurantId so the query never fires before auth resolves
   const { data, isLoading, isError } = useQuery<RevenueReport>({
-    queryKey: ["reports", "revenue", branchId, from, to],
+    queryKey: ["reports", "revenue", restaurantId, branchId, from, to],
     queryFn: () =>
-      apiClient.get<RevenueReport>(
-        `/reports/revenue?branch_id=${branchId ?? ""}&from=${from}&to=${to}`
-      ),
-    enabled: !!from && !!to,
+      apiClient.get<RevenueReport>(buildReportUrl("/reports/revenue", branchId, from, to)),
+    enabled: !!restaurantId && !!from && !!to,
     staleTime: 5 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingOverlay />;
-  if (isError) return <ErrorBanner />;
+  if (isError)   return <ErrorBanner />;
 
   const chartData = (data?.breakdown ?? []).map((row) => ({
-    date: row.date,
+    date:   row.date,
     amount: row.amount,
     label: (() => {
       const d = new Date(row.date);
@@ -130,7 +164,6 @@ function RevenueTab({
 
   return (
     <div className="space-y-5">
-      {/* Summary pill */}
       <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#1A3C5E]/5 border border-[#1A3C5E]/10 rounded-full">
         <TrendingUp size={14} className="text-[#1A3C5E]" />
         <span className="text-sm font-semibold text-[#1A3C5E]">
@@ -138,20 +171,16 @@ function RevenueTab({
         </span>
       </div>
 
-      {/* Line chart */}
       {chartData.length === 0 ? (
         <div className="h-64 flex items-center justify-center text-sm text-gray-400">
           No revenue data for this period.
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={260}>
-          <LineChart
-            data={chartData}
-            margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-          >
+          <LineChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#1A3C5E" stopOpacity={0.15} />
+                <stop offset="5%"  stopColor="#1A3C5E" stopOpacity={0.15} />
                 <stop offset="95%" stopColor="#1A3C5E" stopOpacity={0} />
               </linearGradient>
             </defs>
@@ -197,36 +226,37 @@ function RevenueTab({
 // ── Orders tab ────────────────────────────────────────────────────────────────
 
 const PIE_LABELS: Record<string, string> = {
-  dine_in: "Dine-in",
+  dine_in:  "Dine-in",
   takeaway: "Takeaway",
   delivery: "Delivery",
 };
 
 function OrdersTab({
+  restaurantId,
   branchId,
   from,
   to,
 }: {
+  restaurantId: string;
   branchId: string | null;
   from: string;
   to: string;
 }) {
+  // FIX: gate on restaurantId
   const { data, isLoading, isError } = useQuery<OrdersReport>({
-    queryKey: ["reports", "orders", branchId, from, to],
+    queryKey: ["reports", "orders", restaurantId, branchId, from, to],
     queryFn: () =>
-      apiClient.get<OrdersReport>(
-        `/reports/orders?branch_id=${branchId ?? ""}&from=${from}&to=${to}`
-      ),
-    enabled: !!from && !!to,
+      apiClient.get<OrdersReport>(buildReportUrl("/reports/orders", branchId, from, to)),
+    enabled: !!restaurantId && !!from && !!to,
     staleTime: 5 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingOverlay />;
-  if (isError) return <ErrorBanner />;
+  if (isError)   return <ErrorBanner />;
 
   const pieData = data
     ? Object.entries(data.by_type).map(([key, val]) => ({
-        name: PIE_LABELS[key] ?? key,
+        name:  PIE_LABELS[key] ?? key,
         value: val,
       }))
     : [];
@@ -282,7 +312,6 @@ function OrdersTab({
         </div>
       )}
 
-      {/* Breakdown table */}
       {data && (
         <div className="grid grid-cols-3 gap-3">
           {Object.entries(data.by_type).map(([key, val], idx) => (
@@ -291,7 +320,7 @@ function OrdersTab({
               className="rounded-xl px-4 py-3 border text-center"
               style={{
                 borderColor: PALETTE[idx % PALETTE.length] + "33",
-                background: PALETTE[idx % PALETTE.length] + "0a",
+                background:  PALETTE[idx % PALETTE.length] + "0a",
               }}
             >
               <p
@@ -312,26 +341,27 @@ function OrdersTab({
 // ── Menu tab ──────────────────────────────────────────────────────────────────
 
 function MenuTab({
+  restaurantId,
   branchId,
   from,
   to,
 }: {
+  restaurantId: string;
   branchId: string | null;
   from: string;
   to: string;
 }) {
+  // FIX: gate on restaurantId
   const { data, isLoading, isError } = useQuery<MenuReport>({
-    queryKey: ["reports", "menu", branchId, from, to],
+    queryKey: ["reports", "menu", restaurantId, branchId, from, to],
     queryFn: () =>
-      apiClient.get<MenuReport>(
-        `/reports/menu?branch_id=${branchId ?? ""}&from=${from}&to=${to}`
-      ),
-    enabled: !!from && !!to,
+      apiClient.get<MenuReport>(buildReportUrl("/reports/menu", branchId, from, to)),
+    enabled: !!restaurantId && !!from && !!to,
     staleTime: 5 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingOverlay />;
-  if (isError) return <ErrorBanner />;
+  if (isError)   return <ErrorBanner />;
 
   const items = data?.top_items ?? [];
 
@@ -343,7 +373,10 @@ function MenuTab({
         </div>
       ) : (
         <>
-          <ResponsiveContainer width="100%" height={Math.max(220, items.length * 42)}>
+          <ResponsiveContainer
+            width="100%"
+            height={Math.max(220, items.length * 42)}
+          >
             <BarChart
               layout="vertical"
               data={items.map((i) => ({ ...i, label: i.name }))}
@@ -377,11 +410,16 @@ function MenuTab({
                   fontSize: 13,
                 }}
               />
-              <Bar dataKey="count" fill="#1A3C5E" radius={[0, 4, 4, 0]} maxBarSize={18} name="Orders" />
+              <Bar
+                dataKey="count"
+                fill="#1A3C5E"
+                radius={[0, 4, 4, 0]}
+                maxBarSize={18}
+                name="Orders"
+              />
             </BarChart>
           </ResponsiveContainer>
 
-          {/* Revenue column alongside */}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
@@ -399,9 +437,7 @@ function MenuTab({
               <tbody className="divide-y divide-gray-50">
                 {items.map((item, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    <td className="px-5 py-3 font-medium text-gray-800">
-                      {item.name}
-                    </td>
+                    <td className="px-5 py-3 font-medium text-gray-800">{item.name}</td>
                     <td className="px-5 py-3 text-gray-600">{item.count}</td>
                     <td className="px-5 py-3 font-semibold text-[#1A3C5E]">
                       {formatCurrency(item.revenue)}
@@ -420,26 +456,27 @@ function MenuTab({
 // ── Staff tab ─────────────────────────────────────────────────────────────────
 
 function StaffTab({
+  restaurantId,
   branchId,
   from,
   to,
 }: {
+  restaurantId: string;
   branchId: string | null;
   from: string;
   to: string;
 }) {
+  // FIX: gate on restaurantId
   const { data, isLoading, isError } = useQuery<StaffReport>({
-    queryKey: ["reports", "staff", branchId, from, to],
+    queryKey: ["reports", "staff", restaurantId, branchId, from, to],
     queryFn: () =>
-      apiClient.get<StaffReport>(
-        `/reports/staff?branch_id=${branchId ?? ""}&from=${from}&to=${to}`
-      ),
-    enabled: !!from && !!to,
+      apiClient.get<StaffReport>(buildReportUrl("/reports/staff", branchId, from, to)),
+    enabled: !!restaurantId && !!from && !!to,
     staleTime: 5 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingOverlay />;
-  if (isError) return <ErrorBanner />;
+  if (isError)   return <ErrorBanner />;
 
   const staff = data?.staff_performance ?? [];
 
@@ -471,7 +508,6 @@ function StaffTab({
                 .slice()
                 .sort((a, b) => b.orders - a.orders)
                 .map((member, i) => {
-                  // Efficiency: inverse of avg_time relative to group avg
                   const avgTime =
                     staff.reduce((s, m) => s + m.avg_time, 0) / (staff.length || 1);
                   const efficiency =
@@ -486,9 +522,7 @@ function StaffTab({
                           <div className="w-8 h-8 rounded-full bg-[#1A3C5E]/10 flex items-center justify-center text-xs font-bold text-[#1A3C5E]">
                             {member.name.slice(0, 2).toUpperCase()}
                           </div>
-                          <span className="font-medium text-gray-800">
-                            {member.name}
-                          </span>
+                          <span className="font-medium text-gray-800">{member.name}</span>
                         </div>
                       </td>
                       <td className="px-5 py-3 font-semibold text-gray-800">
@@ -499,7 +533,7 @@ function StaffTab({
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 h-2 bg-gray-100 rounded-full max-w-[80px]">
+                          <div className="flex-1 h-2 bg-gray-100 rounded-full max-w-20">
                             <div
                               className="h-2 rounded-full"
                               style={{
@@ -541,17 +575,16 @@ function StaffTab({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function ReportsDashboard() {
-  const { branchId } = useAuth();
+  // FIX: pull restaurantId in addition to branchId — it is required as a
+  // query guard so reports don't fire before the auth token is resolved.
+  const { branchId, restaurantId } = useAuth();
 
   const [activeTab, setActiveTab] = useState<Tab>("revenue");
-
-  // Date range — default: last 30 days
   const [from, setFrom] = useState(daysAgoISO(30));
-  const [to, setTo] = useState(todayISO());
+  const [to, setTo]     = useState(todayISO());
 
-  // Quick presets
   const presets = [
-    { label: "7d", days: 7 },
+    { label: "7d",  days: 7  },
     { label: "30d", days: 30 },
     { label: "90d", days: 90 },
   ] as const;
@@ -560,6 +593,16 @@ export function ReportsDashboard() {
     setFrom(daysAgoISO(days));
     setTo(todayISO());
   };
+
+  // FIX: show a skeleton while restaurantId is still resolving (auth loading)
+  if (!restaurantId) {
+    return (
+      <div className="space-y-4">
+        <SkeletonCard variant="stat" count={1} />
+        <SkeletonCard variant="card" count={1} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -639,18 +682,39 @@ export function ReportsDashboard() {
       </div>
 
       {/* Tab content */}
+      {/* FIX: pass restaurantId down to each tab so they can gate their queries */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
         {activeTab === "revenue" && (
-          <RevenueTab branchId={branchId} from={from} to={to} />
+          <RevenueTab
+            restaurantId={restaurantId}
+            branchId={branchId}
+            from={from}
+            to={to}
+          />
         )}
         {activeTab === "orders" && (
-          <OrdersTab branchId={branchId} from={from} to={to} />
+          <OrdersTab
+            restaurantId={restaurantId}
+            branchId={branchId}
+            from={from}
+            to={to}
+          />
         )}
         {activeTab === "menu" && (
-          <MenuTab branchId={branchId} from={from} to={to} />
+          <MenuTab
+            restaurantId={restaurantId}
+            branchId={branchId}
+            from={from}
+            to={to}
+          />
         )}
         {activeTab === "staff" && (
-          <StaffTab branchId={branchId} from={from} to={to} />
+          <StaffTab
+            restaurantId={restaurantId}
+            branchId={branchId}
+            from={from}
+            to={to}
+          />
         )}
       </div>
     </div>
