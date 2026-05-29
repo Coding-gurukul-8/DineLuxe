@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMe = getMe;
 exports.updateMe = updateMe;
+exports.deleteMe = deleteMe;
 exports.getUserById = getUserById;
 exports.checkEmail = checkEmail;
 const usersService = __importStar(require("./users.service"));
@@ -56,6 +57,17 @@ async function updateMe(req, res, next) {
         const authReq = req;
         const updated = await usersService.updateMe(authReq.user.id, req.body);
         res.json((0, response_1.success)(updated, 'Profile updated'));
+    }
+    catch (err) {
+        next(err);
+    }
+}
+// DELETE /users/me
+async function deleteMe(req, res, next) {
+    try {
+        const authReq = req;
+        const result = await usersService.deleteMe(authReq.user.id);
+        res.json((0, response_1.success)(result, 'Account deactivated'));
     }
     catch (err) {
         next(err);

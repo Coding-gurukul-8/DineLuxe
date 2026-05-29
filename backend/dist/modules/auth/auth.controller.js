@@ -40,13 +40,15 @@ exports.logoutController = logoutController;
 exports.refreshController = refreshController;
 exports.forgotPasswordController = forgotPasswordController;
 exports.resetPasswordController = resetPasswordController;
+exports.changePasswordController = changePasswordController;
 exports.checkEmailController = checkEmailController;
+exports.sendVerificationOtpController = sendVerificationOtpController;
 const authService = __importStar(require("./auth.service"));
 const response_1 = require("../../utils/response");
 async function signupController(req, res, next) {
     try {
         const result = await authService.signup(req.body);
-        res.status(202).json((0, response_1.success)(result, 'OTP sent. Please verify your email.'));
+        res.status(201).json((0, response_1.success)(result, 'Account created. You can verify your email later.'));
     }
     catch (err) {
         next(err);
@@ -55,7 +57,7 @@ async function signupController(req, res, next) {
 async function verifyOtpController(req, res, next) {
     try {
         const result = await authService.verifyOtp(req.body);
-        res.status(201).json((0, response_1.success)(result, 'Account verified and created successfully.'));
+        res.status(200).json((0, response_1.success)(result, 'Email verified successfully.'));
     }
     catch (err) {
         next(err);
@@ -107,6 +109,15 @@ async function resetPasswordController(req, res, next) {
         next(err);
     }
 }
+async function changePasswordController(req, res, next) {
+    try {
+        const result = await authService.changePassword(req.user?.id ?? '', req.body);
+        res.status(200).json((0, response_1.success)(result));
+    }
+    catch (err) {
+        next(err);
+    }
+}
 async function checkEmailController(req, res, next) {
     try {
         // BUG FIX: normalise email before querying so "User@Email.Com" and
@@ -121,6 +132,15 @@ async function checkEmailController(req, res, next) {
         if (dbError)
             throw dbError;
         res.status(200).json((0, response_1.success)({ available: !data }, data ? 'Email is taken.' : 'Email is available.'));
+    }
+    catch (err) {
+        next(err);
+    }
+}
+async function sendVerificationOtpController(req, res, next) {
+    try {
+        const result = await authService.sendVerificationOtp(req.body);
+        res.status(200).json((0, response_1.success)(result, 'Verification OTP sent successfully.'));
     }
     catch (err) {
         next(err);

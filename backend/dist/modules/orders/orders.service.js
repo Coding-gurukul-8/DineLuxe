@@ -3,11 +3,35 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createOrder = createOrder;
 exports.getOrderById = getOrderById;
 exports.getOrdersByTable = getOrdersByTable;
+exports.getMyOrders = getMyOrders;
+exports.getStaffOrders = getStaffOrders;
 exports.getActiveBranchOrders = getActiveBranchOrders;
 exports.cancelOrder = cancelOrder;
 const supabase_1 = require("../../config/supabase");
 const redis_1 = require("../../config/redis");
+const pagination_1 = require("../../utils/pagination");
 const waiter_assign_1 = require("../../utils/waiter-assign");
+const ACTIVE_CUSTOMER_STATUSES = ['created', 'confirmed', 'preparing', 'ready'];
+const PAST_CUSTOMER_STATUSES = ['served', 'paid', 'closed', 'cancelled'];
+const ACTIVE_STAFF_STATUSES = ['created', 'confirmed', 'preparing', 'ready', 'served'];
+function normalizeOrderItems(items) {
+    const normalized = (items ?? []).map((item) => {
+        const unitPrice = Number(item.unit_price ?? item.menu_items?.price ?? 0);
+        return {
+            id: item.id,
+            quantity: Number(item.quantity ?? 0),
+            unitPrice,
+            price: unitPrice,
+            status: item.status ?? undefined,
+            notes: item.notes ?? undefined,
+            specialRequests: item.notes ?? undefined,
+            name: item.menu_items?.name ?? 'Item',
+            menuItem: item.menu_items ?? undefined,
+        };
+    });
+    const total = normalized.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+    return { items: normalized, total };
+}
 // ─── Create Order ────────────────────────────────────────────────────────────
 async function createOrder(input, restaurantId, branchId, createdBy, customerIdOverride) {
     const { table_id, order_type, items, special_instructions } = input;
@@ -139,13 +163,18 @@ async function deductInventory(branchId, items) {
     }
 }
 // ─── Get Order by ID ─────────────────────────────────────────────────────────
-async function getOrderById(orderId, branchId) {
-    const { data, error } = await supabase_1.supabaseAdmin
+async function getOrderById(orderId, branchId, userId) {
+    let query = supabase_1.supabaseAdmin
         .from('orders')
         .select('*, order_items(*, menu_items(name, price))')
-        .eq('id', orderId)
-        .eq('branch_id', branchId)
-        .single();
+        .eq('id', orderId);
+    if (branchId) {
+        query = query.eq('branch_id', branchId);
+    }
+    else if (userId) {
+        query = query.eq('customer_id', userId);
+    }
+    const { data, error } = await query.single();
     if (error || !data) {
         throw Object.assign(new Error('Order not found'), { statusCode: 404 });
     }
@@ -167,6 +196,95 @@ async function getOrdersByTable(tableId, branchId) {
     if (error)
         throw error;
     return data ?? [];
+}
+// ─── Get orders for current customer ─────────────────────────────────────────
+async function getMyOrders(userId, branchId, query) {
+    const { page, limit, offset } = (0, pagination_1.parsePagination)(query);
+    let request = supabase_1.supabaseAdmin
+        .from('orders')
+        .select('*, tables(label), branches(name), order_items(id, quantity, unit_price, notes, status, menu_items(name, price))', { count: 'exact' })
+        .eq('customer_id', userId);
+    if (branchId) {
+        request = request.eq('branch_id', branchId);
+    }
+    const status = query.status;
+    if (status === 'active') {
+        request = request.in('status', ACTIVE_CUSTOMER_STATUSES);
+    }
+    else if (status === 'past') {
+        request = request.in('status', PAST_CUSTOMER_STATUSES);
+    }
+    else if (status) {
+        request = request.eq('status', status);
+    }
+    const { data, error, count } = await request
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+    if (error)
+        throw error;
+    const normalized = (data ?? []).map((order) => {
+        const { items, total } = normalizeOrderItems(order.order_items);
+        return {
+            ...order,
+            items,
+            total,
+            totalAmount: total,
+            branch: order.branches ?? null,
+            table: order.tables ?? null,
+        };
+    });
+    return { data: normalized, total: count ?? 0, page, limit };
+}
+// ─── Get staff orders for branch ─────────────────────────────────────────────
+async function getStaffOrders(branchId, query) {
+    const { page, limit, offset } = (0, pagination_1.parsePagination)(query);
+    if (!branchId) {
+        return { data: [], total: 0, page, limit };
+    }
+    let request = supabase_1.supabaseAdmin
+        .from('orders')
+        .select('*, tables(label), order_items(id, quantity, unit_price, notes, status, menu_items(name, price))', { count: 'exact' })
+        .eq('branch_id', branchId);
+    const status = query.status;
+    if (!status || status === 'active') {
+        request = request.in('status', ACTIVE_STAFF_STATUSES);
+    }
+    else if (status === 'past') {
+        request = request.in('status', PAST_CUSTOMER_STATUSES);
+    }
+    else {
+        request = request.eq('status', status);
+    }
+    const { data, error, count } = await request
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+    if (error)
+        throw error;
+    const customerIds = Array.from(new Set((data ?? []).map((order) => order.customer_id).filter(Boolean)));
+    let customerNameById = {};
+    if (customerIds.length > 0) {
+        const { data: customers } = await supabase_1.supabaseAdmin
+            .from('users')
+            .select('id, name')
+            .in('id', customerIds);
+        customerNameById = Object.fromEntries((customers ?? []).map((user) => [user.id, user.name]));
+    }
+    const normalized = (data ?? []).map((order) => {
+        const { items, total } = normalizeOrderItems(order.order_items);
+        const orderNumber = order.id ? String(order.id).slice(-6).toUpperCase() : '';
+        const customerName = order.customer_id ? customerNameById[order.customer_id] : undefined;
+        return {
+            ...order,
+            items,
+            total,
+            totalAmount: total,
+            orderNumber,
+            customerName: customerName ?? 'Guest',
+            tableNumber: order.tables?.label ?? undefined,
+            createdAt: order.created_at,
+        };
+    });
+    return { data: normalized, total: count ?? 0, page, limit };
 }
 // ─── Get Active Orders for Branch ────────────────────────────────────────────
 async function getActiveBranchOrders(branchId) {

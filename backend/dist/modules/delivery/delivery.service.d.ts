@@ -15,6 +15,13 @@ export declare function updatePartnerLocation(partnerId: string, lat: number, lo
     retry_after_seconds?: undefined;
 }>;
 export declare function getActiveDelivery(partnerId: string): Promise<any>;
+export declare function getDeliveryStatus(deliveryId: string): Promise<{
+    error: true;
+} & "Received a generic string">;
+export declare function getActiveDeliveriesForBranch(branchId: string): Promise<({
+    error: true;
+} & "Received a generic string")[]>;
+export declare function completeDelivery(deliveryId: string): Promise<any>;
 export declare function getPartnerEarnings(partnerId: string): Promise<{
     deliveries: {
         id: any;

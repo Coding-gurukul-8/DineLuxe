@@ -35,5 +35,11 @@ router.patch('/:id/status', (0, rbac_middleware_1.requireRole)('delivery_partner
         status: zod_1.z.enum(['accepted', 'rejected', 'picked_up', 'delivered', 'failed']),
     }),
 }), delivery_controller_1.handleUpdateDeliveryStatus);
+// GET /delivery/:id/status — manager/owner views full delivery status with partner info
+router.get('/:id/status', (0, rbac_middleware_1.requireRole)('manager', 'owner', 'admin'), delivery_controller_1.handleGetDeliveryStatus);
+// GET /delivery/branch/:branchId/active — list all active deliveries for a branch
+router.get('/branch/:branchId/active', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('manager', 'owner', 'admin'), delivery_controller_1.handleGetActiveDeliveriesForBranch);
+// POST /delivery/:id/complete — manager/owner force-completes a delivery
+router.post('/:id/complete', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('manager', 'owner'), delivery_controller_1.handleCompleteDelivery);
 exports.default = router;
 //# sourceMappingURL=delivery.routes.js.map

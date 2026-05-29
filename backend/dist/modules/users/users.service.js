@@ -2,9 +2,14 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMe = getMe;
 exports.updateMe = updateMe;
+exports.deleteMe = deleteMe;
 exports.getUserById = getUserById;
 exports.checkEmail = checkEmail;
 const supabase_1 = require("../../config/supabase");
+const redis_1 = require("../../config/redis");
+function refreshTokenKey(userId) {
+    return `refresh_token:${userId}`;
+}
 function splitName(name) {
     const parts = (name ?? '').trim().split(' ').filter(Boolean);
     if (parts.length === 0)
@@ -98,6 +103,17 @@ async function updateMe(userId, updates) {
     if (error)
         throw new Error(`Failed to update profile: ${error.message}`);
     return mapUserRow(data);
+}
+// ─── Deactivate Account ─────────────────────────────────────────────────────
+async function deleteMe(userId) {
+    const { error } = await supabase_1.supabaseAdmin
+        .from('users')
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+    if (error)
+        throw new Error(`Failed to deactivate account: ${error.message}`);
+    await redis_1.redis.del(refreshTokenKey(userId));
+    return { deleted: true };
 }
 // ─── Get User By ID (admin / manager) ──────────────────────────────────────
 async function getUserById(userId, restaurantId) {

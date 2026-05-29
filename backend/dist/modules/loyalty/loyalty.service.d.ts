@@ -16,4 +16,27 @@ export declare function getHistory(userId: string, page: number, limit: number):
     data: any[];
     count: number;
 }>;
+export declare function getCustomerLoyalty(userId: string): Promise<{
+    user_id: string;
+    points_balance: number;
+    total_earned: number;
+    tier: string;
+    next_tier: string | null;
+    points_to_next_tier: number | null;
+    accounts: {
+        id: any;
+        restaurant_id: any;
+        points_balance: any;
+        total_earned: any;
+    }[];
+    history: any[];
+}>;
+export declare function awardPoints(userId: string, orderId: string, amount: number): Promise<{
+    points_earned: number;
+    new_balance: number;
+}>;
+export declare function redeemPoints(userId: string, points: number, orderId: string): Promise<{
+    discount_amount: number;
+    new_balance: number;
+}>;
 //# sourceMappingURL=loyalty.service.d.ts.map

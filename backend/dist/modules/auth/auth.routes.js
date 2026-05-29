@@ -16,6 +16,8 @@ router.post('/logout', auth_middleware_1.authenticate, auth_controller_1.logoutC
 router.post('/refresh', (0, validate_middleware_1.validate)(auth_schema_1.refreshTokenSchema), auth_controller_1.refreshController);
 router.post('/forgot-password', (0, validate_middleware_1.validate)(auth_schema_1.forgotPasswordSchema), auth_controller_1.forgotPasswordController);
 router.post('/reset-password', (0, validate_middleware_1.validate)(auth_schema_1.resetPasswordSchema), auth_controller_1.resetPasswordController);
+router.post('/change-password', auth_middleware_1.authenticate, (0, validate_middleware_1.validate)(auth_schema_1.changePasswordSchema), auth_controller_1.changePasswordController);
+router.post('/send-otp', (0, validate_middleware_1.validate)(auth_schema_1.requestOtpSchema), auth_controller_1.sendVerificationOtpController);
 router.get('/check-email', auth_controller_1.checkEmailController);
 exports.default = router;
 //# sourceMappingURL=auth.routes.js.map

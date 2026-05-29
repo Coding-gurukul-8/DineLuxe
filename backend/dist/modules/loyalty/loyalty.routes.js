@@ -7,6 +7,8 @@ const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticate);
 // GET /loyalty/balance — returns balance for the authenticated user (own data only)
 router.get('/balance', loyalty_controller_1.getBalance);
+// GET /loyalty/me — alias used by customer home page; returns combined balance + summary
+router.get('/me', loyalty_controller_1.getBalance);
 // POST /loyalty/earn
 router.post('/earn', loyalty_controller_1.earnPoints);
 // POST /loyalty/redeem

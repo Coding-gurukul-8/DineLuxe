@@ -11,11 +11,11 @@ const response_1 = require("../utils/response");
 function injectTenant(req, res, next) {
     const restaurantId = req.user?.restaurant_id;
     const branchId = req.user?.branch_id;
-    if (!restaurantId) {
+    if (!restaurantId && req.user?.role !== 'customer') {
         res.status(403).json((0, response_1.error)('NO_TENANT_CONTEXT', 'No restaurant context found in token. Access denied.'));
         return;
     }
-    req.restaurantId = restaurantId;
+    req.restaurantId = restaurantId ?? '';
     req.branchId = branchId ?? '';
     next();
 }

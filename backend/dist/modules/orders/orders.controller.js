@@ -1,11 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleCreateOrder = handleCreateOrder;
+exports.handleGetMyOrders = handleGetMyOrders;
+exports.handleGetStaffOrders = handleGetStaffOrders;
 exports.handleGetOrder = handleGetOrder;
 exports.handleGetOrdersByTable = handleGetOrdersByTable;
 exports.handleGetActiveBranchOrders = handleGetActiveBranchOrders;
 exports.handleCancelOrder = handleCancelOrder;
 const response_1 = require("../../utils/response");
+const pagination_1 = require("../../utils/pagination");
 const orders_service_1 = require("./orders.service");
 const STAFF_ORDER_ROLES = ['waiter', 'manager', 'owner', 'cashier', 'host'];
 async function handleCreateOrder(req, res, next) {
@@ -24,9 +27,27 @@ async function handleCreateOrder(req, res, next) {
         next(err);
     }
 }
+async function handleGetMyOrders(req, res, next) {
+    try {
+        const { data, total, page, limit } = await (0, orders_service_1.getMyOrders)(req.user.id, req.branchId, req.query);
+        res.json((0, response_1.success)(data, (0, pagination_1.buildPaginationMeta)(total, page, limit)));
+    }
+    catch (err) {
+        next(err);
+    }
+}
+async function handleGetStaffOrders(req, res, next) {
+    try {
+        const { data, total, page, limit } = await (0, orders_service_1.getStaffOrders)(req.branchId ?? '', req.query);
+        res.json((0, response_1.success)(data, (0, pagination_1.buildPaginationMeta)(total, page, limit)));
+    }
+    catch (err) {
+        next(err);
+    }
+}
 async function handleGetOrder(req, res, next) {
     try {
-        const order = await (0, orders_service_1.getOrderById)(req.params.id, req.branchId);
+        const order = await (0, orders_service_1.getOrderById)(req.params.id, req.branchId, req.user?.id);
         res.json((0, response_1.success)(order));
     }
     catch (err) {

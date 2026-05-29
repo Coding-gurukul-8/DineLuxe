@@ -228,6 +228,50 @@ export default function RestaurantPage({ params }: Props) {
   const categories = [...menuData].sort((a, b) => a.display_order - b.display_order);
   const selectedCat = activeCategoryId ?? categories[0]?.id ?? null;
 
+  function CategorySection({
+    cat,
+    selectedCat,
+    getItemQty,
+    handleCartUpdate,
+  }: {
+    cat: MenuCategory;
+    selectedCat: string | null;
+    getItemQty: (id: string) => number;
+    handleCartUpdate: (item: ReturnType<typeof normalizeItem>, newQty: number) => void;
+  }) {
+    const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.05 });
+    return (
+      <section key={cat.id} id={`cat-${cat.id}`} ref={ref}>
+        <div className="flex items-center gap-2 mb-4">
+          <h2 className="text-base font-bold text-gray-900">{cat.name}</h2>
+          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{cat.items.length}</span>
+        </div>
+        <motion.div
+          initial="hidden"
+          animate={inView ? "visible" : "hidden"}
+          variants={{ visible: { transition: { staggerChildren: 0.07 } } }}
+          className="space-y-3"
+        >
+          {cat.items.map((rawItem) => {
+            const item = normalizeItem(rawItem);
+            return (
+              <motion.div
+                key={item.id}
+                variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 260 } } }}
+              >
+                <FoodCard
+                  item={item}
+                  quantity={getItemQty(item.id)}
+                  onAddToCart={(_id, newQty) => handleCartUpdate(item, newQty)}
+                />
+              </motion.div>
+            );
+          })}
+        </motion.div>
+      </section>
+    );
+  }
+
   function getItemQty(itemId: string) {
     return cartItems.find((i) => i.id === itemId)?.quantity ?? 0;
   }
@@ -378,39 +422,15 @@ export default function RestaurantPage({ params }: Props) {
                 </div>
 
                 <div className="px-4 py-4 space-y-8">
-                  {categories.map((cat) => {
-                    const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.05 });
-                    return (
-                      <section key={cat.id} id={`cat-${cat.id}`} ref={ref}>
-                        <div className="flex items-center gap-2 mb-4">
-                          <h2 className="text-base font-bold text-gray-900">{cat.name}</h2>
-                          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{cat.items.length}</span>
-                        </div>
-                        <motion.div
-                          initial="hidden"
-                          animate={inView ? "visible" : "hidden"}
-                          variants={{ visible: { transition: { staggerChildren: 0.07 } } }}
-                          className="space-y-3"
-                        >
-                          {cat.items.map((rawItem) => {
-                            const item = normalizeItem(rawItem);
-                            return (
-                              <motion.div
-                                key={item.id}
-                                variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 260 } } }}
-                              >
-                                <FoodCard
-                                  item={item}
-                                  quantity={getItemQty(item.id)}
-                                  onAddToCart={(_id, newQty) => handleCartUpdate(item, newQty)}
-                                />
-                              </motion.div>
-                            );
-                          })}
-                        </motion.div>
-                      </section>
-                    );
-                  })}
+                  {categories.map((cat) => (
+                    <CategorySection
+                      key={cat.id}
+                      cat={cat}
+                      selectedCat={selectedCat}
+                      getItemQty={getItemQty}
+                      handleCartUpdate={handleCartUpdate}
+                    />
+                  ))}
                 </div>
               </>
             )}

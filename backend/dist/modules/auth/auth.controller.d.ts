@@ -6,5 +6,7 @@ export declare function logoutController(req: Request, res: Response, next: Next
 export declare function refreshController(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function forgotPasswordController(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function resetPasswordController(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function changePasswordController(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function checkEmailController(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function sendVerificationOtpController(req: Request, res: Response, next: NextFunction): Promise<void>;
 //# sourceMappingURL=auth.controller.d.ts.map

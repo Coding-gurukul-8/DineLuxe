@@ -46,6 +46,8 @@ router.get('/check-email', ctrl.checkEmail);
 // Authenticated
 router.get('/me', auth_middleware_1.authenticate, ctrl.getMe);
 router.patch('/me', auth_middleware_1.authenticate, (0, validate_middleware_1.validate)(users_schema_1.updateProfileSchema), ctrl.updateMe);
+router.put('/me', auth_middleware_1.authenticate, (0, validate_middleware_1.validate)(users_schema_1.updateProfileSchema), ctrl.updateMe);
+router.delete('/me', auth_middleware_1.authenticate, ctrl.deleteMe);
 // Manager / Owner / Admin only
 // BUG FIX: injectTenant added so restaurantId is always on req and the
 // getUserById controller doesn't need a fragile JWT fallback.

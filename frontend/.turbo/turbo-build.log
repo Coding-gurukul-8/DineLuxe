@@ -1,57 +1,130 @@
 
-> dineluxe-frontend@0.1.0 build D:\CODES\DineLuxe\frontend
+
+> dineluxe-frontend@0.1.0 build /Users/priyanshugupta/Desktop/Code/Web_Developoment/1._HTML_CSS/Projects/DineLuxe/frontend
 > next build
 
-   ▲ Next.js 15.3.2
+   [1m[38;2;173;127;168m▲ Next.js 15.3.2[39m[22m
    - Environments: .env.local
 
-   Creating an optimized production build ...
-Failed to compile.
+ [37m[1m [22m[39m Creating an optimized production build ...
+ [32m[1m✓[22m[39m Compiled successfully in 12.0s
+[?25l [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m.[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m..[39m[2K[1G [37m[1m [22m[39m Linting and checking validity of types  [36m...[39m[2K[1G[?25h [37m[1m [22m[39m Linting and checking validity of types     [32m[1m✓[22m[39m Linting and checking validity of types 
+[?25l [37m[1m [22m[39m Collecting page data  [36m.[39m[2K[1G [37m[1m [22m[39m Collecting page data  [36m..[39m[2K[1G [37m[1m [22m[39m Collecting page data  [36m...[39m[2K[1G [37m[1m [22m[39m Collecting page data  [36m.[39m[2K[1G[?25h [37m[1m [22m[39m Collecting page data     [32m[1m✓[22m[39m Collecting page data 
+[?25l [37m[1m [22m[39m Generating static pages (0/87)  [36m[    ][39m[2K[1G [37m[1m [22m[39m Generating static pages (0/87)  [36m[=   ][39m[2K[1G [37m[1m [22m[39m Generating static pages (0/87)  [36m[==  ][39m[2K[1G [37m[1m [22m[39m Generating static pages (0/87)  [36m[=== ][39m[2K[1G [37m[1m [22m[39m Generating static pages (0/87)  [36m[ ===][39m[2K[1G [37m[1m [22m[39m Generating static pages (1/87)  [36m[  ==][39m[2K[1G [37m[1m [22m[39m Generating static pages (53/87)  [36m[   =][39m[2K[1G[?25h [32m[1m✓[22m[39m Generating static pages (87/87)
+[?25l [37m[1m [22m[39m Finalizing page optimization  [36m.[39m[?25l [37m[1m [22m[39m Collecting build traces  [36m.[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m..[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m..[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m...[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m...[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m.[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m.[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m..[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m..[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m...[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m...[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m.[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m.[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m..[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m..[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m...[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m...[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m.[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m.[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m..[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m..[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m...[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m...[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m.[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m.[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m..[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m..[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m...[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m...[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m.[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m.[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m..[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m..[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m...[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m...[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m.[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m.[39m[2K[1G [37m[1m [22m[39m Finalizing page optimization  [36m..[39m[2K[1G [37m[1m [22m[39m Collecting build traces  [36m..[39m[2K[1G[?25h [37m[1m [22m[39m Collecting build traces     [32m[1m✓[22m[39m Collecting build traces 
+[2K[1G[?25h [37m[1m [22m[39m Finalizing page optimization     [32m[1m✓[22m[39m Finalizing page optimization 
 
-app\layout.tsx
-An error occurred in `next/font`.
+[4mRoute (app)[24m                                         [4mSize[24m  [4mFirst Load JS[24m  [4m[24m  [4m[24m
+┌ ƒ /                                              164 B         [37m[1m102 kB[22m[39m
+├ ○ /_not-found                                    164 B         [37m[1m102 kB[22m[39m
+├ ○ /admin/customers                             5.04 kB         [37m[1m171 kB[22m[39m
+├ ○ /admin/dashboard                             7.13 kB         [37m[1m284 kB[22m[39m
+├ ○ /admin/platform-health                       7.37 kB         [37m[1m278 kB[22m[39m
+├ ○ /admin/reports                                4.9 kB         [37m[1m282 kB[22m[39m
+├ ○ /admin/restaurants                           8.72 kB         [37m[1m184 kB[22m[39m
+├ ƒ /admin/restaurants/[id]                      5.75 kB         [37m[1m137 kB[22m[39m
+├ ○ /admin/settings                              6.13 kB         [37m[1m181 kB[22m[39m
+├ ƒ /api/v1/floor-layout/branch/[branchId]/live    164 B         [37m[1m102 kB[22m[39m
+├ ○ /auth/admin                                  1.04 kB         [37m[1m184 kB[22m[39m
+├ ○ /auth/customer                               1.28 kB         [37m[1m184 kB[22m[39m
+├ ○ /auth/first-login                              154 B         [37m[1m190 kB[22m[39m
+├ ○ /auth/forgot-password                        9.19 kB         [37m[1m193 kB[22m[39m
+├ ○ /auth/login                                  6.05 kB         [37m[1m155 kB[22m[39m
+├ ○ /auth/onboarding                               205 B         [37m[1m191 kB[22m[39m
+├ ○ /auth/onboarding/step-2                        205 B         [37m[1m191 kB[22m[39m
+├ ○ /auth/onboarding/step-3                        205 B         [37m[1m191 kB[22m[39m
+├ ○ /auth/onboarding/step-4                        205 B         [37m[1m191 kB[22m[39m
+├ ○ /auth/onboarding/step-5                        205 B         [37m[1m191 kB[22m[39m
+├ ○ /auth/reset-password                         8.52 kB         [37m[1m192 kB[22m[39m
+├ ○ /auth/restaurant                             1.04 kB         [37m[1m184 kB[22m[39m
+├ ○ /auth/signup                                 1.97 kB         [37m[1m151 kB[22m[39m
+├ ○ /auth/signup/admin                           8.11 kB         [37m[1m192 kB[22m[39m
+├ ○ /auth/signup/customer                        1.25 kB         [37m[1m193 kB[22m[39m
+├ ○ /auth/signup/restaurant                      1.12 kB         [37m[1m195 kB[22m[39m
+├ ○ /auth/signup/step-2                            193 B         [37m[1m189 kB[22m[39m
+├ ○ /auth/signup/step-3                            193 B         [37m[1m189 kB[22m[39m
+├ ○ /auth/verify-otp                             8.96 kB         [37m[1m169 kB[22m[39m
+├ ○ /customer                                      383 B         [37m[1m102 kB[22m[39m
+├ ○ /customer/booking                             5.9 kB         [37m[1m185 kB[22m[39m
+├ ƒ /customer/booking/[bookingId]                4.77 kB         [37m[1m187 kB[22m[39m
+├ ○ /customer/booking/history                    4.25 kB         [37m[1m173 kB[22m[39m
+├ ○ /customer/cart                               5.69 kB         [37m[1m181 kB[22m[39m
+├ ○ /customer/home                               8.66 kB         [37m[1m184 kB[22m[39m
+├ ○ /customer/menu                               5.79 kB         [37m[1m181 kB[22m[39m
+├ ○ /customer/order                              3.68 kB         [37m[1m169 kB[22m[39m
+├ ƒ /customer/order/[orderId]                    5.02 kB         [37m[1m139 kB[22m[39m
+├ ƒ /customer/order/[orderId]/receipt            5.42 kB         [37m[1m184 kB[22m[39m
+├ ○ /customer/order/cart                         5.69 kB         [37m[1m181 kB[22m[39m
+├ ○ /customer/order/history                      4.97 kB         [37m[1m180 kB[22m[39m
+├ ƒ /customer/payment/[orderId]                  8.49 kB         [37m[1m183 kB[22m[39m
+├ ○ /customer/payment/success                    3.44 kB         [37m[1m169 kB[22m[39m
+├ ○ /customer/profile                            7.79 kB         [37m[1m173 kB[22m[39m
+├ ○ /customer/profile/addresses                  5.27 kB         [37m[1m184 kB[22m[39m
+├ ○ /customer/profile/edit                       10.7 kB         [37m[1m209 kB[22m[39m
+├ ○ /customer/profile/favorites                  4.01 kB         [37m[1m183 kB[22m[39m
+├ ○ /customer/profile/loyalty                    4.32 kB         [37m[1m170 kB[22m[39m
+├ ○ /customer/profile/support                     9.3 kB         [37m[1m184 kB[22m[39m
+├ ƒ /customer/restaurant/[restaurantId]          12.2 kB         [37m[1m199 kB[22m[39m
+├ ƒ /customer/restaurant/[restaurantId]/book     23.8 kB         [37m[1m206 kB[22m[39m
+├ ƒ /customer/restaurant/[restaurantId]/gallery  6.26 kB         [37m[1m172 kB[22m[39m
+├ ƒ /customer/restaurant/[restaurantId]/queue    6.95 kB         [37m[1m184 kB[22m[39m
+├ ○ /customer/scan                               3.12 kB         [37m[1m157 kB[22m[39m
+├ ○ /delivery                                    6.58 kB         [37m[1m141 kB[22m[39m
+├ ○ /delivery/earnings                           2.49 kB         [37m[1m119 kB[22m[39m
+├ ○ /first-login                                   154 B         [37m[1m190 kB[22m[39m
+├ ○ /manifest.json                                   0 B            [37m[1m0 B[22m[39m
+├ ○ /owner/bookings                                 7 kB         [37m[1m182 kB[22m[39m
+├ ○ /owner/branches                              9.24 kB         [37m[1m184 kB[22m[39m
+├ ƒ /owner/branches/[branchId]                   6.17 kB         [37m[1m277 kB[22m[39m
+├ ƒ /owner/branches/[branchId]/edit              5.67 kB         [37m[1m204 kB[22m[39m
+├ ƒ /owner/branches/[branchId]/hours             6.05 kB         [37m[1m181 kB[22m[39m
+├ ○ /owner/branches/new                          4.86 kB         [37m[1m198 kB[22m[39m
+├ ○ /owner/branding                               9.1 kB         [37m[1m208 kB[22m[39m
+├ ○ /owner/customers                             10.1 kB         [37m[1m176 kB[22m[39m
+├ ○ /owner/dashboard                             20.1 kB         [37m[1m359 kB[22m[39m
+├ ○ /owner/inventory                             6.52 kB         [37m[1m185 kB[22m[39m
+├ ○ /owner/menu                                    164 B         [37m[1m102 kB[22m[39m
+├ ○ /owner/menu/categories                       8.07 kB         [37m[1m201 kB[22m[39m
+├ ○ /owner/menu/items                            7.53 kB         [37m[1m186 kB[22m[39m
+├ ƒ /owner/menu/items/[itemId]/edit              6.18 kB         [37m[1m209 kB[22m[39m
+├ ○ /owner/menu/items/new                        7.19 kB         [37m[1m162 kB[22m[39m
+├ ○ /owner/reports                               7.29 kB         [37m[1m231 kB[22m[39m
+├ ○ /owner/settings                                148 B         [37m[1m170 kB[22m[39m
+├ ○ /owner/shifts                                9.61 kB         [37m[1m185 kB[22m[39m
+├ ○ /owner/staff                                 3.96 kB         [37m[1m215 kB[22m[39m
+├ ƒ /owner/staff/[staffId]                       8.29 kB         [37m[1m207 kB[22m[39m
+├ ○ /owner/staff/new                             10.4 kB         [37m[1m203 kB[22m[39m
+├ ○ /staff/cashier                               6.06 kB         [37m[1m176 kB[22m[39m
+├ ○ /staff/cashier/tables                        9.98 kB         [37m[1m185 kB[22m[39m
+├ ○ /staff/chef                                   8.5 kB         [37m[1m174 kB[22m[39m
+├ ○ /staff/chef/kitchen                          5.44 kB         [37m[1m171 kB[22m[39m
+├ ○ /staff/dasboard                                164 B         [37m[1m102 kB[22m[39m
+├ ○ /staff/dashboard                               164 B         [37m[1m102 kB[22m[39m
+├ ○ /staff/host                                  11.4 kB         [37m[1m213 kB[22m[39m
+├ ○ /staff/host/floor                            3.18 kB         [37m[1m214 kB[22m[39m
+├ ○ /staff/host/queue                            6.67 kB         [37m[1m185 kB[22m[39m
+├ ○ /staff/manager                               11.2 kB         [37m[1m318 kB[22m[39m
+├ ○ /staff/manager/dashboard                      5.8 kB         [37m[1m322 kB[22m[39m
+├ ○ /staff/manager/floor                           148 B         [37m[1m170 kB[22m[39m
+├ ○ /staff/manager/inventory                      5.8 kB         [37m[1m171 kB[22m[39m
+├ ○ /staff/manager/menu-status                    9.1 kB         [37m[1m184 kB[22m[39m
+├ ○ /staff/manager/orders                        8.67 kB         [37m[1m184 kB[22m[39m
+├ ○ /staff/manager/queue                         4.27 kB         [37m[1m186 kB[22m[39m
+├ ○ /staff/manager/staff-duty                    8.76 kB         [37m[1m184 kB[22m[39m
+├ ○ /staff/waiter                                6.81 kB         [37m[1m176 kB[22m[39m
+├ ƒ /staff/waiter/order/[tableId]                9.77 kB         [37m[1m185 kB[22m[39m
+├ ○ /staff/waiter/performance                    8.65 kB         [37m[1m279 kB[22m[39m
+├ ○ /staff/waiter/tables                         5.65 kB         [37m[1m186 kB[22m[39m
+└ ○ /table-test                                  7.64 kB         [37m[1m153 kB[22m[39m
++ First Load JS shared by all                     [37m[1m102 kB[22m[39m
+  ├ chunks/2242-b45666f91cc2b198.js              46.3 kB
+  ├ chunks/adfd44bf-5032910f8edceabd.js          53.2 kB
+  └ other shared chunks (total)                  2.07 kB
 
-Error: Cannot find module 'autoprefixer'
-Require stack:
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\plugins.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\index.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\index.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack-config.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack-build\impl.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\compiled\jest-worker\processChild.js
-    at Module.<anonymous> (node:internal/modules/cjs/loader:1420:15)
-    at D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\server\require-hook.js:55:36
-    at require.resolve (node:internal/modules/helpers:163:19)
-    at loadPlugin (D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\plugins.js:53:32)
-    at D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\plugins.js:185:56
-    at Array.map (<anonymous>)
-    at getPostCssPlugins (D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\plugins.js:185:47)
-    at async D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\index.js:125:36
-    at async D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\loaders\next-font-loader\index.js:94:33
-    at async Span.traceAsyncFn (D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\trace\trace.js:157:20)
 
-app\layout.tsx
-An error occurred in `next/font`.
+ƒ Middleware                                     [37m[1m34.3 kB[22m[39m
 
-Error: Cannot find module 'autoprefixer'
-Require stack:
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\plugins.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\index.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\index.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack-config.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack-build\impl.js
-- D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\compiled\jest-worker\processChild.js
-    at Module.<anonymous> (node:internal/modules/cjs/loader:1420:15)
-    at D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\server\require-hook.js:55:36
-    at require.resolve (node:internal/modules/helpers:163:19)
-    at loadPlugin (D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\plugins.js:53:32)
-    at D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\plugins.js:185:56
-    at Array.map (<anonymous>)
-    at getPostCssPlugins (D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\plugins.js:185:47)
-    at async D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\config\blocks\css\index.js:125:36
-    at async D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\build\webpack\loaders\next-font-loader\index.js:94:33
-    at async Span.traceAsyncFn (D:\CODES\DineLuxe\node_modules\.pnpm\next@15.3.2_@babel+core@7.29.0_@opentelemetry+api@1.9.1_react-dom@19.2.5_react@19.2.5__react@19.2.5\node_modules\next\dist\trace\trace.js:157:20)
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
 
-
-> Build failed because of webpack errors
- ELIFECYCLE  Command failed with exit code 1.
+[?25h

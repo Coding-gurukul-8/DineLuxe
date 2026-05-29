@@ -1,12 +1,14 @@
-import type { SignupInput, LoginInput, OtpInput, ResetPasswordInput, ForgotPasswordInput, RefreshTokenInput } from './auth.schema';
+import type { SignupInput, LoginInput, OtpInput, ResetPasswordInput, ChangePasswordInput, ForgotPasswordInput, RefreshTokenInput, RequestOtpInput } from './auth.schema';
 /**
- * Step 1 of signup: validate uniqueness, hash password, send OTP.
- * The Supabase user is NOT created until OTP is verified.
+ * Signup creates the account immediately and sends OTP for optional
+ * email verification.
  */
 export declare function signup(input: SignupInput): Promise<{
-    message: string;
+    accessToken: string;
+    refreshToken: string;
+    verification_pending: boolean;
 }>;
-/** Step 2: verify OTP, create Supabase user, return token pair. */
+/** Verify OTP to mark the email as verified (account already exists). */
 export declare function verifyOtp(input: OtpInput): Promise<{
     accessToken: string;
     refreshToken: string;
@@ -20,8 +22,16 @@ export declare function login(input: LoginInput): Promise<{
 export declare function forgotPassword(input: ForgotPasswordInput): Promise<{
     message: string;
 }>;
+/** Send a verification OTP so users can verify their email later. */
+export declare function sendVerificationOtp(input: RequestOtpInput): Promise<{
+    message: string;
+}>;
 /** Verify OTP and set new password, then invalidate all sessions. */
 export declare function resetPassword(input: ResetPasswordInput): Promise<{
+    message: string;
+}>;
+/** Change password for authenticated users and clear first-login flag. */
+export declare function changePassword(userId: string, input: ChangePasswordInput): Promise<{
     message: string;
 }>;
 /** Issue a new access token from a valid refresh token. */

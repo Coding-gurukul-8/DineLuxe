@@ -5,4 +5,7 @@ export declare function handleUpdateDeliveryStatus(req: Request, res: Response, 
 export declare function handleUpdateLocation(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleGetActiveDelivery(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleGetEarnings(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function handleGetDeliveryStatus(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function handleGetActiveDeliveriesForBranch(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function handleCompleteDelivery(req: Request, res: Response, next: NextFunction): Promise<void>;
 //# sourceMappingURL=delivery.controller.d.ts.map

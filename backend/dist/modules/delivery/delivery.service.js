@@ -5,6 +5,9 @@ exports.getDelivery = getDelivery;
 exports.updateDeliveryStatus = updateDeliveryStatus;
 exports.updatePartnerLocation = updatePartnerLocation;
 exports.getActiveDelivery = getActiveDelivery;
+exports.getDeliveryStatus = getDeliveryStatus;
+exports.getActiveDeliveriesForBranch = getActiveDeliveriesForBranch;
+exports.completeDelivery = completeDelivery;
 exports.getPartnerEarnings = getPartnerEarnings;
 const supabase_1 = require("../../config/supabase");
 const redis_1 = require("../../config/redis");
@@ -197,6 +200,68 @@ async function getActiveDelivery(partnerId) {
     if (error)
         throw error;
     return data;
+}
+// ─── Get Delivery Status (with partner info) ──────────────────────────────────
+async function getDeliveryStatus(deliveryId) {
+    const { data, error } = await supabase_1.supabaseAdmin
+        .from('deliveries')
+        .select('*, orders(id, status, total_amount, order_type), ' +
+        'delivery_partners(id, is_online, current_lat, current_lon, active_delivery_id), ' +
+        'branches(id, name, address)')
+        .eq('id', deliveryId)
+        .single();
+    if (error || !data)
+        throw Object.assign(new Error('Delivery not found'), { status: 404 });
+    return data;
+}
+// ─── Get Active Deliveries for Branch ────────────────────────────────────────
+async function getActiveDeliveriesForBranch(branchId) {
+    const { data, error } = await supabase_1.supabaseAdmin
+        .from('deliveries')
+        .select('*, orders(id, status, total_amount, customer_id), ' +
+        'delivery_partners(id, current_lat, current_lon)')
+        .eq('branch_id', branchId)
+        .in('status', ['assigned', 'accepted', 'picked_up'])
+        .order('assigned_at', { ascending: false });
+    if (error)
+        throw error;
+    return data ?? [];
+}
+// ─── Complete Delivery ────────────────────────────────────────────────────────
+async function completeDelivery(deliveryId) {
+    const { data: delivery, error: fetchErr } = await supabase_1.supabaseAdmin
+        .from('deliveries')
+        .select('id, partner_id, status, orders(id)')
+        .eq('id', deliveryId)
+        .single();
+    if (fetchErr || !delivery)
+        throw Object.assign(new Error('Delivery not found'), { status: 404 });
+    if (delivery.status === 'delivered') {
+        throw Object.assign(new Error('Delivery already completed'), { status: 409 });
+    }
+    const now = new Date().toISOString();
+    const { data: updated, error: updateErr } = await supabase_1.supabaseAdmin
+        .from('deliveries')
+        .update({ status: 'delivered', delivered_at: now })
+        .eq('id', deliveryId)
+        .select()
+        .single();
+    if (updateErr)
+        throw updateErr;
+    // Clear partner active delivery
+    await supabase_1.supabaseAdmin
+        .from('delivery_partners')
+        .update({ active_delivery_id: null })
+        .eq('id', delivery.partner_id);
+    // Update order status to delivered
+    const order = delivery.orders?.[0] ?? null;
+    if (order?.id) {
+        await supabase_1.supabaseAdmin
+            .from('orders')
+            .update({ status: 'delivered' })
+            .eq('id', order.id);
+    }
+    return updated;
 }
 // ─── Get Partner Earnings ─────────────────────────────────────────────────────
 async function getPartnerEarnings(partnerId) {

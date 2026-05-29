@@ -5,6 +5,8 @@ export declare function getAll(restaurantId: string): Promise<{
     address: any;
     lat: any;
     lon: any;
+    phone: any;
+    seating_capacity: any;
     is_active: any;
     operating_hours: any;
     created_at: any;

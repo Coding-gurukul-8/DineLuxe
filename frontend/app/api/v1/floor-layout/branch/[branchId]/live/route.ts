@@ -12,11 +12,8 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL?.trim() || 'http://localhost
  * Fixed to forward the request with the caller's Authorization header so the
  * backend can authenticate + return real live table statuses.
  */
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { branchId: string } }
-) {
-  const { branchId } = params;
+export async function GET(req: NextRequest, { params }: any) {
+  const { branchId } = params as { branchId: string };
   const backendUrl = `${BACKEND_URL}/floor-layout/branch/${branchId}/live`;
 
   const authHeader = req.headers.get('authorization');

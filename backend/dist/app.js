@@ -39,6 +39,13 @@ const support_routes_1 = __importDefault(require("./modules/support/support.rout
 const tables_routes_1 = __importDefault(require("./modules/tables/tables.routes"));
 const users_routes_1 = __importDefault(require("./modules/users/users.routes"));
 const app = (0, express_1.default)();
+// ─── Trust proxy (must be set before rate-limiters & other middleware) ───────
+// Tells Express to trust the X-Forwarded-For header set by reverse proxies
+// (nginx, Render, Railway, AWS ALB, etc.) so express-rate-limit can identify
+// real client IPs instead of the proxy IP.
+// Use `1` to trust the first hop (direct proxy). For multiple proxy hops,
+// set to the number of trusted hops, or a specific IP/CIDR string.
+app.set('trust proxy', 1);
 // ─── Global middleware (ORDER MATTERS) ──────────────────────────────────────
 app.use((0, helmet_1.default)());
 app.use(cors_1.corsMiddleware);

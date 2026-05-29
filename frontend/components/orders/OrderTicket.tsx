@@ -17,6 +17,7 @@ interface OrderTicketProps {
     specialNotes?: string
     createdAt: string
     status: 'pending' | 'preparing' | 'ready'
+      | 'served'
   }
   onStatusChange?: (orderId: string, newStatus: string) => void
   className?: string
@@ -45,7 +46,7 @@ export function OrderTicket({ order, onStatusChange, className }: OrderTicketPro
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const statusConfig = {
+  const statusConfig: Record<string, any> = {
     pending: {
       borderColor: 'border-blue-500',
       bgColor: 'bg-blue-500/5',
@@ -67,9 +68,16 @@ export function OrderTicket({ order, onStatusChange, className }: OrderTicketPro
       buttonColor: 'bg-green-500 hover:bg-green-600',
       nextStatus: 'served',
     },
+    served: {
+      borderColor: 'border-gray-500',
+      bgColor: 'bg-gray-500/5',
+      buttonText: 'Completed',
+      buttonColor: 'bg-gray-500',
+      nextStatus: 'served',
+    },
   }
 
-  const config = statusConfig[order.status]
+  const config = statusConfig[order.status] ?? statusConfig['served']
 
   return (
     <motion.div

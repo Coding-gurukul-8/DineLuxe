@@ -306,7 +306,7 @@ export async function completeDelivery(deliveryId: string) {
     .eq('id', delivery.partner_id);
 
   // Update order status to delivered
-  const order = delivery.orders as { id: string } | null;
+  const order = (delivery.orders as { id: string }[] | null)?.[0] ?? null;
   if (order?.id) {
     await supabaseAdmin
       .from('orders')

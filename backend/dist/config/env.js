@@ -16,6 +16,14 @@ const envSchema = zod_1.z.object({
     // Supabase
     SUPABASE_URL: zod_1.z.string().url('SUPABASE_URL must be a valid URL'),
     SUPABASE_SERVICE_ROLE_KEY: zod_1.z.string().min(1, 'SUPABASE_SERVICE_ROLE_KEY is required'),
+    // ISSUE 5 — Why SUPABASE_JWT_SECRET and not JWT_SECRET:
+    // This secret is used to sign and verify all JWTs in the system (access
+    // tokens + refresh tokens). It is named SUPABASE_JWT_SECRET because it must
+    // be the same value as the "JWT Secret" shown in the Supabase dashboard
+    // (Project Settings → API → JWT Settings). If you ever connect a Supabase
+    // client that also validates JWTs, they must share this secret.
+    // The redundant JWT_SECRET key that used to exist in .env has been removed
+    // to avoid confusion — only SUPABASE_JWT_SECRET is authoritative.
     SUPABASE_JWT_SECRET: zod_1.z.string().min(1, 'SUPABASE_JWT_SECRET is required'),
     // Redis
     REDIS_URL: zod_1.z.string().min(1, 'REDIS_URL is required'),

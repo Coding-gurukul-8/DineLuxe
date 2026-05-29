@@ -42,6 +42,9 @@ const router = (0, express_1.Router)();
 // Active KDS orders — chef needs this to cook; manager/owner need it for oversight
 // FIX: was chef-only; manager and owner added so they can monitor the KDS remotely
 router.get('/branch/:branchId/tickets', auth_middleware_1.authenticate, (0, rbac_middleware_1.requireRole)('chef', 'manager', 'owner'), ctrl.getTickets);
+// GET /kitchen/orders — branchless alias used by chef KDS page; branch is resolved
+// from the authenticated staff member's assigned branch in the controller
+router.get('/orders', auth_middleware_1.authenticate, (0, rbac_middleware_1.requireRole)('chef', 'manager', 'owner'), ctrl.getTickets);
 // PATCH /kitchen/orders/:id/status
 // Chef-ONLY forward transitions (confirmed → preparing → ready)
 router.patch('/orders/:id/status', auth_middleware_1.authenticate, (0, rbac_middleware_1.requireRole)('chef'), ctrl.updateOrderStatus);

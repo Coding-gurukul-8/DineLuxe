@@ -35,7 +35,7 @@ async function getAll(restaurantId) {
     const { data, error } = await supabase_1.supabaseAdmin
         .from('branches')
         .select(`
-      id, name, address, lat, lon,
+      id, name, address, lat, lon, phone, seating_capacity,
       is_active, operating_hours, created_at, updated_at,
       manager:users!manager_id ( id, name )
     `)
@@ -60,6 +60,8 @@ async function create(restaurantId, input, actorId, ipAddress) {
         lon: geo?.lon ?? null,
         manager_id: input.manager_id ?? null,
         operating_hours: input.operating_hours ?? null,
+        seating_capacity: input.seating_capacity,
+        phone: input.phone ?? null,
         is_active: true,
         created_at: now,
         updated_at: now,
@@ -119,6 +121,10 @@ async function update(branchId, restaurantId, input) {
         updateData.manager_id = input.manager_id;
     if (input.operating_hours)
         updateData.operating_hours = input.operating_hours;
+    if (input.seating_capacity !== undefined)
+        updateData.seating_capacity = input.seating_capacity;
+    if (input.phone !== undefined)
+        updateData.phone = input.phone;
     const { data, error } = await supabase_1.supabaseAdmin
         .from('branches')
         .update(updateData)

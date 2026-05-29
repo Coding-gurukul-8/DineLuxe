@@ -80,7 +80,24 @@ export declare const resetPasswordSchema: z.ZodObject<{
     otp: string;
     newPassword: string;
 }>;
+export declare const changePasswordSchema: z.ZodObject<{
+    currentPassword: z.ZodString;
+    newPassword: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    newPassword: string;
+    currentPassword: string;
+}, {
+    newPassword: string;
+    currentPassword: string;
+}>;
 export declare const forgotPasswordSchema: z.ZodObject<{
+    email: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    email: string;
+}, {
+    email: string;
+}>;
+export declare const requestOtpSchema: z.ZodObject<{
     email: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     email: string;
@@ -98,6 +115,8 @@ export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type OtpInput = z.infer<typeof otpSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
+export type RequestOtpInput = z.infer<typeof requestOtpSchema>;
 //# sourceMappingURL=auth.schema.d.ts.map

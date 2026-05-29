@@ -11,8 +11,8 @@ export declare const createInventorySchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     branch_id: string;
     name: string;
-    unit: string;
     quantity: number;
+    unit: string;
     min_threshold: number;
     cost_per_unit?: number | undefined;
     category?: string | undefined;
@@ -20,8 +20,8 @@ export declare const createInventorySchema: z.ZodObject<{
 }, {
     branch_id: string;
     name: string;
-    unit: string;
     quantity: number;
+    unit: string;
     min_threshold: number;
     cost_per_unit?: number | undefined;
     category?: string | undefined;
@@ -36,32 +36,32 @@ export declare const updateInventorySchema: z.ZodEffects<z.ZodObject<{
     reorder_threshold: z.ZodOptional<z.ZodNumber>;
     unit: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    unit?: string | undefined;
     quantity?: number | undefined;
+    unit?: string | undefined;
     current_quantity?: number | undefined;
     reorder_threshold?: number | undefined;
     cost_per_unit?: number | undefined;
     min_threshold?: number | undefined;
     notes?: string | undefined;
 }, {
-    unit?: string | undefined;
     quantity?: number | undefined;
+    unit?: string | undefined;
     current_quantity?: number | undefined;
     reorder_threshold?: number | undefined;
     cost_per_unit?: number | undefined;
     min_threshold?: number | undefined;
     notes?: string | undefined;
 }>, {
-    unit?: string | undefined;
     quantity?: number | undefined;
+    unit?: string | undefined;
     current_quantity?: number | undefined;
     reorder_threshold?: number | undefined;
     cost_per_unit?: number | undefined;
     min_threshold?: number | undefined;
     notes?: string | undefined;
 }, {
-    unit?: string | undefined;
     quantity?: number | undefined;
+    unit?: string | undefined;
     current_quantity?: number | undefined;
     reorder_threshold?: number | undefined;
     cost_per_unit?: number | undefined;
@@ -78,30 +78,30 @@ export declare const deductInventorySchema: z.ZodObject<{
         quantity: z.ZodNumber;
     }, "strip", z.ZodTypeAny, {
         quantity: number;
-        inventory_item_id?: string | undefined;
         menu_item_id?: string | undefined;
+        inventory_item_id?: string | undefined;
         inventory_id?: string | undefined;
     }, {
         quantity: number;
-        inventory_item_id?: string | undefined;
         menu_item_id?: string | undefined;
+        inventory_item_id?: string | undefined;
         inventory_id?: string | undefined;
     }>, {
         quantity: number;
-        inventory_item_id?: string | undefined;
         menu_item_id?: string | undefined;
+        inventory_item_id?: string | undefined;
         inventory_id?: string | undefined;
     }, {
         quantity: number;
-        inventory_item_id?: string | undefined;
         menu_item_id?: string | undefined;
+        inventory_item_id?: string | undefined;
         inventory_id?: string | undefined;
     }>, "many">;
 }, "strip", z.ZodTypeAny, {
     items: {
         quantity: number;
-        inventory_item_id?: string | undefined;
         menu_item_id?: string | undefined;
+        inventory_item_id?: string | undefined;
         inventory_id?: string | undefined;
     }[];
     branch_id?: string | undefined;
@@ -109,8 +109,8 @@ export declare const deductInventorySchema: z.ZodObject<{
 }, {
     items: {
         quantity: number;
-        inventory_item_id?: string | undefined;
         menu_item_id?: string | undefined;
+        inventory_item_id?: string | undefined;
         inventory_id?: string | undefined;
     }[];
     branch_id?: string | undefined;
@@ -124,29 +124,29 @@ export declare const wasteLogSchema: z.ZodEffects<z.ZodObject<{
     reason: z.ZodString;
     logged_by: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    reason: string;
     quantity: number;
+    reason: string;
     inventory_item_id?: string | undefined;
     logged_by?: string | undefined;
     inventory_id?: string | undefined;
     ingredient_id?: string | undefined;
 }, {
-    reason: string;
     quantity: number;
+    reason: string;
     inventory_item_id?: string | undefined;
     logged_by?: string | undefined;
     inventory_id?: string | undefined;
     ingredient_id?: string | undefined;
 }>, {
-    reason: string;
     quantity: number;
+    reason: string;
     inventory_item_id?: string | undefined;
     logged_by?: string | undefined;
     inventory_id?: string | undefined;
     ingredient_id?: string | undefined;
 }, {
-    reason: string;
     quantity: number;
+    reason: string;
     inventory_item_id?: string | undefined;
     logged_by?: string | undefined;
     inventory_id?: string | undefined;
