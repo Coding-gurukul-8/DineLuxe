@@ -15,6 +15,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { DietaryProfile } from "@/components/customer/DietaryProfile";
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,8 @@ function FloatingInput({
 interface UserProfile {
   id: string; email: string; first_name?: string; last_name?: string;
   phone?: string; profile_pic_url?: string;
+  dietary_preferences?: string[];
+  dietary_allergies?: string[];
 }
 
 export default function EditProfilePage() {
@@ -353,6 +356,17 @@ export default function EditProfilePage() {
                   value={phone}
                   onChange={(v) => setProfileValue("phone", v, { shouldDirty: true })}
                 />
+
+                {/* ── Dietary preferences ─────────────────────────────── */}
+                <div className="border-t border-gray-100 pt-5 space-y-1">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
+                    Dietary Preferences
+                  </p>
+                  <DietaryProfile
+                    initialPreferences={profile?.dietary_preferences ?? []}
+                    initialAllergies={profile?.dietary_allergies ?? []}
+                  />
+                </div>
 
                 <motion.button type="submit" whileTap={{ scale: 0.97 }}
                   disabled={savingProfile}
