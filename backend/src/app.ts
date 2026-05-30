@@ -7,6 +7,7 @@ import hpp from 'hpp';
 import { corsMiddleware } from './config/cors';
 import { config } from './config/env';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { metricsMiddleware } from './middleware/metrics.middleware';
 
 // ─── Route modules ───────────────────────────────────────────────────────────
 import authRoutes from './modules/auth/auth.routes';
@@ -32,8 +33,6 @@ import paymentsRoutes from './modules/payments/payments.routes';
 import queueRoutes from './modules/queue/queue.routes';
 import recommendationsRoutes from './modules/recommendations/recommendations.routes';
 import recipeIngredientsRoutes from './modules/recipe-ingredients/recipe-ingredients.routes';
-import couponsRoutes from './modules/coupons/coupons.routes';
-import socialDiningRoutes from './modules/social-dining/social-dining.routes';
 import reportsRoutes from './modules/reports/reports.routes';
 import restaurantsRoutes from './modules/restaurants/restaurants.routes';
 import reviewsRoutes from './modules/reviews/reviews.routes';
@@ -64,6 +63,9 @@ app.use(morgan(process.env['NODE_ENV'] === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(hpp());
+
+// ─── Metrics (must be before routes to capture all request timings) ──────────
+app.use(metricsMiddleware);
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 const API = '/api/v1';
@@ -98,11 +100,9 @@ app.use(`${API}/notifications`, notificationsRoutes);
 app.use(`${API}/order-items`, orderItemsRoutes);
 app.use(`${API}/orders`, ordersRoutes);
 app.use(`${API}/payments`, paymentsRoutes);
-app.use(`${API}/coupons`, couponsRoutes);
 app.use(`${API}/queue`, queueRoutes);
 app.use(`${API}/recommendations`, recommendationsRoutes);
 app.use(`${API}/recipe-ingredients`, recipeIngredientsRoutes);
-app.use(`${API}/social-dining`, socialDiningRoutes);
 app.use(`${API}/reports`, reportsRoutes);
 app.use(`${API}/restaurants`, restaurantsRoutes);
 app.use(`${API}/reviews`, reviewsRoutes);

@@ -108,43 +108,175 @@ export async function getPlatformStats() {
 }
 
 // ─── Health check (public) ────────────────────────────────────────────────────
-export async function getHealth() {
-  const start = Date.now();
-  const { error } = await supabaseAdmin.from('restaurants').select('id').limit(1);
-  const dbLatency = Date.now() - start;
+export async function getBasicHealth() {
+  // DB check with 500ms timeout
+  let dbStatus: 'ok' | 'degraded' = 'ok';
+  let dbDown = false;
+  let dbLatency = 0;
 
-  const redisStart = Date.now();
-  await redis.ping();
-  const redisLatency = Date.now() - redisStart;
+  try {
+    const dbStart = Date.now();
+    const dbCheck = supabaseAdmin
+      .from('restaurants')
+      .select('id', { count: 'exact', head: true });
+    const timeout = new Promise<{ timeout: true }>((res) =>
+      setTimeout(() => res({ timeout: true }), 500),
+    );
+    const result = await Promise.race([dbCheck, timeout as unknown]);
+    dbLatency = Date.now() - dbStart;
+
+    // If timeout resolved, mark DB as down
+    if ((result as any)?.timeout) {
+      dbDown = true;
+      dbStatus = 'degraded';
+    } else {
+      const { error } = result as any;
+      if (error) dbStatus = 'degraded';
+    }
+  } catch {
+    dbStatus = 'degraded';
+  }
+
+  // Redis check
+  let redisLatency = 0;
+  let redisOk = true;
+
+  try {
+    const redisStart = Date.now();
+    await redis.ping();
+    redisLatency = Date.now() - redisStart;
+  } catch {
+    redisOk = false;
+  }
+
+  const overallStatus =
+    dbDown ? 'down'
+    : dbStatus === 'degraded' || !redisOk ? 'degraded'
+    : 'ok';
 
   return {
-    status: error ? 'degraded' : 'ok',
+    status: overallStatus as 'ok' | 'degraded' | 'down',
     db_latency_ms: dbLatency,
     redis_latency_ms: redisLatency,
     timestamp: new Date().toISOString(),
   };
 }
 
-// ─── Detailed health (admin only) ────────────────────────────────────────────
+// Keep legacy alias so existing controller reference still compiles
+export const getHealth = getBasicHealth;
+
+// ─── Detailed health (super_admin only) ──────────────────────────────────────
 export async function getDetailedHealth() {
-  const basic = await getHealth();
+  const basic = await getBasicHealth();
 
-  const [redisInfo, dbMetrics] = await Promise.all([
-    redis.info('stats'),
-    supabaseAdmin.rpc('get_db_metrics'),
-  ]);
+  // ── Redis metrics ──────────────────────────────────────────────────────────
+  let redisHitRate = 0;
+  let usedMemoryHuman = 'N/A';
+  let connectedClients = 0;
 
-  // Parse Redis hit rate from INFO stats
-  const hitMatch = redisInfo.match(/keyspace_hits:(\d+)/);
-  const missMatch = redisInfo.match(/keyspace_misses:(\d+)/);
-  const hits = hitMatch ? parseInt(hitMatch[1]) : 0;
-  const misses = missMatch ? parseInt(missMatch[1]) : 0;
-  const hitRate = hits + misses > 0 ? Math.round((hits / (hits + misses)) * 100) : 0;
+  try {
+    const info = await redis.info('all');
+
+    const parse = (key: string): number => {
+      const m = info.match(new RegExp(`${key}:(\\d+)`));
+      return m ? parseInt(m[1], 10) : 0;
+    };
+
+    const parseStr = (key: string): string => {
+      const m = info.match(new RegExp(`${key}:([^\\r\\n]+)`));
+      return m ? m[1].trim() : 'N/A';
+    };
+
+    const hits = parse('keyspace_hits');
+    const misses = parse('keyspace_misses');
+    redisHitRate = hits + misses > 0 ? Math.round((hits / (hits + misses)) * 100) : 0;
+    usedMemoryHuman = parseStr('used_memory_human');
+    connectedClients = parse('connected_clients');
+  } catch {
+    // Redis info unavailable — leave defaults
+  }
+
+  // ── API metrics from Redis ─────────────────────────────────────────────────
+  let avgQueryMs = 0;
+  let errorRate = 0;
+
+  try {
+    const minute = Math.floor(Date.now() / 60_000);
+
+    // Average of last 100 request durations tracked by metrics middleware
+    const [queryTimes, reqCount, errCount] = await Promise.all([
+      redis.call('LRANGE', 'metric:query_times', '0', '99') as Promise<string[]>,
+      redis.get(`metric:requests:${minute}`),
+      redis.get(`metric:errors:${minute}`),
+    ]);
+
+    if (Array.isArray(queryTimes) && queryTimes.length > 0) {
+      const times = queryTimes.map(Number).filter(Number.isFinite);
+      avgQueryMs = times.length > 0
+        ? Math.round(times.reduce((a, b) => a + b, 0) / times.length)
+        : 0;
+    }
+
+    const totalReqs = parseInt(reqCount ?? '0', 10);
+    const totalErrs = parseInt(errCount ?? '0', 10);
+    errorRate = totalReqs > 0 ? Math.round((totalErrs / totalReqs) * 100 * 10) / 10 : 0;
+  } catch {
+    // Metrics not available — leave defaults
+  }
+
+  // ── WebSocket stats via socket.io ──────────────────────────────────────────
+  let wsConnections = 0;
+  let wsRooms = 0;
+
+  try {
+    const { io } = await import('../../server');
+    wsConnections = io.engine.clientsCount;
+    wsRooms = io.sockets.adapter.rooms.size;
+  } catch {
+    // io not available (e.g. test environment)
+  }
+
+  // ── Active sessions (estimate from Redis session keys) ─────────────────────
+  let activeSessions = 0;
+
+  try {
+    // Scan for session:* keys — safer than KEYS in production
+    let cursor = '0';
+    let count = 0;
+    do {
+      const [nextCursor, keys] = (await redis.call(
+        'SCAN', cursor, 'MATCH', 'session:*', 'COUNT', '100',
+      )) as [string, string[]];
+      cursor = nextCursor;
+      count += keys.length;
+    } while (cursor !== '0' && count < 5000); // cap scan at 5000 keys
+    activeSessions = count;
+  } catch {
+    // SCAN not available in memory fallback
+  }
 
   return {
     ...basic,
-    redis_hit_rate_percent: hitRate,
-    db_metrics: dbMetrics.data ?? {},
+    redis_hit_rate_percent: redisHitRate,
+    redis_memory: usedMemoryHuman,
+    redis_connected_clients: connectedClients,
+    db_metrics: {
+      avg_query_ms: avgQueryMs,
+      // Active connections via Supabase not directly queryable without pg_stat_activity RPC
+      // Expose what the frontend HealthDetailed interface expects:
+      active_connections: null as number | null,
+      idle_connections: null as number | null,
+      total_connections: null as number | null,
+    },
+    api_metrics: {
+      error_rate_percent: errorRate,
+      avg_response_ms: avgQueryMs,
+    },
+    websocket: {
+      connections: wsConnections,
+      rooms: wsRooms,
+    },
+    active_sessions: activeSessions,
   };
 }
 

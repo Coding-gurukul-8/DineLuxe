@@ -21,8 +21,16 @@ const router: import('express').Router = Router();
 
 // ── Public ───────────────────────────────────────────────────────────────────
 
-// Health check
+// Basic health — no auth required (used by uptime monitors, load balancers)
 router.get('/health', getHealth);
+
+// Detailed health — super_admin only (before the catch-all authenticate below)
+router.get(
+  '/health/detailed',
+  authenticate,
+  requireRole('super_admin'),
+  getDetailedHealth,
+);
 
 // Super_admin signup — no token needed.
 // Can create multiple super_admin accounts using the seed secret header.
@@ -42,7 +50,6 @@ router.use(authenticate, requireRole('admin', 'super_admin'));
 
 router.get('/dashboard', getDashboard);
 router.get('/platform-stats', getPlatformStats);
-router.get('/health/detailed', getDetailedHealth);
 router.get('/restaurants', getRestaurants);
 router.patch('/restaurants/:id/status', updateRestaurantStatus);
 router.get('/customers', getCustomers);
