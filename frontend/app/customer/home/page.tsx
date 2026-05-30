@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, useMotionValue, useTransform, AnimatePresence } from "framer-motion";
 import { useInView } from "react-intersection-observer";
 import Link from "next/link";
@@ -18,7 +18,7 @@ import type { Order, MenuItem, LoyaltyData } from "@/types/api";
 import {
   Search, QrCode, Calendar, ShoppingBag, Clock, Star,
   ChevronRight, Flame, Bell, Gift, Sparkles, MapPin,
-  TrendingUp, ArrowRight, Zap,
+  TrendingUp, ArrowRight, Zap, Check, X,
 } from "lucide-react";
 
 // ── Variants ──────────────────────────────────────────────────────────────────
@@ -57,16 +57,82 @@ const quickActions = [
   { label: "Explore",    icon: TrendingUp,   href: "/customer/menu",    gradient: "from-[#27AE60] to-[#2ECC71]" },
 ];
 
-// ── Mood Tiles ────────────────────────────────────────────────────────────────
+// ── Mood Tiles ─────────────────────────────────────────────────────────────────
+// Each tile carries a `filter` object that gets appended as query params when
+// the user taps the tile. The restaurant feed re-fetches with these params.
 
-const moodTiles = [
-  { label: "🍕 Pizza Night",  color: "from-orange-500 to-red-600",     emoji: "🍕" },
-  { label: "🥗 Healthy",      color: "from-green-500 to-emerald-600",  emoji: "🥗" },
-  { label: "🍣 Japanese",     color: "from-rose-500 to-pink-600",      emoji: "🍣" },
-  { label: "🍔 Burgers",      color: "from-yellow-500 to-orange-500",  emoji: "🍔" },
-  { label: "🍜 Noodles",      color: "from-purple-500 to-indigo-600",  emoji: "🍜" },
-  { label: "🍦 Desserts",     color: "from-pink-400 to-rose-500",      emoji: "🍦" },
+interface MoodFilter {
+  max_prep_time?: number;
+  types?: string;
+  cuisine?: string;
+  dine_in?: boolean;
+  open_after?: string;
+  dietary?: string;
+  rating?: number;
+  ambiance?: string;
+}
+
+interface MoodTile {
+  id: string;
+  label: string;
+  emoji: string;
+  filter: MoodFilter;
+  gradient: string;
+}
+
+const MOOD_TILES: MoodTile[] = [
+  {
+    id: "quick_bite",
+    label: "Quick Bite",
+    emoji: "⚡",
+    filter: { max_prep_time: 15, types: "takeaway,delivery" },
+    gradient: "from-orange-400 to-red-500",
+  },
+  {
+    id: "fine_dining",
+    label: "Fine Dining",
+    emoji: "🍷",
+    filter: { cuisine: "fine_dining", dine_in: true },
+    gradient: "from-purple-600 to-indigo-700",
+  },
+  {
+    id: "late_night",
+    label: "Late Night",
+    emoji: "🌙",
+    filter: { open_after: "22:00" },
+    gradient: "from-indigo-900 to-blue-900",
+  },
+  {
+    id: "healthy",
+    label: "Healthy",
+    emoji: "🥗",
+    filter: { dietary: "vegan,vegetarian,high_protein" },
+    gradient: "from-green-400 to-emerald-600",
+  },
+  {
+    id: "celebration",
+    label: "Celebration",
+    emoji: "🎉",
+    filter: { cuisine: "celebration", rating: 4.5 },
+    gradient: "from-yellow-400 to-amber-500",
+  },
+  {
+    id: "date_night",
+    label: "Date Night",
+    emoji: "💑",
+    filter: { ambiance: "romantic", dine_in: true },
+    gradient: "from-rose-400 to-pink-600",
+  },
 ];
+
+/** Converts a MoodFilter to a URL query-string segment */
+function buildMoodQueryString(filter: MoodFilter): string {
+  const params = new URLSearchParams();
+  Object.entries(filter).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) params.set(k, String(v));
+  });
+  return params.toString();
+}
 
 // ── Shimmer Skeleton ──────────────────────────────────────────────────────────
 
@@ -115,11 +181,121 @@ function getGreeting() {
   return "Good evening";
 }
 
+// ── MoodTileGrid component ─────────────────────────────────────────────────────
+
+interface MoodTileGridProps {
+  activeMoodId: string | null;
+  filteredCount: number | null;
+  onTilePress: (tile: MoodTile) => void;
+  inView: boolean;
+}
+
+function MoodTileGrid({ activeMoodId, filteredCount, onTilePress, inView }: MoodTileGridProps) {
+  const activeTile = MOOD_TILES.find((t) => t.id === activeMoodId) ?? null;
+
+  return (
+    <div>
+      {/* Section heading */}
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          What are you in the mood for?
+        </p>
+        {activeMoodId && (
+          <motion.span
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-xs text-[#E8A020] font-semibold"
+          >
+            {filteredCount !== null ? `${filteredCount} restaurants` : "Filtering…"}
+          </motion.span>
+        )}
+      </div>
+
+      {/* 2-row × 3-column grid */}
+      <div className="grid grid-cols-3 gap-2.5">
+        {MOOD_TILES.map((tile, i) => {
+          const isActive = activeMoodId === tile.id;
+          return (
+            <motion.button
+              key={tile.id}
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={inView ? { opacity: 1, scale: 1 } : {}}
+              transition={{ delay: i * 0.06, type: "spring", stiffness: 300, damping: 20 }}
+              whileTap={{ scale: 0.93 }}
+              onClick={() => onTilePress(tile)}
+              className={[
+                "relative h-16 rounded-2xl flex flex-col items-center justify-center gap-1",
+                `bg-gradient-to-br ${tile.gradient}`,
+                "shadow-md overflow-hidden",
+                isActive ? "ring-2 ring-white ring-offset-2 scale-95" : "",
+              ].join(" ")}
+              aria-pressed={isActive}
+              aria-label={tile.label}
+            >
+              {/* Active checkmark overlay */}
+              <AnimatePresence>
+                {isActive && (
+                  <motion.div
+                    key="check"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                    className="absolute inset-0 bg-black/25 flex items-center justify-center rounded-2xl"
+                  >
+                    <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
+                      <Check size={13} className="text-gray-800 stroke-[3]" />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <span className="text-2xl leading-none">{tile.emoji}</span>
+              <span className="text-white text-[10px] font-semibold leading-tight px-1 text-center">
+                {tile.label}
+              </span>
+            </motion.button>
+          );
+        })}
+      </div>
+
+      {/* Filtered result label */}
+      <AnimatePresence>
+        {activeMoodId && filteredCount !== null && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-2.5 flex items-center justify-between bg-[#1A3C5E]/6 rounded-xl px-3 py-2">
+              <span className="text-xs font-medium text-gray-700">
+                <span className="font-bold text-[#1A3C5E]">{filteredCount}</span>{" "}
+                restaurants for{" "}
+                <span className="font-semibold">{activeTile?.label}</span>
+              </span>
+              <button
+                onClick={() => onTilePress(activeTile!)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Clear mood filter"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function CustomerHomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [pulling, setPulling] = useState(false);
+  const [activeMoodId, setActiveMoodId] = useState<string | null>(null);
+  const [moodFilteredCount, setMoodFilteredCount] = useState<number | null>(null);
   const { user, branchId } = useAuth();
   const router = useRouter();
 
@@ -131,6 +307,10 @@ export default function CustomerHomePage() {
   const { ref: moodRef, inView: moodInView } = useInView({ triggerOnce: true, threshold: 0.1 });
   const { ref: aiRef, inView: aiInView } = useInView({ triggerOnce: true, threshold: 0.1 });
   const { ref: loyaltyRef, inView: loyaltyInView } = useInView({ triggerOnce: true, threshold: 0.1 });
+
+  // ── Active mood filter → query string ────────────────────────────────────────
+  const activeMoodTile = MOOD_TILES.find((t) => t.id === activeMoodId) ?? null;
+  const moodQs = activeMoodTile ? buildMoodQueryString(activeMoodTile.filter) : "";
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -152,10 +332,48 @@ export default function CustomerHomePage() {
     enabled: !!branchId,
   });
 
+  // Mood-filtered restaurant feed — re-fetches whenever activeMoodId changes
+  const {
+    data: moodRestaurants,
+    isLoading: moodLoading,
+    refetch: refetchMood,
+  } = useQuery({
+    queryKey: ["customer", "recommendations", "mood", activeMoodId],
+    queryFn: () =>
+      apiClient.get<{ id: string; name: string }[]>(
+        `/recommendations/popular${moodQs ? `?${moodQs}` : ""}`
+      ),
+    enabled: activeMoodId !== null,
+  });
+
+  // Sync filtered count whenever mood results arrive
+  useEffect(() => {
+    if (activeMoodId === null) {
+      setMoodFilteredCount(null);
+      return;
+    }
+    if (!moodLoading && moodRestaurants) {
+      setMoodFilteredCount(moodRestaurants.length);
+    }
+  }, [activeMoodId, moodLoading, moodRestaurants]);
+
   const { data: loyaltyData } = useQuery({
     queryKey: ["customer", "loyalty"],
     queryFn: () => apiClient.get<LoyaltyData>("/loyalty/me"),
   });
+
+  // ── Mood tile handler ─────────────────────────────────────────────────────────
+  const handleMoodPress = useCallback((tile: MoodTile) => {
+    setActiveMoodId((prev) => {
+      if (prev === tile.id) {
+        // Deselect
+        setMoodFilteredCount(null);
+        return null;
+      }
+      setMoodFilteredCount(null); // reset while new results load
+      return tile.id;
+    });
+  }, []);
 
   // Client-side search filter
   const visibleItems = searchQuery.trim()
@@ -306,33 +524,72 @@ export default function CustomerHomePage() {
           )}
         </AnimatePresence>
 
-        {/* ── Mood Tiles (horizontal scroll) ──────────────────────────── */}
+        {/* ── MOOD TILES — 2×3 grid with filter integration ───────────── */}
         <motion.div
           ref={moodRef}
           initial={{ opacity: 0, y: 20 }}
           animate={moodInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5 }}
+          transition={{ duration: 0.45, ease: "easeOut" }}
         >
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-bold text-gray-900">What are you craving?</h2>
-          </div>
-          <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4">
-            {moodTiles.map((tile, i) => (
-              <motion.button
-                key={tile.label}
-                initial={{ opacity: 0, x: 20 }}
-                animate={moodInView ? { opacity: 1, x: 0 } : {}}
-                transition={{ delay: i * 0.07, type: "spring", stiffness: 280 }}
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.95 }}
-                className={`shrink-0 w-28 h-20 rounded-2xl bg-linear-to-br ${tile.color} flex flex-col items-center justify-center gap-1 shadow-md`}
-              >
-                <span className="text-2xl">{tile.emoji}</span>
-                <span className="text-white text-[11px] font-semibold">{tile.label.split(" ").slice(1).join(" ")}</span>
-              </motion.button>
-            ))}
-          </div>
+          <MoodTileGrid
+            activeMoodId={activeMoodId}
+            filteredCount={moodFilteredCount}
+            onTilePress={handleMoodPress}
+            inView={moodInView}
+          />
         </motion.div>
+
+        {/* ── Mood Results Feed (only shown when a mood is active) ─────── */}
+        <AnimatePresence>
+          {activeMoodId && (
+            <motion.div
+              key="mood-results"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-lg">{activeMoodTile?.emoji}</span>
+                <h2 className="text-base font-bold text-gray-900">
+                  {activeMoodTile?.label} Spots
+                </h2>
+              </div>
+
+              {moodLoading ? (
+                <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4">
+                  {[1, 2, 3].map((n) => <ShimmerCard key={n} />)}
+                </div>
+              ) : (moodRestaurants ?? []).length === 0 ? (
+                <EmptyState
+                  variant="menu"
+                  title="No restaurants found"
+                  message={`No results for ${activeMoodTile?.label}. Try another mood!`}
+                />
+              ) : (
+                <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4">
+                  {(moodRestaurants ?? []).map((r) => (
+                    <motion.button
+                      key={r.id}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => router.push(`/customer/restaurant/${r.id}`)}
+                      className="shrink-0 w-44 rounded-2xl overflow-hidden bg-white shadow-sm text-left"
+                    >
+                      <div className={`h-24 bg-gradient-to-br ${activeMoodTile?.gradient} flex items-center justify-center`}>
+                        <span className="text-4xl">{activeMoodTile?.emoji}</span>
+                      </div>
+                      <div className="p-3">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{r.name}</p>
+                      </div>
+                    </motion.button>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── AI Picks ─────────────────────────────────────────────────── */}
         {branchId && (
