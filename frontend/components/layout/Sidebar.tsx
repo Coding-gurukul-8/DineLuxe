@@ -12,6 +12,7 @@ import {
   BarChart3, Store, ChefHat, ClipboardList, CreditCard,
   QrCode, Shield, ChevronLeft, ChevronRight, LogOut,
   Heart, Package, Palette, Sun, Moon,
+  LayoutGrid, Settings2, MessageSquare,
 } from "lucide-react"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -37,20 +38,25 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard",       href: "/admin/dashboard",       icon: <LayoutDashboard size={18} />, roles: ["super_admin"], section: "Platform" },
   { label: "Restaurants",     href: "/admin/restaurants",     icon: <Store size={18} />,           roles: ["super_admin"], section: "Platform" },
   { label: "Customers",       href: "/admin/customers",       icon: <Users size={18} />,           roles: ["super_admin"], section: "Platform" },
+  // ── ADDED: Staff Reviews ──────────────────────────────────────────────────────
+  { label: "Staff Reviews",   href: "/admin/staff-reviews",   icon: <MessageSquare size={18} />,   roles: ["super_admin"], section: "Platform" },
   { label: "Reports",         href: "/admin/reports",         icon: <BarChart3 size={18} />,       roles: ["super_admin"], section: "Analytics" },
   { label: "Platform Health", href: "/admin/platform-health", icon: <Shield size={18} />,         roles: ["super_admin"], section: "Analytics" },
   { label: "Settings",        href: "/admin/settings",        icon: <Settings size={18} />,        roles: ["super_admin"], section: "System" },
 
   // ── Owner ────────────────────────────────────────────────────────────────────
-  { label: "Dashboard",  href: "/owner/dashboard",  icon: <LayoutDashboard size={18} />, roles: ["owner"], section: "Overview" },
-  { label: "Branches",   href: "/owner/branches",   icon: <Store size={18} />,           roles: ["owner"], section: "Operations" },
-  { label: "Menu",       href: "/owner/menu",        icon: <Utensils size={18} />,        roles: ["owner"], section: "Operations" },
-  { label: "Inventory",  href: "/owner/inventory",   icon: <Package size={18} />,         roles: ["owner"], section: "Operations" },
-  { label: "Bookings",   href: "/owner/bookings",    icon: <Calendar size={18} />,        roles: ["owner"], section: "Operations" },
-  { label: "Customers",  href: "/owner/customers",   icon: <Heart size={18} />,           roles: ["owner"], section: "Insights" },
-  { label: "Reports",    href: "/owner/reports",     icon: <BarChart3 size={18} />,       roles: ["owner"], section: "Insights" },
-  { label: "Branding",   href: "/owner/branding",    icon: <Palette size={18} />,         roles: ["owner"], section: "Settings" },
-  { label: "Settings",   href: "/owner/settings",    icon: <Settings size={18} />,        roles: ["owner"], section: "Settings" },
+  { label: "Dashboard",    href: "/owner/dashboard",  icon: <LayoutDashboard size={18} />, roles: ["owner"],            section: "Overview" },
+  { label: "Branches",     href: "/owner/branches",   icon: <Store size={18} />,           roles: ["owner"],            section: "Operations" },
+  { label: "Menu",         href: "/owner/menu",        icon: <Utensils size={18} />,        roles: ["owner"],            section: "Operations" },
+  { label: "Inventory",    href: "/owner/inventory",   icon: <Package size={18} />,         roles: ["owner"],            section: "Operations" },
+  { label: "Bookings",     href: "/owner/bookings",    icon: <Calendar size={18} />,        roles: ["owner"],            section: "Operations" },
+  // ── ADDED: Floor Layout (visible to owner + manager) ──────────────────────────
+  { label: "Floor Layout", href: "/owner/floor",       icon: <LayoutGrid size={18} />,      roles: ["owner", "manager"], section: "Operations" },
+  { label: "Customers",    href: "/owner/customers",   icon: <Heart size={18} />,           roles: ["owner"],            section: "Insights" },
+  { label: "Reports",      href: "/owner/reports",     icon: <BarChart3 size={18} />,       roles: ["owner"],            section: "Insights" },
+  { label: "Branding",     href: "/owner/branding",    icon: <Palette size={18} />,         roles: ["owner"],            section: "Settings" },
+  // ── ADDED: AI Settings (owner-only) ───────────────────────────────────────────
+  { label: "AI Settings",  href: "/owner/settings",    icon: <Settings2 size={18} />,       roles: ["owner"],            section: "Settings" },
 
   // ── Manager ──────────────────────────────────────────────────────────────────
   { label: "Dashboard",  href: "/staff/manager/dashboard", icon: <LayoutDashboard size={18} />, roles: ["manager"], section: "Overview" },
