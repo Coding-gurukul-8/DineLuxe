@@ -12,6 +12,129 @@ import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
 import type { InitiateInput, VerifyInput, SplitInput, UPIQRInput } from './payments.schema';
 
+interface CouponRow {
+  id: string;
+  restaurant_id: string;
+  code: string;
+  discount_type: string;
+  discount_value: string | number;
+  min_order_amount: string | number | null;
+  max_uses: number | null;
+  used_count: number;
+  expires_at: string | null;
+  is_active: boolean;
+}
+
+interface CouponValidationResult {
+  valid: boolean;
+  discount_amount: number;
+  coupon_id: string;
+  error_code?: string;
+}
+
+function roundMoney(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
+
+function couponError(errorCode: string, message: string): never {
+  throw Object.assign(new Error(message), { statusCode: 422, errorCode });
+}
+
+function normalizeCouponCode(code: string): string {
+  return code.trim().toUpperCase();
+}
+
+async function fetchCoupon(code: string, restaurantId: string): Promise<CouponRow | null> {
+  const { data, error } = await supabaseAdmin
+    .from('coupons')
+    .select('id, restaurant_id, code, discount_type, discount_value, min_order_amount, max_uses, used_count, expires_at, is_active')
+    .eq('code', normalizeCouponCode(code))
+    .eq('restaurant_id', restaurantId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data as CouponRow | null) ?? null;
+}
+
+async function validateCoupon(
+  code: string,
+  orderId: string,
+  orderAmount: number,
+  orderType: string,
+  userId: string,
+  restaurantId: string,
+): Promise<CouponValidationResult> {
+  const coupon = await fetchCoupon(code, restaurantId);
+
+  if (!coupon) {
+    couponError('COUPON_NOT_FOUND', 'Coupon not found');
+  }
+
+  if (!coupon.is_active) {
+    couponError('COUPON_INACTIVE', 'Coupon is inactive');
+  }
+
+  if (coupon.expires_at && new Date(coupon.expires_at).getTime() < Date.now()) {
+    couponError('COUPON_EXPIRED', 'Coupon has expired');
+  }
+
+  if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) {
+    couponError('COUPON_EXHAUSTED', 'Coupon has reached its usage limit');
+  }
+
+  const minimumOrderAmount = coupon.min_order_amount === null ? null : Number(coupon.min_order_amount);
+  if (minimumOrderAmount !== null && orderAmount < minimumOrderAmount) {
+    couponError('MINIMUM_NOT_MET', `Minimum order amount of ${minimumOrderAmount} is required`);
+  }
+
+  const discountValue = Number(coupon.discount_value);
+  const discountType = coupon.discount_type.toLowerCase();
+  let discountAmount = 0;
+
+  if (discountType === 'percent' || discountType === 'percentage') {
+    discountAmount = (discountValue / 100) * orderAmount;
+  } else {
+    discountAmount = discountValue;
+  }
+
+  discountAmount = roundMoney(Math.min(discountAmount, orderAmount));
+
+  if (!Number.isFinite(discountAmount) || discountAmount < 0) {
+    couponError('COUPON_INVALID', 'Coupon could not be applied');
+  }
+
+  return {
+    valid: true,
+    discount_amount: discountAmount,
+    coupon_id: coupon.id,
+  };
+}
+
+async function redeemCoupon(couponId: string, userId: string, orderId: string): Promise<void> {
+  const redemptionKey = `coupon_redeemed:${couponId}:${orderId}`;
+  const alreadyRedeemed = await redis.get(redemptionKey);
+
+  if (alreadyRedeemed) return;
+
+  const { data: coupon, error: fetchError } = await supabaseAdmin
+    .from('coupons')
+    .select('used_count')
+    .eq('id', couponId)
+    .maybeSingle();
+
+  if (fetchError) throw fetchError;
+
+  const nextCount = Number(coupon?.used_count ?? 0) + 1;
+  const { error: updateError } = await supabaseAdmin
+    .from('coupons')
+    .update({ used_count: nextCount })
+    .eq('id', couponId);
+
+  if (updateError) throw updateError;
+
+  await redis.set(redemptionKey, JSON.stringify({ couponId, userId, orderId, redeemed_at: new Date().toISOString() }));
+}
+
 function toDbPaymentStatus(status: VerifyInput['status']): 'pending' | 'completed' | 'failed' {
   return status === 'success' ? 'completed' : status;
 }
@@ -42,12 +165,12 @@ export async function initiatePayment(
   branchId: string,
   restaurantId: string
 ) {
-  const { order_id, payment_method } = input;
+  const { order_id, payment_method, coupon_code } = input;
 
   // FIX: orders has no total_amount - fetch status + compute total from items
   const { data: order, error: orderErr } = await supabaseAdmin
     .from('orders')
-    .select('id, status, branch_id')
+    .select('id, status, branch_id, customer_id, order_type')
     .eq('id', order_id)
     .eq('branch_id', branchId)
     .single();
@@ -76,6 +199,31 @@ export async function initiatePayment(
     throw Object.assign(new Error('Payment already exists for this order'), { statusCode: 409 });
   }
 
+  let discountAmount = 0;
+  let couponId: string | null = null;
+
+  if (coupon_code) {
+    const validation = await validateCoupon(
+      coupon_code,
+      order_id,
+      amount,
+      order.order_type,
+      order.customer_id ?? '',
+      restaurantId,
+    );
+
+    if (!validation.valid) {
+      throw Object.assign(new Error(validation.error_code ?? 'Coupon could not be applied'), {
+        statusCode: 422,
+      });
+    }
+
+    discountAmount = validation.discount_amount;
+    couponId = validation.coupon_id;
+  }
+
+  const finalAmount = roundMoney(Math.max(0, amount - discountAmount));
+
   const gatewayOrderId: string | null = null; // TODO: replace with real gateway order ID
 
   // FIX: use correct column name 'method' not 'payment_method'; no branch_id/restaurant_id
@@ -83,10 +231,12 @@ export async function initiatePayment(
     .from('payments')
     .insert({
       order_id,
-      amount,
+      amount: finalAmount,
+      discount_amount: discountAmount || null,
       method: payment_method,
       status: 'pending',
       gateway_order_id: gatewayOrderId,
+      coupon_id: couponId,
     })
     .select()
     .single();
@@ -99,6 +249,8 @@ export async function initiatePayment(
   return {
     payment_id: payment.id,
     amount: payment.amount,
+    discount_amount: discountAmount,
+    coupon_id: couponId,
     status: 'pending',
     gateway_order_id: gatewayOrderId,
   };
@@ -337,18 +489,33 @@ export async function onPaymentComplete(orderId: string, branchId: string, resta
     .update({ status: 'paid', paid_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq('id', orderId);
 
-  // 2. Update table status to 'cleaning'
-  const { data: order } = await supabaseAdmin
-    .from('orders')
-    .select('table_id')
-    .eq('id', orderId)
-    .single();
+  // 2. Update table status to 'cleaning' and redeem any applied coupon
+  const [{ data: order }, { data: payment }] = await Promise.all([
+    supabaseAdmin
+      .from('orders')
+      .select('table_id, customer_id')
+      .eq('id', orderId)
+      .single(),
+    supabaseAdmin
+      .from('payments')
+      .select('coupon_id')
+      .eq('order_id', orderId)
+      .maybeSingle(),
+  ]);
 
   if (order?.table_id) {
     await supabaseAdmin
       .from('tables')
       .update({ status: 'cleaning', updated_at: new Date().toISOString() })
       .eq('id', order.table_id);
+  }
+
+  if (payment?.coupon_id) {
+    try {
+      await redeemCoupon(payment.coupon_id, order?.customer_id ?? '', orderId);
+    } catch (redeemErr) {
+      console.warn('[payments] coupon redemption failed:', redeemErr);
+    }
   }
 
   // 3. Emit 'payment_confirmed' Realtime event

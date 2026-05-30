@@ -4,6 +4,7 @@ export const initiateSchema = z.object({
   order_id: z.string().uuid(),
   payment_method: z.enum(['upi', 'card', 'cash', 'wallet']),
   split_with: z.array(z.string().uuid()).optional(), // user IDs for split bill
+  coupon_code: z.string().trim().min(1).max(50).optional(),
 });
 
 export const verifySchema = z.object({
