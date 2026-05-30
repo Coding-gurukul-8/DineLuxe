@@ -20,6 +20,7 @@ import { FloorMap, type FloorTable } from "@/components/floor/FloorMap";
 import PageWrapper from "@/components/layout/PageWrapper";
 import { WS_EVENTS } from "@/lib/constants";
 import { formatCurrency, elapsedMinutes, timeAgo, cn } from "@/lib/utils";
+import DemandPrediction from "@/components/ai/DemandPrediction";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 // Actual backend shapes — not the ones described in the prompt.
@@ -385,7 +386,7 @@ export default function ManagerPage() {
                 <p className="text-sm text-gray-400">Queue is empty</p>
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto space-y-0 max-h-[520px]">
+              <div className="flex-1 overflow-y-auto space-y-0 max-h-130">
                 {queueEntries.map((entry) => (
                   <QueueFeedRow key={entry.id} entry={entry} />
                 ))}
@@ -422,6 +423,13 @@ export default function ManagerPage() {
             </div>
           )}
         </div>
+
+        {/* ── AI Demand Prediction ─────────────────────────────────── */}
+        {branchId && (
+          <div className="mt-2">
+            <DemandPrediction branchId={branchId} className="w-full" />
+          </div>
+        )}
 
       </div>
     </PageWrapper>

@@ -17,10 +17,13 @@
  *   <MenuManagement branchId={activeBranchId ?? undefined} />
  */
 
-import { Loader2, ChevronRight, UtensilsCrossed } from "lucide-react"
+import { useState } from "react"
+import { Loader2, ChevronRight, UtensilsCrossed, Sparkles, ChevronDown, ChevronUp } from "lucide-react"
 import { PageWrapper } from "@/components/layout/PageWrapper"
 import { MenuManagement } from "@/components/owner/MenuManagement"
+import SmartPricingWidget from "@/components/ai/SmartPricingWidget"
 import { useAuth } from "@/hooks/useAuth"
+import { cn } from "@/lib/utils"
 
 // ── Breadcrumb ─────────────────────────────────────────────────────────────────
 
@@ -35,10 +38,69 @@ function Breadcrumb() {
   )
 }
 
+// ── Collapsible AI Suggestions Panel ───────────────────────────────────────────
+
+function SmartSuggestionsPanel({
+  branchId,
+  restaurantId,
+}: {
+  branchId: string
+  restaurantId: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <div className="rounded-2xl border border-[#1A3C5E]/15 bg-linear-to-r from-[#1A3C5E]/3 to-[#E8A020]/3 overflow-hidden">
+      {/* Toggle button */}
+      <button
+        onClick={() => setIsOpen((v) => !v)}
+        className={cn(
+          "w-full flex items-center justify-between px-5 py-3.5 transition-colors",
+          isOpen
+            ? "bg-[#1A3C5E]/5 border-b border-[#1A3C5E]/10"
+            : "hover:bg-[#1A3C5E]/5"
+        )}
+        aria-expanded={isOpen}
+        aria-controls="smart-suggestions-panel"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-[#1A3C5E]/10 flex items-center justify-center">
+            <Sparkles size={14} className="text-[#1A3C5E]" />
+          </div>
+          <div className="text-left">
+            <span className="text-sm font-semibold text-gray-800">AI Suggestions</span>
+            <span className="ml-2 text-xs font-medium text-[#E8A020]">✨ Smart Pricing</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-gray-400">
+          <span className="text-xs hidden sm:block">
+            {isOpen ? "Hide suggestions" : "View AI-powered insights"}
+          </span>
+          {isOpen ? (
+            <ChevronUp size={16} className="text-[#1A3C5E]" />
+          ) : (
+            <ChevronDown size={16} />
+          )}
+        </div>
+      </button>
+
+      {/* Collapsible content */}
+      {isOpen && (
+        <div
+          id="smart-suggestions-panel"
+          className="p-4"
+        >
+          <SmartPricingWidget branchId={branchId} restaurantId={restaurantId} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function OwnerMenuPage() {
-  const { branchId, loading } = useAuth()
+  const { branchId, restaurantId, loading } = useAuth()
 
   // Show a brief spinner while auth hydrates — avoids a flash where
   // MenuManagement renders its BranchSelector before branchId arrives.
@@ -60,6 +122,11 @@ export default function OwnerMenuPage() {
       }
     >
       <Breadcrumb />
+
+      {/* ── AI Smart Suggestions — collapsible panel ─────────────────── */}
+      {branchId && restaurantId && (
+        <SmartSuggestionsPanel branchId={branchId} restaurantId={restaurantId} />
+      )}
 
       {/*
         MenuManagement handles its own branch resolution:
