@@ -1,26 +1,283 @@
-export type RecommendationRecord = Record<string, unknown> & { id: string };
+import { supabaseAdmin } from '../../config/supabase';
 
-export async function list(): Promise<RecommendationRecord[]> {
-  return [];
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface RestaurantRecommendation {
+  id: string;
+  branch_id: string;
+  name: string;
+  cuisine_type: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  lat: number;
+  lon: number;
+  avg_rating: number | null;
+  orders_last_7d: number;
+  distance_meters: number;
+  score: number;
+  match_reason: string;
 }
 
-export async function create(
-  payload: Record<string, unknown>
-): Promise<RecommendationRecord> {
-  return { id: 'temp', ...payload };
+interface RawRestaurantRow {
+  id: string;
+  branch_id: string;
+  name: string;
+  cuisine_type: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  lat: number;
+  lon: number;
+  avg_rating: number | null;
+  orders_last_7d: number;
 }
 
-export async function getById(id: string): Promise<RecommendationRecord> {
-  return { id };
+interface OrderHistoryRow {
+  restaurant_id: string;
+  cuisine_type: string | null;
+  visit_count: number;
 }
 
-export async function update(
-  id: string,
-  payload: Record<string, unknown>
-): Promise<RecommendationRecord> {
-  return { id, ...payload };
+interface DietaryProfile {
+  preferences: string[];
+  allergies: string[];
 }
 
-export async function remove(id: string): Promise<{ id: string; deleted: true }> {
-  return { id, deleted: true };
+// ---------------------------------------------------------------------------
+// Haversine distance — returns metres
+// ---------------------------------------------------------------------------
+function haversineMetres(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number,
+): number {
+  const R = 6_371_000; // Earth radius in metres
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ---------------------------------------------------------------------------
+// Fetch all active restaurants with branch geo + rating + recent order count
+// (shared by both service functions)
+// ---------------------------------------------------------------------------
+async function fetchActiveRestaurants(): Promise<RawRestaurantRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from('branches')
+    .select(
+      `
+      id,
+      lat, lon,
+      restaurants!inner (
+        id, name, cuisine_type, status,
+        restaurant_branding ( logo_url, primary_color ),
+        reviews ( overall_rating )
+      ),
+      orders ( id, created_at )
+    `,
+    )
+    .eq('is_active', true)
+    .eq('restaurants.status', 'active')
+    .not('lat', 'is', null)
+    .not('lon', 'is', null);
+
+  if (error) throw error;
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  return (data ?? []).map((branch: any) => {
+    const restaurant = branch.restaurants;
+    const branding = Array.isArray(restaurant.restaurant_branding)
+      ? restaurant.restaurant_branding[0]
+      : restaurant.restaurant_branding;
+    const reviews: Array<{ overall_rating: number }> = restaurant.reviews ?? [];
+    const allOrders: Array<{ created_at: string }> = branch.orders ?? [];
+
+    const avgRating =
+      reviews.length > 0
+        ? reviews.reduce((s, r) => s + r.overall_rating, 0) / reviews.length
+        : null;
+
+    const ordersLast7d = allOrders.filter((o) => o.created_at >= sevenDaysAgo).length;
+
+    return {
+      id: restaurant.id,
+      branch_id: branch.id,
+      name: restaurant.name,
+      cuisine_type: restaurant.cuisine_type ?? null,
+      logo_url: branding?.logo_url ?? null,
+      primary_color: branding?.primary_color ?? null,
+      lat: Number(branch.lat),
+      lon: Number(branch.lon),
+      avg_rating: avgRating,
+      orders_last_7d: ordersLast7d,
+    } satisfies RawRestaurantRow;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Time-of-day boost (IST = UTC + 5:30)
+// ---------------------------------------------------------------------------
+function getTimeBoost(cuisineType: string | null): number {
+  const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const hour = nowIST.getUTCHours();
+  const cuisine = (cuisineType ?? '').toLowerCase();
+
+  // 06:00–11:00 → breakfast boost
+  if (hour >= 6 && hour < 11) {
+    if (cuisine.includes('breakfast') || cuisine.includes('café') || cuisine.includes('cafe')) {
+      return 0.15;
+    }
+  }
+  // 12:00–15:00 → fast casual boost
+  if (hour >= 12 && hour < 15) {
+    if (
+      cuisine.includes('fast') ||
+      cuisine.includes('casual') ||
+      cuisine.includes('sandwich') ||
+      cuisine.includes('pizza')
+    ) {
+      return 0.1;
+    }
+  }
+  // 19:00–23:00 → fine dining boost
+  if (hour >= 19 && hour < 23) {
+    if (
+      cuisine.includes('fine') ||
+      cuisine.includes('continental') ||
+      cuisine.includes('french') ||
+      cuisine.includes('italian')
+    ) {
+      return 0.1;
+    }
+  }
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// getPersonalizedRecommendations
+// GET /recommendations/personalized?lat=&lon=&radius=
+// ---------------------------------------------------------------------------
+export async function getPersonalizedRecommendations(
+  userId: string,
+  lat: number,
+  lon: number,
+  radiusKm = 5,
+): Promise<RestaurantRecommendation[]> {
+  // Step 1 — order history (last 20 grouped by restaurant)
+  const { data: historyData } = await supabaseAdmin
+    .from('orders')
+    .select('restaurant_id:branches!branch_id(restaurant_id), created_at')
+    .eq('customer_id', userId)
+    .in('status', ['paid', 'served', 'closed'])
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  // Count visits per restaurant_id
+  const visitMap = new Map<string, number>();
+  for (const row of historyData ?? []) {
+    const rid = (row as any).restaurant_id?.restaurant_id;
+    if (rid) visitMap.set(rid, (visitMap.get(rid) ?? 0) + 1);
+  }
+  const orderHistory: OrderHistoryRow[] = Array.from(visitMap.entries())
+    .map(([restaurant_id, visit_count]) => ({ restaurant_id, cuisine_type: null, visit_count }))
+    .sort((a, b) => b.visit_count - a.visit_count)
+    .slice(0, 20);
+
+  // Step 2 — dietary profile
+  const { data: dietaryData } = await supabaseAdmin
+    .from('user_dietary_profiles')
+    .select('preferences, allergies')
+    .eq('user_id', userId)
+    .maybeSingle();
+  const userPreferences: DietaryProfile | null = dietaryData ?? null;
+
+  // Step 3 — all active restaurants
+  const restaurants = await fetchActiveRestaurants();
+
+  // Step 4 — score each restaurant
+  const radiusMetres = radiusKm * 1000;
+
+  const scored: RestaurantRecommendation[] = [];
+
+  for (const r of restaurants) {
+    const dist = haversineMetres(lat, lon, r.lat, r.lon);
+    if (dist > radiusMetres) continue;
+
+    const distanceScore = 1 - dist / radiusMetres;
+    const ratingScore = (r.avg_rating ?? 3) / 5;
+    const popularityScore = Math.min((r.orders_last_7d ?? 0) / 100, 1);
+
+    const orderCount = orderHistory.find((o) => o.restaurant_id === r.id)?.visit_count ?? 0;
+    const returnBonus = Math.min(orderCount / 10, 0.2);
+
+    const hasDietaryMatch = (userPreferences?.preferences?.length ?? 0) > 0;
+    const dietaryBonus = hasDietaryMatch ? 0.1 : 0;
+
+    const timeBoost = getTimeBoost(r.cuisine_type);
+
+    const score =
+      0.4 * distanceScore +
+      0.35 * ratingScore +
+      0.25 * popularityScore +
+      returnBonus +
+      dietaryBonus +
+      timeBoost;
+
+    let match_reason: string;
+    if (orderCount > 2) match_reason = "You've visited before";
+    else if (distanceScore > 0.8) match_reason = 'Very close to you';
+    else if (ratingScore > 0.8) match_reason = 'Highly rated';
+    else match_reason = 'Popular in your area';
+
+    scored.push({ ...r, distance_meters: Math.round(dist), score, match_reason });
+  }
+
+  // Step 5 — sort by score, return top 10
+  return scored.sort((a, b) => b.score - a.score).slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+// getPopularNearby
+// GET /recommendations/popular?lat=&lon=&radius=&cuisine=
+// No auth required
+// ---------------------------------------------------------------------------
+export async function getPopularNearby(
+  lat: number,
+  lon: number,
+  radiusKm = 5,
+  cuisine?: string,
+): Promise<RestaurantRecommendation[]> {
+  const restaurants = await fetchActiveRestaurants();
+  const radiusMetres = radiusKm * 1000;
+
+  const scored: RestaurantRecommendation[] = [];
+
+  for (const r of restaurants) {
+    // Optional cuisine filter (case-insensitive substring match)
+    if (cuisine) {
+      const haystack = (r.cuisine_type ?? '').toLowerCase();
+      if (!haystack.includes(cuisine.toLowerCase())) continue;
+    }
+
+    const dist = haversineMetres(lat, lon, r.lat, r.lon);
+    if (dist > radiusMetres) continue;
+
+    const ratingNorm = (r.avg_rating ?? 3) / 5;
+    const popularityNorm = Math.min((r.orders_last_7d ?? 0) / 100, 1);
+    const score = 0.5 * ratingNorm + 0.5 * popularityNorm;
+
+    scored.push({
+      ...r,
+      distance_meters: Math.round(dist),
+      score,
+      match_reason: 'Popular in your area',
+    });
+  }
+
+  return scored.sort((a, b) => b.score - a.score).slice(0, 20);
 }

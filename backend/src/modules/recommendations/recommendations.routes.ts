@@ -1,15 +1,15 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/auth.middleware';
-import * as ctrl from './recommendations.controller';
+import { getPersonalized, getPopular } from './recommendations.controller';
 
 const router: import('express').Router = Router();
 
-router.use(authenticate);
+// GET /recommendations/personalized?lat=&lon=&radius=
+// Requires authentication — score is personalised to req.user.id
+router.get('/personalized', authenticate, getPersonalized);
 
-router.get('/', ctrl.list);
-router.post('/', ctrl.create);
-router.get('/:id', ctrl.getById);
-router.patch('/:id', ctrl.update);
-router.delete('/:id', ctrl.remove);
+// GET /recommendations/popular?lat=&lon=&radius=&cuisine=
+// Public — no auth required, works for guest / logged-out users
+router.get('/popular', getPopular);
 
 export default router;

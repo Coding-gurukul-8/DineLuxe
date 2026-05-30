@@ -1,48 +1,56 @@
 import { Request, Response, NextFunction } from 'express';
-import { success } from '../../utils/response';
-import * as chatbotService from './chatbot.service';
+import { success, error } from '../../utils/response';
+import { sendMessage, getHistory } from './chatbot.service';
 
-export async function list(req: Request, res: Response, next: NextFunction) {
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+function handleKnownError(err: any, res: Response, next: NextFunction) {
+  const code = err.statusCode ?? err.status;
+  if (code && code >= 400 && code < 600) {
+    return res.status(code).json(error(err.message));
+  }
+  next(err);
+}
+
+// ─── POST /chatbot/message ────────────────────────────────────────────────────
+
+/**
+ * Accepts a user message and returns an AI/rule-based response.
+ * Body: { message: string; restaurant_id?: string }
+ * Auth: customer JWT required (req.user.id is the customer's userId)
+ */
+export async function handleSendMessage(req: Request, res: Response, next: NextFunction) {
   try {
-    const data = await chatbotService.list();
-    res.json(success(data));
-  } catch (err) {
-    next(err);
+    const userId = req.user!.id;
+    const { message, restaurant_id } = req.body;
+
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json(error('VALIDATION_ERROR', 'message is required'));
+    }
+
+    const result = await sendMessage(userId, message.trim(), restaurant_id);
+
+    res.json(
+      success(result, result.isEscalated ? 'Your concern has been escalated to a support agent' : undefined),
+    );
+  } catch (err: any) {
+    handleKnownError(err, res, next);
   }
 }
 
-export async function create(req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await chatbotService.create(req.body);
-    res.status(201).json(success(data));
-  } catch (err) {
-    next(err);
-  }
-}
+// ─── GET /chatbot/history ─────────────────────────────────────────────────────
 
-export async function getById(req: Request, res: Response, next: NextFunction) {
+/**
+ * Returns the conversation history for the authenticated user.
+ * If an open support ticket exists, returns the full DB conversation.
+ * Otherwise returns the Redis session history.
+ */
+export async function handleGetHistory(req: Request, res: Response, next: NextFunction) {
   try {
-    const data = await chatbotService.getById(req.params.id);
-    res.json(success(data));
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function update(req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await chatbotService.update(req.params.id, req.body);
-    res.json(success(data));
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function remove(req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await chatbotService.remove(req.params.id);
-    res.json(success(data));
-  } catch (err) {
-    next(err);
+    const userId = req.user!.id;
+    const result = await getHistory(userId);
+    res.json(success(result));
+  } catch (err: any) {
+    handleKnownError(err, res, next);
   }
 }
