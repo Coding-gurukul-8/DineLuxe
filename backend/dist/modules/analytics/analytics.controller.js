@@ -40,6 +40,7 @@ exports.getStaffingRecommendation = getStaffingRecommendation;
 exports.getRestaurantOverview = getRestaurantOverview;
 exports.getBranchHourly = getBranchHourly;
 exports.getRestaurantAnalytics = getRestaurantAnalytics;
+exports.getPlatformOverview = getPlatformOverview;
 const analyticsService = __importStar(require("./analytics.service"));
 const response_1 = require("../../utils/response");
 // ─── Existing AI/forecast endpoints ──────────────────────────────────────────
@@ -112,6 +113,24 @@ async function getRestaurantAnalytics(req, res, next) {
             return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'period must be 7d, 30d, or 90d' } });
         }
         const data = await analyticsService.getRestaurantAnalytics(req.params.restaurantId, period);
+        res.json((0, response_1.success)(data));
+    }
+    catch (err) {
+        next(err);
+    }
+}
+// ─── Platform overview (admin) ───────────────────────────────────────────────
+// GET /analytics/overview?period=7d|30d|90d
+async function getPlatformOverview(req, res, next) {
+    try {
+        const period = req.query.period || '30d';
+        if (!['7d', '30d', '90d'].includes(period)) {
+            return res.status(400).json({
+                success: false,
+                error: { code: 'VALIDATION_ERROR', message: 'period must be 7d, 30d, or 90d' },
+            });
+        }
+        const data = await analyticsService.getPlatformOverview(period);
         res.json((0, response_1.success)(data));
     }
     catch (err) {

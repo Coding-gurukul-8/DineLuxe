@@ -18,12 +18,12 @@ export declare const verifySchema: z.ZodObject<{
     status: z.ZodEnum<["success", "failed", "pending"]>;
     gateway_signature: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    status: "failed" | "pending" | "success";
+    status: "pending" | "failed" | "success";
     payment_id: string;
     gateway_payment_id?: string | undefined;
     gateway_signature?: string | undefined;
 }, {
-    status: "failed" | "pending" | "success";
+    status: "pending" | "failed" | "success";
     payment_id: string;
     gateway_payment_id?: string | undefined;
     gateway_signature?: string | undefined;

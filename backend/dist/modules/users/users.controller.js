@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMe = getMe;
+exports.listUsers = listUsers;
 exports.updateMe = updateMe;
 exports.deleteMe = deleteMe;
 exports.getUserById = getUserById;
@@ -46,6 +47,27 @@ async function getMe(req, res, next) {
         const authReq = req;
         const profile = await usersService.getMe(authReq.user.id);
         res.json((0, response_1.success)(profile, 'Profile fetched'));
+    }
+    catch (err) {
+        next(err);
+    }
+}
+// GET /users?role=&restaurant_id=
+async function listUsers(req, res, next) {
+    try {
+        const authReq = req;
+        const role = typeof req.query.role === 'string' ? req.query.role : undefined;
+        const queryRestaurantId = typeof req.query.restaurant_id === 'string'
+            ? req.query.restaurant_id
+            : undefined;
+        const restaurantId = authReq.restaurantId || authReq.user?.restaurant_id || queryRestaurantId;
+        if (!restaurantId) {
+            return res
+                .status(400)
+                .json((0, response_1.error)('VALIDATION_ERROR', 'Restaurant context is required'));
+        }
+        const users = await usersService.listUsers(restaurantId, role);
+        res.json((0, response_1.success)(users));
     }
     catch (err) {
         next(err);

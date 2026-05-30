@@ -4,6 +4,7 @@ exports.getMe = getMe;
 exports.updateMe = updateMe;
 exports.deleteMe = deleteMe;
 exports.getUserById = getUserById;
+exports.listUsers = listUsers;
 exports.checkEmail = checkEmail;
 const supabase_1 = require("../../config/supabase");
 const redis_1 = require("../../config/redis");
@@ -130,6 +131,20 @@ async function getUserById(userId, restaurantId) {
     if (error)
         throw new Error(`User not found: ${error.message}`);
     return mapUserRow(data);
+}
+// ─── List Users (owner/manager/admin) ───────────────────────────────────────
+async function listUsers(restaurantId, role) {
+    let query = supabase_1.supabaseAdmin
+        .from('users')
+        .select(`id, name, email, phone, role, is_active, created_at, profile_pic_url`)
+        .eq('restaurant_id', restaurantId);
+    if (role) {
+        query = query.eq('role', role);
+    }
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error)
+        throw new Error(`Failed to fetch users: ${error.message}`);
+    return (data ?? []).map(mapUserRow);
 }
 // ─── Check Email Availability ────────────────────────────────────────────────
 async function checkEmail(email) {

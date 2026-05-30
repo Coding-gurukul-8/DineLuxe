@@ -13,6 +13,16 @@ export declare function getCustomerInsights(restaurantId: string): Promise<{
     top_spenders: any;
 }>;
 export declare function getAdminPlatformReport(): Promise<any>;
+export declare function getAdminPlatformReportForPeriod(period: string): Promise<{
+    revenue_total: number;
+    orders_total: number;
+    avg_order_value: number;
+    period_breakdowns: {
+        date: string;
+        revenue: number;
+        orders: number;
+    }[];
+}>;
 export declare function getAdminTrends(from: string, to: string): Promise<any>;
 export declare function exportReport(params: {
     report_type: string;

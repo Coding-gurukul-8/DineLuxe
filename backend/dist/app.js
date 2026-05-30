@@ -19,7 +19,10 @@ const analytics_routes_1 = __importDefault(require("./modules/analytics/analytic
 const bookings_routes_1 = __importDefault(require("./modules/bookings/bookings.routes"));
 const branches_routes_1 = __importDefault(require("./modules/branches/branches.routes"));
 const branding_routes_1 = __importDefault(require("./modules/branding/branding.routes"));
+const chatbot_routes_1 = __importDefault(require("./modules/chatbot/chatbot.routes"));
+const customer_preferences_routes_1 = __importDefault(require("./modules/customer-preferences/customer-preferences.routes"));
 const delivery_routes_1 = __importDefault(require("./modules/delivery/delivery.routes"));
+const dynamic_pricing_routes_1 = __importDefault(require("./modules/dynamic-pricing/dynamic-pricing.routes"));
 const floor_layout_routes_1 = __importDefault(require("./modules/floor-layout/floor-layout.routes"));
 const geo_routes_1 = __importDefault(require("./modules/geo/geo.routes"));
 const inventory_routes_1 = __importDefault(require("./modules/inventory/inventory.routes"));
@@ -31,13 +34,19 @@ const order_items_routes_1 = __importDefault(require("./modules/order-items/orde
 const orders_routes_1 = __importDefault(require("./modules/orders/orders.routes"));
 const payments_routes_1 = __importDefault(require("./modules/payments/payments.routes"));
 const queue_routes_1 = __importDefault(require("./modules/queue/queue.routes"));
+const recommendations_routes_1 = __importDefault(require("./modules/recommendations/recommendations.routes"));
+const recipe_ingredients_routes_1 = __importDefault(require("./modules/recipe-ingredients/recipe-ingredients.routes"));
 const reports_routes_1 = __importDefault(require("./modules/reports/reports.routes"));
 const restaurants_routes_1 = __importDefault(require("./modules/restaurants/restaurants.routes"));
 const reviews_routes_1 = __importDefault(require("./modules/reviews/reviews.routes"));
+const shifts_routes_1 = __importDefault(require("./modules/shifts/shifts.routes"));
 const staff_routes_1 = __importDefault(require("./modules/staff/staff.routes"));
+const staff_feedback_routes_1 = __importDefault(require("./modules/staff-feedback/staff-feedback.routes"));
+const staffing_routes_1 = __importDefault(require("./modules/staffing/staffing.routes"));
 const support_routes_1 = __importDefault(require("./modules/support/support.routes"));
 const tables_routes_1 = __importDefault(require("./modules/tables/tables.routes"));
 const users_routes_1 = __importDefault(require("./modules/users/users.routes"));
+const waste_log_routes_1 = __importDefault(require("./modules/waste-log/waste-log.routes"));
 const app = (0, express_1.default)();
 // ─── Trust proxy (must be set before rate-limiters & other middleware) ───────
 // Tells Express to trust the X-Forwarded-For header set by reverse proxies
@@ -71,7 +80,10 @@ app.use(`${API}/bookings`, bookings_routes_1.default);
 app.use(`${API}/branches`, branches_routes_1.default);
 app.use(`${API}/restaurant/:id/branding`, branding_routes_1.default);
 app.use(`${API}/restaurants/:id/branding`, branding_routes_1.default);
+app.use(`${API}/chatbot`, chatbot_routes_1.default);
+app.use(`${API}/customer-preferences`, customer_preferences_routes_1.default);
 app.use(`${API}/delivery`, delivery_routes_1.default);
+app.use(`${API}/dynamic-pricing`, dynamic_pricing_routes_1.default);
 app.use(`${API}/floor-layout`, floor_layout_routes_1.default);
 app.use(`${API}/geo`, geo_routes_1.default);
 app.use(`${API}/inventory`, inventory_routes_1.default);
@@ -83,13 +95,19 @@ app.use(`${API}/order-items`, order_items_routes_1.default);
 app.use(`${API}/orders`, orders_routes_1.default);
 app.use(`${API}/payments`, payments_routes_1.default);
 app.use(`${API}/queue`, queue_routes_1.default);
+app.use(`${API}/recommendations`, recommendations_routes_1.default);
+app.use(`${API}/recipe-ingredients`, recipe_ingredients_routes_1.default);
 app.use(`${API}/reports`, reports_routes_1.default);
 app.use(`${API}/restaurants`, restaurants_routes_1.default);
 app.use(`${API}/reviews`, reviews_routes_1.default);
+app.use(`${API}/shifts`, shifts_routes_1.default);
 app.use(`${API}/staff`, staff_routes_1.default);
+app.use(`${API}/staff-feedback`, staff_feedback_routes_1.default);
+app.use(`${API}/staffing`, staffing_routes_1.default);
 app.use(`${API}/support`, support_routes_1.default);
 app.use(`${API}/tables`, tables_routes_1.default);
 app.use(`${API}/users`, users_routes_1.default);
+app.use(`${API}/waste-log`, waste_log_routes_1.default);
 // ─── Health checks ───────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });

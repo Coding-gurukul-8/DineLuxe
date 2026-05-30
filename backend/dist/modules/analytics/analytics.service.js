@@ -7,10 +7,21 @@ exports.getStaffingRecommendation = getStaffingRecommendation;
 exports.getRestaurantOverview = getRestaurantOverview;
 exports.getBranchHourly = getBranchHourly;
 exports.getRestaurantAnalytics = getRestaurantAnalytics;
+exports.getPlatformOverview = getPlatformOverview;
 const supabase_1 = require("../../config/supabase");
+const platform_analytics_1 = require("../../utils/platform-analytics");
 function isMissingRpc(error) {
     return (error?.message ?? '').includes('Could not find the function');
 }
+const ORDER_STATUSES = [
+    'created',
+    'confirmed',
+    'preparing',
+    'ready',
+    'served',
+    'paid',
+    'closed',
+];
 // ─── Menu suggestions ─────────────────────────────────────────────────────────
 async function getMenuSuggestions(branchId) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -162,7 +173,7 @@ async function getRestaurantOverview(restaurantId) {
             .select('id, total_amount', { count: 'exact' })
             .eq('restaurant_id', restaurantId)
             .gte('created_at', startOfToday)
-            .neq('status', 'cancelled')
+            .in('status', ORDER_STATUSES)
             .then(({ data, count }) => ({ data: data ?? [], count: count ?? 0 })),
         // Tables for occupancy
         supabase_1.supabaseAdmin
@@ -221,7 +232,7 @@ async function getBranchHourly(branchId) {
         .select('id, created_at, total_amount, status')
         .eq('branch_id', branchId)
         .gte('created_at', startOfToday)
-        .neq('status', 'cancelled');
+        .in('status', ORDER_STATUSES);
     if (error)
         throw error;
     // Bucket into hours 0–23
@@ -308,6 +319,22 @@ async function getRestaurantAnalytics(restaurantId, period = '30d') {
             total_revenue: Math.round(totalRevenue * 100) / 100,
             total_orders: totalOrders,
         },
+    };
+}
+// ─── Platform overview (admin) ───────────────────────────────────────────────
+// GET /analytics/overview?period=7d|30d|90d
+async function getPlatformOverview(period) {
+    const report = await (0, platform_analytics_1.getPlatformPeriodReport)(period);
+    return {
+        daily_revenue: report.period_breakdowns.map((row) => ({
+            date: row.date,
+            revenue: row.revenue,
+        })),
+        daily_orders: report.period_breakdowns.map((row) => ({
+            date: row.date,
+            orders: row.orders,
+        })),
+        top_categories: [],
     };
 }
 //# sourceMappingURL=analytics.service.js.map

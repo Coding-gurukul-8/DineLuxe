@@ -15,6 +15,7 @@ router.get('/menu-performance', tenant_middleware_1.injectTenant, (0, rbac_middl
 router.get('/kitchen-performance', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('owner', 'manager'), reports_controller_1.getKitchenPerformance);
 router.get('/customer-insights', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('owner'), reports_controller_1.getCustomerInsights);
 router.get('/admin/platform', (0, rbac_middleware_1.requireRole)('admin', 'super_admin'), reports_controller_1.getAdminPlatform);
+router.get('/platform', (0, rbac_middleware_1.requireRole)('admin', 'super_admin'), reports_controller_1.getPlatformReport);
 router.get('/admin/trends', (0, rbac_middleware_1.requireRole)('admin', 'super_admin'), reports_controller_1.getAdminTrends);
 router.post('/export', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('owner', 'admin'), (0, validate_middleware_1.validate)(reports_schema_1.exportReportSchema), reports_controller_1.exportReport);
 // ─── NEW: Frontend-shaped endpoints for ReportsDashboard ─────────────────────

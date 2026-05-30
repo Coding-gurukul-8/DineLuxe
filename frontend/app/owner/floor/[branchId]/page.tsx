@@ -15,6 +15,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useCallback } from "react";
@@ -53,12 +54,6 @@ const FloorMap = dynamic(
     })),
   { ssr: false }
 );
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface PageProps {
-  params: { branchId: string };
-}
 
 // ── Skeleton while the designer JS bundle loads ───────────────────────────────
 
@@ -260,9 +255,9 @@ function HeaderSkeleton() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function OwnerFloorBranchPage({ params }: PageProps) {
-  // In Next.js 14 (App Router), params is a plain object — destructure directly.
-  const { branchId } = params;
+export default function OwnerFloorBranchPage() {
+  const params = useParams();
+  const branchId = params.branchId as string;
 
   const qc = useQueryClient();
   const [showLiveMap, setShowLiveMap] = useState(false);

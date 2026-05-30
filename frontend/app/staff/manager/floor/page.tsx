@@ -186,6 +186,14 @@ function TableDetailsSheet({
     staleTime: 15_000,
   })
 
+  const tableInfoItems = [
+    ["ID", table.id.slice(0, 8) + "…"],
+    ["Shape", table.shape],
+    ["Capacity", `${table.capacity} guests`],
+    rawTable?.zone ? ["Zone", rawTable.zone] : null,
+    rawTable?.floor_number ? ["Floor", `Floor ${rawTable.floor_number}`] : null,
+  ].filter((item): item is [string, string] => Boolean(item))
+
   return (
     <motion.div
       initial={{ x: "100%" }}
@@ -332,13 +340,7 @@ function TableDetailsSheet({
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Table Info
           </p>
-          {[
-            ["ID",       table.id.slice(0, 8) + "…"],
-            ["Shape",    table.shape],
-            ["Capacity", `${table.capacity} guests`],
-            rawTable?.zone        ? ["Zone",  rawTable.zone]               : null,
-            rawTable?.floor_number ? ["Floor", `Floor ${rawTable.floor_number}`] : null,
-          ].filter(Boolean).map(([label, value]) => (
+          {tableInfoItems.map(([label, value]) => (
             <div key={label} className="flex justify-between text-xs">
               <span className="text-gray-400">{label}</span>
               <span className="text-gray-600 capitalize">{value}</span>

@@ -8,6 +8,9 @@ const analytics_controller_1 = require("./analytics.controller");
 const router = (0, express_1.Router)();
 // ── All analytics routes require authentication ───────────────────────────────
 router.use(auth_middleware_1.authenticate);
+// ── Platform overview (admin) ───────────────────────────────────────────────
+// GET /analytics/overview?period=7d|30d|90d
+router.get('/overview', (0, rbac_middleware_1.requireRole)('admin', 'super_admin'), analytics_controller_1.getPlatformOverview);
 // ── Existing AI/forecast routes (owner + manager) ─────────────────────────────
 router.get('/menu-suggestions/:branchId', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('owner', 'manager'), analytics_controller_1.getMenuSuggestions);
 router.get('/demand-forecast/:branchId', tenant_middleware_1.injectTenant, (0, rbac_middleware_1.requireRole)('owner', 'manager'), analytics_controller_1.getDemandForecast);

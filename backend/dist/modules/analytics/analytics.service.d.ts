@@ -58,4 +58,15 @@ export declare function getRestaurantAnalytics(restaurantId: string, period?: st
         total_orders: number;
     };
 }>;
+export declare function getPlatformOverview(period: string): Promise<{
+    daily_revenue: {
+        date: string;
+        revenue: number;
+    }[];
+    daily_orders: {
+        date: string;
+        orders: number;
+    }[];
+    top_categories: never[];
+}>;
 //# sourceMappingURL=analytics.service.d.ts.map

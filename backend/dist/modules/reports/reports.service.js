@@ -8,11 +8,13 @@ exports.getMenuPerformance = getMenuPerformance;
 exports.getKitchenPerformance = getKitchenPerformance;
 exports.getCustomerInsights = getCustomerInsights;
 exports.getAdminPlatformReport = getAdminPlatformReport;
+exports.getAdminPlatformReportForPeriod = getAdminPlatformReportForPeriod;
 exports.getAdminTrends = getAdminTrends;
 exports.exportReport = exportReport;
 const supabase_1 = require("../../config/supabase");
 const json2csv_1 = require("json2csv");
 const pdfkit_1 = __importDefault(require("pdfkit"));
+const platform_analytics_1 = require("../../utils/platform-analytics");
 function isMissingRpc(error) {
     return (error?.message ?? '').includes('Could not find the function');
 }
@@ -103,6 +105,16 @@ async function getAdminPlatformReport() {
         throw error;
     }
     return data ?? [];
+}
+// ─── Admin platform report (period-based, frontend shape) ───────────────────
+async function getAdminPlatformReportForPeriod(period) {
+    const report = await (0, platform_analytics_1.getPlatformPeriodReport)(period);
+    return {
+        revenue_total: report.revenue_total,
+        orders_total: report.orders_total,
+        avg_order_value: report.avg_order_value,
+        period_breakdowns: report.period_breakdowns,
+    };
 }
 // ─── Admin trends ─────────────────────────────────────────────────────────────
 async function getAdminTrends(from, to) {

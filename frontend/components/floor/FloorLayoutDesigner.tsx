@@ -18,6 +18,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   KeyboardEvent,
 } from "react";
@@ -769,7 +770,10 @@ export default function FloorLayoutDesigner({
 
   // ── Floor helpers ──────────────────────────────────────────────────────────
 
-  const currentTables = floors[activeFloor]?.tables ?? [];
+  const currentTables = useMemo(
+    () => floors[activeFloor]?.tables ?? [],
+    [floors, activeFloor]
+  );
 
   const updateTables = useCallback(
     (updater: (tables: DesignTable[]) => DesignTable[]) => {

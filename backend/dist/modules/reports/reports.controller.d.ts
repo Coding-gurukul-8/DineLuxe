@@ -4,6 +4,7 @@ export declare function getMenuPerformance(req: Request, res: Response, next: Ne
 export declare function getKitchenPerformance(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function getCustomerInsights(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
 export declare function getAdminPlatform(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function getPlatformReport(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
 export declare function getAdminTrends(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function exportReport(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
 /**

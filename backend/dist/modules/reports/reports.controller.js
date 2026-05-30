@@ -38,6 +38,7 @@ exports.getMenuPerformance = getMenuPerformance;
 exports.getKitchenPerformance = getKitchenPerformance;
 exports.getCustomerInsights = getCustomerInsights;
 exports.getAdminPlatform = getAdminPlatform;
+exports.getPlatformReport = getPlatformReport;
 exports.getAdminTrends = getAdminTrends;
 exports.exportReport = exportReport;
 exports.getRevenueReport = getRevenueReport;
@@ -46,6 +47,15 @@ exports.getMenuReport = getMenuReport;
 exports.getStaffReport = getStaffReport;
 const reportsService = __importStar(require("./reports.service"));
 const response_1 = require("../../utils/response");
+const ORDER_STATUSES = [
+    'created',
+    'confirmed',
+    'preparing',
+    'ready',
+    'served',
+    'paid',
+    'closed',
+];
 // ─── Existing endpoints ───────────────────────────────────────────────────────
 async function getSales(req, res, next) {
     try {
@@ -111,6 +121,22 @@ async function getCustomerInsights(req, res, next) {
 async function getAdminPlatform(req, res, next) {
     try {
         const data = await reportsService.getAdminPlatformReport();
+        res.json((0, response_1.success)(data));
+    }
+    catch (err) {
+        next(err);
+    }
+}
+// GET /reports/platform?period=7d|30d|90d
+async function getPlatformReport(req, res, next) {
+    try {
+        const period = req.query.period || '30d';
+        if (!['7d', '30d', '90d'].includes(period)) {
+            return res
+                .status(400)
+                .json((0, response_1.error)('VALIDATION_ERROR', 'period must be 7d, 30d, or 90d'));
+        }
+        const data = await reportsService.getAdminPlatformReportForPeriod(period);
         res.json((0, response_1.success)(data));
     }
     catch (err) {
@@ -220,7 +246,7 @@ async function getOrdersReport(req, res, next) {
             .from('orders')
             .select('id, order_type')
             .eq('restaurant_id', restaurant_id)
-            .neq('status', 'cancelled');
+            .in('status', ORDER_STATUSES);
         if (branch_id)
             query = query.eq('branch_id', branch_id);
         if (from)
@@ -301,7 +327,7 @@ async function getStaffReport(req, res, next) {
         users!waiter_id (name)
       `)
             .eq('restaurant_id', restaurant_id)
-            .neq('status', 'cancelled');
+            .in('status', ORDER_STATUSES);
         if (branch_id)
             query = query.eq('branch_id', branch_id);
         if (from)
