@@ -344,3 +344,195 @@ export interface PaymentInitResponse {
   amount: number;
   currency: string;
 }
+// ─── User (base) ──────────────────────────────────────────────────────────────
+// Minimal User shape used as a join target across multiple new interfaces below.
+// Defined here to avoid forward-reference issues; does not replace any
+// existing Staff interface.
+
+export interface User {
+  id: string;
+  first_name: string;
+  last_name: string;
+  role: UserRole;
+  profile_pic_url: string | null;
+}
+
+// ─── Dynamic Pricing ──────────────────────────────────────────────────────────
+
+export type DiscountType = 'percentage' | 'fixed_amount';
+
+export interface DynamicPricingRule {
+  id: string;
+  branch_id: string;
+  menu_item_id: string | null;
+  menu_category_id: string | null;
+  rule_name: string;
+  discount_type: DiscountType;
+  discount_value: number;
+  days_of_week: number[];           // 0=Sun, 1=Mon, …, 6=Sat
+  start_time: string;               // "HH:MM:SS"
+  end_time: string;                 // "HH:MM:SS"
+  is_active: boolean;
+  created_at: string;
+  // Joined
+  menu_item?: Pick<MenuItem, 'id' | 'name' | 'price'> | null;
+  menu_category?: Pick<MenuCategory, 'id' | 'name'> | null;
+}
+
+// ─── Shifts ───────────────────────────────────────────────────────────────────
+
+export interface Shift {
+  id: string;
+  branch_id: string;
+  staff_id: string;
+  date: string;                     // "YYYY-MM-DD"
+  start_time: string;               // "HH:MM" or "HH:MM:SS"
+  end_time: string;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  // Joined
+  staff?: Pick<User, 'id' | 'first_name' | 'last_name' | 'role'>;
+}
+
+// ─── Customer Preferences ─────────────────────────────────────────────────────
+
+export type DietaryPreference =
+  | 'vegan'
+  | 'vegetarian'
+  | 'halal'
+  | 'jain'
+  | 'gluten_free'
+  | 'keto'
+  | 'high_protein';
+
+export type AllergenType =
+  | 'nuts'
+  | 'dairy'
+  | 'gluten'
+  | 'eggs'
+  | 'soy'
+  | 'shellfish'
+  | 'fish';
+
+export interface DietaryProfile {
+  user_id: string;
+  preferences: DietaryPreference[];
+  allergies: AllergenType[];
+  updated_at: string;
+}
+
+export interface CustomerTablePreference {
+  id: string;
+  user_id: string;
+  branch_id: string;
+  preferred_table_id: string | null;
+  preferred_table_label: string | null;
+  times_selected: number;
+  last_selected: string;
+  branch_name?: string;
+}
+
+// ─── Staff Feedback ───────────────────────────────────────────────────────────
+
+export interface StaffFeedback {
+  id: string;
+  restaurant_id: string;
+  branch_id: string | null;
+  role_label: string;               // "A Waiter", "A Chef" — never the real name
+  feedback_text: string;
+  sentiment_label: SentimentLabel | null;
+  sentiment_score: number | null;
+  is_flagged: boolean;
+  created_at: string;
+  branch_name?: string;
+}
+
+export interface StaffFeedbackStats {
+  items: StaffFeedback[];
+  total: number;
+  positive_pct: number;
+  neutral_pct: number;
+  negative_pct: number;
+  high_negative_branches: string[];
+}
+
+// ─── AI Recommendations ───────────────────────────────────────────────────────
+
+export interface RestaurantRecommendation {
+  id: string;
+  name: string;
+  cuisine_type: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  branch_id: string;
+  lat: number | null;
+  lon: number | null;
+  distance_meters: number;
+  avg_rating: number;
+  orders_last_7d: number;
+  score: number;
+  match_reason: string;
+}
+
+// ─── Chatbot ──────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: 'user' | 'ai' | 'agent';
+  content: string;
+  timestamp: string;
+}
+
+export interface ChatbotResponse {
+  response: string;
+  isEscalated: boolean;
+  ticketId: string | null;
+}
+
+// ─── Staffing Prediction ──────────────────────────────────────────────────────
+
+export interface HourlyPrediction {
+  hour: number;
+  predicted_orders: number;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface StaffingRecommendation {
+  date: string;
+  peak_hours: number[];
+  recommendations: Array<{
+    hour: number;
+    waiters: number;
+    chefs: number;
+    cashiers: number;
+  }>;
+  current_scheduled: {
+    waiter: number;
+    chef: number;
+    cashier: number;
+    host: number;
+  };
+  warnings: string[];
+}
+
+// ─── Social Dining ────────────────────────────────────────────────────────────
+
+export interface SocialDiningGroup {
+  id: string;
+  booking_id: string;
+  invite_code: string;
+  organizer_id: string;
+  max_members: number;
+  is_open: boolean;
+  created_at: string;
+  members?: SocialDiningMember[];
+}
+
+export interface SocialDiningMember {
+  id: string;
+  group_id: string;
+  user_id: string;
+  joined_at: string;
+  pre_orders: Array<{ menu_item_id: string; quantity: number; notes?: string }> | null;
+  user?: Pick<User, 'id' | 'first_name' | 'last_name' | 'profile_pic_url'>;
+}
