@@ -45,6 +45,21 @@ const envSchema = z.object({
     .string()
     .transform(Number)
     .pipe(z.number().positive()),
+
+  // ─── Push Notifications (Web Push / VAPID) ──────────────────────────────
+  // All three keys are optional — if any are absent, push notifications are
+  // silently disabled and the rest of the system continues normally.
+  //
+  // Generate a key pair once with:
+  //   npx web-push generate-vapid-keys
+  //
+  // VAPID_PUBLIC_KEY  — shared with the browser (safe to expose)
+  // VAPID_PRIVATE_KEY — kept server-side only, never sent to the client
+  // VAPID_CONTACT_EMAIL — shown to push services as a contact address;
+  //                       must be a valid mailto: or https: URI
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_CONTACT_EMAIL: z.string().email('VAPID_CONTACT_EMAIL must be a valid email').optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
