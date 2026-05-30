@@ -39,7 +39,21 @@ export const webhookSchema = z.object({
   gateway_signature: z.string().optional(),
 });
 
+// ─── Refund Schemas ───────────────────────────────────────────────────────────
+
+export const refundRequestSchema = z.object({
+  reason: z.string().min(10, 'Please provide at least 10 characters describing the issue').max(2000),
+  items: z.array(z.string().uuid()).optional(), // optional: specific order_item IDs
+});
+
+export const processRefundSchema = z.object({
+  action: z.enum(['approve', 'reject']),
+  notes: z.string().max(1000).optional(),
+});
+
 export type InitiateInput = z.infer<typeof initiateSchema>;
 export type VerifyInput = z.infer<typeof verifySchema>;
 export type SplitInput = z.infer<typeof splitSchema>;
 export type UPIQRInput = z.infer<typeof upiQRSchema>;
+export type RefundRequestInput = z.infer<typeof refundRequestSchema>;
+export type ProcessRefundInput = z.infer<typeof processRefundSchema>;

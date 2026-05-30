@@ -9,9 +9,11 @@ import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { CheckCircle, Clock, ChefHat, Bike, UtensilsCrossed, CreditCard } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { RefundRequest } from "@/components/payment/RefundRequest";
 
 interface OrderDetail {
   id: string; type: string; status: string; tableLabel?: string;
+  payment_id?: string;
   items: { name:string; quantity:number; unitPrice:number; status:string }[];
   subtotal: number; tax: number; total: number;
   estimatedReadyAt?: string; createdAt: string;
@@ -39,6 +41,11 @@ function getStepIndex(steps: typeof STATUS_STEPS, status: string): number {
   return idx === -1 ? 0 : idx;
 }
 
+/** Returns true if the order was created more than 1 hour ago */
+function isOlderThan1Hour(createdAt: string): boolean {
+  return Date.now() - new Date(createdAt).getTime() > 60 * 60 * 1000;
+}
+
 export default function OrderTrackingPage() {
   const { orderId } = useParams<{ orderId:string }>();
   const router = useRouter();
@@ -62,6 +69,13 @@ export default function OrderTrackingPage() {
 
   const steps = order?.type === "delivery" ? DELIVERY_STEPS : STATUS_STEPS;
   const currentStep = order ? getStepIndex(steps, order.status) : 0;
+
+  // Refund eligibility: order is 'paid', has a payment_id, and was placed >1 hour ago
+  const showRefund =
+    order?.status === "paid" &&
+    !!order?.payment_id &&
+    !!order?.createdAt &&
+    isOlderThan1Hour(order.createdAt);
 
   if (isLoading) {
     return (
@@ -148,6 +162,19 @@ export default function OrderTrackingPage() {
             <div className="flex justify-between text-base font-bold text-gray-900"><span>Total</span><span>{formatCurrency(order.total)}</span></div>
           </div>
         </div>
+
+        {/* Refund Request — only for paid orders older than 1 hour */}
+        {showRefund && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-2">
+            <p className="text-xs text-gray-500 font-medium">Having an issue with this order?</p>
+            <RefundRequest
+              orderId={order.id}
+              paymentId={order.payment_id!}
+              amount={order.total}
+              onSuccess={() => qc.invalidateQueries({ queryKey: ["order", orderId] })}
+            />
+          </div>
+        )}
 
         {/* Meta */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-2 text-sm text-gray-600">

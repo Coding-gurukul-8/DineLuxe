@@ -10,6 +10,7 @@
 import QRCode from 'qrcode';
 import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
+import { sendPush, createInApp, sendEmailNotification } from '../notifications/notifications.service';
 import type { InitiateInput, VerifyInput, SplitInput, UPIQRInput } from './payments.schema';
 
 interface CouponRow {
@@ -544,4 +545,342 @@ export async function handleGatewayWebhook(body: Record<string, unknown>) {
   // TODO: Implement real webhook signature verification
   console.log('[webhook] Received gateway event:', body.event);
   return { received: true };
+}
+
+// ─── Request Refund ───────────────────────────────────────────────────────────
+// Called by customer via POST /payments/:orderId/refund-request
+export async function requestRefund(
+  orderId: string,
+  userId: string,
+  reason: string,
+  items?: string[],
+) {
+  // 1. Verify order belongs to this user
+  const { data: order, error: orderErr } = await supabaseAdmin
+    .from('orders')
+    .select('id, status, customer_id, branch_id')
+    .eq('id', orderId)
+    .single();
+
+  if (orderErr || !order) {
+    throw Object.assign(new Error('Order not found'), { statusCode: 404 });
+  }
+
+  if (order.customer_id !== userId) {
+    throw Object.assign(new Error('Forbidden: order does not belong to you'), { statusCode: 403 });
+  }
+
+  // 2. Verify order is in a refundable state
+  if (order.status !== 'paid' && order.status !== 'closed') {
+    throw Object.assign(
+      new Error(`Refund can only be requested for paid or closed orders. Current status: ${order.status}`),
+      { statusCode: 422 },
+    );
+  }
+
+  // 3. Check no existing pending refund ticket for this order
+  // Support tickets store order_id inside the conversation meta; we check via a
+  // status query filtering on the metadata stored in the first conversation entry.
+  // Since support_tickets may not have a reference_id column we store order_id
+  // in the conversation meta and use a reference_type field if available.
+  const { data: existingTickets } = await supabaseAdmin
+    .from('support_tickets')
+    .select('id, status')
+    .eq('user_id', userId)
+    .in('status', ['open', 'assigned']);
+
+  // Filter in JS — avoids dependency on a reference_id column that may not exist
+  const existingRefund = (existingTickets ?? []).find((t: any) => {
+    const conv = Array.isArray(t.conversation) ? t.conversation : [];
+    const meta = conv[0]?.meta ?? {};
+    return meta.reference_type === 'refund' && meta.order_id === orderId;
+  });
+
+  if (existingRefund) {
+    throw Object.assign(
+      new Error('A refund request for this order is already pending'),
+      { statusCode: 409 },
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  // 4. Fetch payment to mark refund_requested
+  const { data: payment } = await supabaseAdmin
+    .from('payments')
+    .select('id, amount, status')
+    .eq('order_id', orderId)
+    .maybeSingle();
+
+  // 5. Create support ticket for the refund request
+  const { data: ticket, error: ticketErr } = await supabaseAdmin
+    .from('support_tickets')
+    .insert({
+      user_id: userId,
+      subject: `Refund Request - Order #${orderId.slice(-8).toUpperCase()}`,
+      conversation: [
+        {
+          sender_id: userId,
+          sender_role: 'customer',
+          message: reason,
+          created_at: now,
+          attachments: [],
+          meta: {
+            category: 'payment',
+            priority: 'medium',
+            reference_type: 'refund',
+            order_id: orderId,
+            payment_id: payment?.id ?? null,
+            items: items ?? [],
+          },
+        },
+      ],
+      status: 'open',
+      created_at: now,
+      updated_at: now,
+    })
+    .select()
+    .single();
+
+  if (ticketErr || !ticket) {
+    throw ticketErr ?? new Error('Failed to create refund support ticket');
+  }
+
+  // 6. Mark the payment as refund_requested using status
+  // The payments table has a 'status' column; we update it to signal the refund.
+  if (payment?.id) {
+    await supabaseAdmin
+      .from('payments')
+      .update({
+        status: 'refund_requested',
+        updated_at: now,
+      })
+      .eq('id', payment.id);
+  }
+
+  // 7. Notify super admins
+  const { data: superAdmins } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .eq('role', 'super_admin');
+
+  for (const admin of superAdmins ?? []) {
+    createInApp(
+      admin.id,
+      'payment',
+      'New Refund Request',
+      `Customer requested a refund for Order #${orderId.slice(-8).toUpperCase()}`,
+      ticket.id,
+      'support_ticket',
+    ).catch(() => {});
+
+    sendPush(
+      admin.id,
+      'New Refund Request',
+      `Order #${orderId.slice(-8).toUpperCase()} — ${reason.slice(0, 80)}`,
+      { ticket_id: ticket.id, type: 'refund_request', order_id: orderId },
+    );
+  }
+
+  // 8. Notify customer of submission
+  createInApp(
+    userId,
+    'payment',
+    'Refund Request Submitted',
+    `Your refund request for Order #${orderId.slice(-8).toUpperCase()} has been received.`,
+    ticket.id,
+    'support_ticket',
+  ).catch(() => {});
+
+  return {
+    ticket_id: ticket.id,
+    message: 'Refund request submitted. We will review within 24 hours.',
+  };
+}
+
+// ─── Process Refund (approve / reject) ───────────────────────────────────────
+// Called by super_admin via PATCH /payments/:paymentId/process-refund
+export async function processRefund(
+  paymentId: string,
+  adminId: string,
+  action: 'approve' | 'reject',
+  notes?: string,
+) {
+  // 1. Fetch the payment
+  const { data: payment, error: payErr } = await supabaseAdmin
+    .from('payments')
+    .select('id, order_id, amount, status')
+    .eq('id', paymentId)
+    .single();
+
+  if (payErr || !payment) {
+    throw Object.assign(new Error('Payment not found'), { statusCode: 404 });
+  }
+
+  if (payment.status !== 'refund_requested') {
+    throw Object.assign(
+      new Error(`Payment is not in refund_requested state. Current status: ${payment.status}`),
+      { statusCode: 422 },
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  // 2. Find the linked support ticket
+  // We look for open/assigned tickets whose conversation[0].meta.order_id matches
+  const { data: allTickets } = await supabaseAdmin
+    .from('support_tickets')
+    .select('id, user_id, conversation')
+    .in('status', ['open', 'assigned']);
+
+  const ticket = (allTickets ?? []).find((t: any) => {
+    const conv = Array.isArray(t.conversation) ? t.conversation : [];
+    const meta = conv[0]?.meta ?? {};
+    return meta.reference_type === 'refund' && meta.payment_id === paymentId;
+  });
+
+  // 3. Handle approve
+  if (action === 'approve') {
+    // Update payment status to refunded
+    const { error: updateErr } = await supabaseAdmin
+      .from('payments')
+      .update({
+        status: 'refunded',
+        refunded_at: now,
+        refunded_by: adminId,
+        updated_at: now,
+      })
+      .eq('id', paymentId);
+
+    if (updateErr) {
+      // Fallback: try without refunded_at/refunded_by if columns don't exist
+      await supabaseAdmin
+        .from('payments')
+        .update({ status: 'refunded', updated_at: now })
+        .eq('id', paymentId);
+    }
+
+    // Update support ticket to resolved
+    if (ticket) {
+      const conv = Array.isArray(ticket.conversation) ? ticket.conversation : [];
+      await supabaseAdmin
+        .from('support_tickets')
+        .update({
+          status: 'resolved',
+          resolved_at: now,
+          updated_at: now,
+          conversation: [
+            ...conv,
+            {
+              sender_id: adminId,
+              sender_role: 'admin',
+              message: notes ?? 'Your refund has been approved and will be processed shortly.',
+              created_at: now,
+              attachments: [],
+            },
+          ],
+        })
+        .eq('id', ticket.id);
+    }
+
+    // Fetch customer info for email
+    if (ticket?.user_id) {
+      const { data: customer } = await supabaseAdmin
+        .from('users')
+        .select('name, email')
+        .eq('id', ticket.user_id)
+        .single();
+
+      // Fetch restaurant name via order → branch
+      const { data: order } = await supabaseAdmin
+        .from('orders')
+        .select('branch_id, branches(restaurant_id, restaurants(name))')
+        .eq('id', payment.order_id)
+        .single();
+
+      const restaurantName =
+        (order?.branches as any)?.restaurants?.name ?? 'DineLuxe';
+
+      // Send refund initiated email
+      sendEmailNotification(ticket.user_id, 'refund-initiated', {
+        customerName: customer?.name ?? 'Customer',
+        orderId: payment.order_id,
+        amount: Number(payment.amount),
+        restaurantName,
+        estimatedDays: 5,
+      }).catch(() => {});
+
+      // In-app notification
+      createInApp(
+        ticket.user_id,
+        'payment',
+        'Refund Approved 🎉',
+        `Your refund of ₹${Number(payment.amount).toFixed(2)} has been approved. Expect it within 5–7 business days.`,
+        paymentId,
+        'payment',
+      ).catch(() => {});
+
+      sendPush(
+        ticket.user_id,
+        'Refund Approved',
+        `₹${Number(payment.amount).toFixed(2)} will be credited within 5–7 business days.`,
+        { type: 'refund_approved', payment_id: paymentId },
+      );
+    }
+
+    return { success: true, action: 'approved', payment_id: paymentId };
+  }
+
+  // 4. Handle reject
+  if (action === 'reject') {
+    await supabaseAdmin
+      .from('payments')
+      .update({ status: 'refund_rejected', updated_at: now })
+      .eq('id', paymentId);
+
+    if (ticket) {
+      const conv = Array.isArray(ticket.conversation) ? ticket.conversation : [];
+      await supabaseAdmin
+        .from('support_tickets')
+        .update({
+          status: 'resolved',
+          resolved_at: now,
+          updated_at: now,
+          conversation: [
+            ...conv,
+            {
+              sender_id: adminId,
+              sender_role: 'admin',
+              message: notes ?? 'Your refund request has been reviewed and unfortunately rejected.',
+              created_at: now,
+              attachments: [],
+            },
+          ],
+        })
+        .eq('id', ticket.id);
+
+      // Notify customer of rejection
+      if (ticket.user_id) {
+        createInApp(
+          ticket.user_id,
+          'payment',
+          'Refund Request Update',
+          notes ?? 'Your refund request has been reviewed and rejected. Contact support for details.',
+          paymentId,
+          'payment',
+        ).catch(() => {});
+
+        sendPush(
+          ticket.user_id,
+          'Refund Request Rejected',
+          notes ?? 'Your refund request was not approved. Tap to view details.',
+          { type: 'refund_rejected', payment_id: paymentId },
+        );
+      }
+    }
+
+    return { success: true, action: 'rejected', payment_id: paymentId };
+  }
+
+  throw Object.assign(new Error('Invalid action. Must be approve or reject.'), { statusCode: 400 });
 }
