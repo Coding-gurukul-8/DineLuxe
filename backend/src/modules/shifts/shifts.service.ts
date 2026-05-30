@@ -1,24 +1,380 @@
-export type ShiftRecord = Record<string, unknown> & { id: string };
+import { supabaseAdmin } from '../../config/supabase';
 
-export async function list(): Promise<ShiftRecord[]> {
-  return [];
+// ---------------------------------------------------------------------------
+// Typed return shapes
+// ---------------------------------------------------------------------------
+
+export interface ShiftRow {
+  id: string;
+  branch_id: string;
+  staff_id: string;
+  staff_name: string;
+  staff_role: string;
+  employee_id: string | null;
+  date: string;
+  start_time: string;
+  end_time: string;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
 }
 
-export async function create(payload: Record<string, unknown>): Promise<ShiftRecord> {
-  return { id: 'temp', ...payload };
+export interface GroupedShift {
+  staff_id: string;
+  staff_name: string;
+  staff_role: string;
+  employee_id: string | null;
+  shifts: Omit<ShiftRow, 'staff_id' | 'staff_name' | 'staff_role' | 'employee_id'>[];
 }
 
-export async function getById(id: string): Promise<ShiftRecord> {
-  return { id };
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function httpError(status: number, code: string, message: string): Error {
+  return Object.assign(new Error(message), { status, code });
 }
 
-export async function update(
-  id: string,
-  payload: Record<string, unknown>
-): Promise<ShiftRecord> {
-  return { id, ...payload };
+/** Adds N days to a YYYY-MM-DD string, returns YYYY-MM-DD */
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split('T')[0]!;
 }
 
-export async function remove(id: string): Promise<{ id: string; deleted: true }> {
-  return { id, deleted: true };
+/**
+ * Verifies that a branch belongs to the given restaurant.
+ * Throws 404 if not found / not owned.
+ */
+async function assertBranchBelongsToRestaurant(
+  branchId: string,
+  restaurantId: string,
+): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from('branches')
+    .select('id')
+    .eq('id', branchId)
+    .eq('restaurant_id', restaurantId)
+    .single();
+
+  if (error?.code === 'PGRST116' || !data) {
+    throw httpError(404, 'BRANCH_NOT_FOUND', 'Branch not found or does not belong to this restaurant.');
+  }
+  if (error) throw error;
+}
+
+/**
+ * Verifies that a staff member belongs to the given branch AND restaurant.
+ * Throws 404 if not found / not owned.
+ */
+async function assertStaffBelongsToBranch(
+  staffId: string,
+  branchId: string,
+  restaurantId: string,
+): Promise<{ name: string; role: string; employee_id: string | null }> {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select('id, name, role, employee_id')
+    .eq('id', staffId)
+    .eq('branch_id', branchId)
+    .eq('restaurant_id', restaurantId)
+    .single();
+
+  if (error?.code === 'PGRST116' || !data) {
+    throw httpError(404, 'STAFF_NOT_FOUND', 'Staff member not found in this branch.');
+  }
+  if (error) throw error;
+
+  return {
+    name: (data as any).name,
+    role: (data as any).role,
+    employee_id: (data as any).employee_id ?? null,
+  };
+}
+
+/**
+ * Normalises a raw DB shift row into a typed ShiftRow.
+ * The `users` join comes back as a nested object from Supabase.
+ */
+function normaliseShift(row: any): ShiftRow {
+  const user = Array.isArray(row.users) ? row.users[0] : row.users;
+  return {
+    id: row.id,
+    branch_id: row.branch_id,
+    staff_id: row.staff_id,
+    staff_name: user?.name ?? '',
+    staff_role: user?.role ?? '',
+    employee_id: user?.employee_id ?? null,
+    date: row.date,
+    start_time: row.start_time,
+    end_time: row.end_time,
+    notes: row.notes ?? null,
+    created_by: row.created_by,
+    created_at: row.created_at,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// getShiftsForWeek
+// GET /shifts?branch_id=&week_start=&staff_id=
+// ---------------------------------------------------------------------------
+export async function getShiftsForWeek(
+  branchId: string,
+  weekStart: string,
+  restaurantId: string,
+  staffId?: string,
+): Promise<GroupedShift[]> {
+  // Security: verify the branch belongs to the caller's restaurant
+  await assertBranchBelongsToRestaurant(branchId, restaurantId);
+
+  const weekEnd = addDays(weekStart, 6);
+
+  let query = supabaseAdmin
+    .from('shifts')
+    .select(
+      `
+      id, branch_id, staff_id, date, start_time, end_time, notes, created_by, created_at,
+      users!staff_id (
+        name,
+        role,
+        employee_id
+      )
+    `,
+    )
+    .eq('branch_id', branchId)
+    .gte('date', weekStart)
+    .lte('date', weekEnd)
+    .order('date', { ascending: true })
+    .order('start_time', { ascending: true });
+
+  if (staffId) {
+    query = query.eq('staff_id', staffId);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  // Group by staff_id for calendar rendering
+  const map = new Map<string, GroupedShift>();
+
+  for (const row of data ?? []) {
+    const shift = normaliseShift(row);
+    const { staff_id, staff_name, staff_role, employee_id, ...rest } = shift;
+
+    if (!map.has(staff_id)) {
+      map.set(staff_id, {
+        staff_id,
+        staff_name,
+        staff_role,
+        employee_id,
+        shifts: [],
+      });
+    }
+    map.get(staff_id)!.shifts.push(rest);
+  }
+
+  return Array.from(map.values());
+}
+
+// ---------------------------------------------------------------------------
+// createShift  (core — used by both POST /shifts and POST /staff/:id/shifts)
+// ---------------------------------------------------------------------------
+export async function createShift(
+  data: {
+    branch_id: string;
+    staff_id: string;
+    date: string;
+    start_time: string;
+    end_time: string;
+    notes?: string;
+  },
+  createdBy: string,
+  restaurantId: string,
+): Promise<ShiftRow> {
+  // 1. Branch ownership check
+  await assertBranchBelongsToRestaurant(data.branch_id, restaurantId);
+
+  // 2. Staff membership check
+  await assertStaffBelongsToBranch(data.staff_id, data.branch_id, restaurantId);
+
+  // 3. Conflict check — one shift per staff per day per branch (DB unique constraint)
+  const { data: existing, error: conflictErr } = await supabaseAdmin
+    .from('shifts')
+    .select('id')
+    .eq('staff_id', data.staff_id)
+    .eq('branch_id', data.branch_id)
+    .eq('date', data.date)
+    .maybeSingle();
+
+  if (conflictErr) throw conflictErr;
+  if (existing) {
+    throw httpError(
+      409,
+      'SHIFT_CONFLICT',
+      `A shift already exists for this staff member on ${data.date}. Delete or update it first.`,
+    );
+  }
+
+  // 4. Insert
+  const { data: inserted, error: insertErr } = await supabaseAdmin
+    .from('shifts')
+    .insert({
+      branch_id: data.branch_id,
+      staff_id: data.staff_id,
+      date: data.date,
+      start_time: data.start_time,
+      end_time: data.end_time,
+      notes: data.notes ?? null,
+      created_by: createdBy,
+    })
+    .select(
+      `
+      id, branch_id, staff_id, date, start_time, end_time, notes, created_by, created_at,
+      users!staff_id (
+        name,
+        role,
+        employee_id
+      )
+    `,
+    )
+    .single();
+
+  if (insertErr) throw insertErr;
+  return normaliseShift(inserted);
+}
+
+// ---------------------------------------------------------------------------
+// createShiftForStaff
+// POST /staff/:staffId/shifts  — staffId comes from URL, branch from JWT
+// ---------------------------------------------------------------------------
+export async function createShiftForStaff(
+  staffId: string,
+  data: {
+    date: string;
+    start_time: string;
+    end_time: string;
+    notes?: string;
+  },
+  createdBy: string,
+  branchId: string,
+  restaurantId: string,
+): Promise<ShiftRow> {
+  // Verify the staff member belongs to the caller's branch before delegating
+  await assertStaffBelongsToBranch(staffId, branchId, restaurantId);
+
+  return createShift(
+    {
+      branch_id: branchId,
+      staff_id: staffId,
+      date: data.date,
+      start_time: data.start_time,
+      end_time: data.end_time,
+      notes: data.notes,
+    },
+    createdBy,
+    restaurantId,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// updateShift
+// PATCH /shifts/:id
+// ---------------------------------------------------------------------------
+export async function updateShift(
+  shiftId: string,
+  updates: {
+    start_time?: string;
+    end_time?: string;
+    notes?: string;
+  },
+  restaurantId: string,
+): Promise<ShiftRow> {
+  // Verify ownership via branch → restaurant join
+  const { data: existing, error: fetchErr } = await supabaseAdmin
+    .from('shifts')
+    .select('id, start_time, end_time, branches!branch_id ( restaurant_id )')
+    .eq('id', shiftId)
+    .single();
+
+  if (fetchErr?.code === 'PGRST116' || !existing) {
+    throw httpError(404, 'SHIFT_NOT_FOUND', 'Shift not found.');
+  }
+  if (fetchErr) throw fetchErr;
+
+  const branch = Array.isArray((existing as any).branches)
+    ? (existing as any).branches[0]
+    : (existing as any).branches;
+
+  if (branch?.restaurant_id !== restaurantId) {
+    throw httpError(403, 'FORBIDDEN', 'You do not have permission to update this shift.');
+  }
+
+  // Validate time ordering if both fields are being updated
+  const newStart = updates.start_time ?? (existing as any).start_time;
+  const newEnd = updates.end_time ?? (existing as any).end_time;
+  if (newStart >= newEnd) {
+    throw httpError(400, 'INVALID_TIME_RANGE', 'start_time must be before end_time.');
+  }
+
+  const updatePayload: Record<string, unknown> = {};
+  if (updates.start_time !== undefined) updatePayload.start_time = updates.start_time;
+  if (updates.end_time !== undefined) updatePayload.end_time = updates.end_time;
+  if (updates.notes !== undefined) updatePayload.notes = updates.notes;
+
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from('shifts')
+    .update(updatePayload)
+    .eq('id', shiftId)
+    .select(
+      `
+      id, branch_id, staff_id, date, start_time, end_time, notes, created_by, created_at,
+      users!staff_id (
+        name,
+        role,
+        employee_id
+      )
+    `,
+    )
+    .single();
+
+  if (updateErr) throw updateErr;
+  return normaliseShift(updated);
+}
+
+// ---------------------------------------------------------------------------
+// deleteShift
+// DELETE /shifts/:id
+// ---------------------------------------------------------------------------
+export async function deleteShift(
+  shiftId: string,
+  restaurantId: string,
+): Promise<{ deleted: true; id: string }> {
+  // Verify ownership before deleting
+  const { data: existing, error: fetchErr } = await supabaseAdmin
+    .from('shifts')
+    .select('id, branches!branch_id ( restaurant_id )')
+    .eq('id', shiftId)
+    .single();
+
+  if (fetchErr?.code === 'PGRST116' || !existing) {
+    throw httpError(404, 'SHIFT_NOT_FOUND', 'Shift not found.');
+  }
+  if (fetchErr) throw fetchErr;
+
+  const branch = Array.isArray((existing as any).branches)
+    ? (existing as any).branches[0]
+    : (existing as any).branches;
+
+  if (branch?.restaurant_id !== restaurantId) {
+    throw httpError(403, 'FORBIDDEN', 'You do not have permission to delete this shift.');
+  }
+
+  const { error: deleteErr } = await supabaseAdmin
+    .from('shifts')
+    .delete()
+    .eq('id', shiftId);
+
+  if (deleteErr) throw deleteErr;
+
+  return { deleted: true, id: shiftId };
 }
