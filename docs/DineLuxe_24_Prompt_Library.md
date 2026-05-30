@@ -2915,3 +2915,1601 @@ Phase 6 — Audit & Polish
 ---
 
 *Restaurant OS Implementation Guide | Priyanshu Kumar Gupta & Ronit Gupta | 2025*
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 14: BACKEND — SOCIAL DINING MODULE
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 25 — Social Dining Group Backend Module
+
+### 📂 Files to Provide to Claude
+
+```
+backend/src/modules/bookings/bookings.service.ts
+backend/src/modules/bookings/bookings.routes.ts
+backend/src/modules/bookings/bookings.schema.ts
+backend/prisma/schema.prisma         (for SocialDiningGroup + SocialDiningMember models)
+backend/src/config/supabase.ts
+backend/src/utils/response.ts
+backend/src/middleware/auth.middleware.ts
+backend/src/middleware/tenant.middleware.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are building Restaurant OS — Node.js/Express/TypeScript with Supabase.
+Reference the bookings service for code patterns and style.
+
+Create a complete new module: social-dining
+Purpose: Customers can create a dining group linked to a booking.
+Friends join via invite code and pre-order from the menu before arriving.
+
+=== CREATE THESE 4 FILES ===
+
+FILE 1: backend/src/modules/social-dining/social-dining.schema.ts
+
+  createGroupSchema: z.object({
+    booking_id: z.string().uuid(),
+    max_members: z.number().int().min(2).max(20).default(10),
+  })
+
+  joinGroupSchema: z.object({
+    invite_code: z.string().min(6).max(12),
+  })
+
+  preOrderSchema: z.object({
+    pre_orders: z.array(z.object({
+      menu_item_id: z.string().uuid(),
+      quantity: z.number().int().positive().max(20),
+      notes: z.string().max(200).optional(),
+    })).min(1).max(30),
+  })
+
+FILE 2: backend/src/modules/social-dining/social-dining.service.ts
+  Tables: 'social_dining_groups', 'social_dining_members'
+
+  generateInviteCode(): string
+    - Generate 8-char alphanumeric: use crypto.randomBytes(6).toString('base64url').slice(0,8).toUpperCase()
+    - Format: e.g., "DINE-AB12"
+    - Make sure to check uniqueness in DB (retry up to 3 times if collision)
+
+  createGroup(userId: string, bookingId: string, maxMembers: number):
+    - Verify booking exists and belongs to userId
+    - Verify booking status is 'pending' | 'confirmed' (can't group on past bookings)
+    - Check no group already exists for this booking
+    - Generate unique invite_code
+    - INSERT into social_dining_groups: { booking_id, organizer_id: userId, invite_code, max_members }
+    - Also INSERT the organizer as first member in social_dining_members
+    - Return: { group_id, invite_code, share_url: `https://dineluxe.app/join/${invite_code}` }
+
+  joinGroup(userId: string, inviteCode: string):
+    - SELECT FROM social_dining_groups WHERE invite_code = inviteCode AND is_open = true
+    - If not found: throw 404 'Group not found or invite has expired'
+    - Check member count < max_members, else throw 409 'Group is full'
+    - Check user not already a member
+    - INSERT into social_dining_members: { group_id, user_id }
+    - Emit WebSocket event 'group_member_joined' to the organizer:
+      { group_id, new_member: { user_id, first_name, last_name } }
+    - Return: { group_id, booking_id, member_count }
+
+  getGroupForBooking(bookingId: string, userId: string):
+    - SELECT group with members, JOIN users for first_name/last_name
+    - Only return if userId is the organizer OR a member of the group
+    - Return: { group, members with pre_order status, booking details }
+
+  updatePreOrders(userId: string, groupId: string, preOrders: Array<{menu_item_id, quantity, notes?}>):
+    - Verify userId is a member of groupId
+    - UPDATE social_dining_members SET pre_orders = preOrders WHERE user_id = userId AND group_id = groupId
+    - Emit 'pre_order_updated' WebSocket event to organizer
+    - Return success
+
+  closeGroup(organizerId: string, groupId: string):
+    - Verify organizerId owns the group
+    - UPDATE social_dining_groups SET is_open = false
+    - Aggregate all pre_orders from all members
+    - Return: { total_pre_orders: [{menu_item_id, item_name, total_quantity, notes_list}] }
+    - This aggregation is what the waiter/kitchen will use as initial order
+
+  getGroupPreOrderSummary(groupId: string, organizerId: string):
+    - Verify organizer ownership
+    - Aggregate all members' pre_orders into a flat order list
+    - GROUP BY menu_item_id, SUM quantities
+    - Return: { items: [{menu_item_id, quantity, notes}], member_count, pre_order_count }
+
+FILE 3: backend/src/modules/social-dining/social-dining.controller.ts
+  Standard controller pattern with try/catch for all service functions.
+
+FILE 4: backend/src/modules/social-dining/social-dining.routes.ts
+  All routes: authenticate
+
+  POST /social-dining              → createGroup (body: booking_id, max_members?)
+  POST /social-dining/join/:code   → joinGroup (NO injectTenant — customers don't have it)
+  GET  /social-dining/booking/:bookingId  → getGroupForBooking
+  PATCH /social-dining/:groupId/pre-orders → updatePreOrders (body: pre_orders[])
+  POST /social-dining/:groupId/close  → closeGroup (organizer only)
+  GET  /social-dining/:groupId/summary  → getGroupPreOrderSummary
+
+Also create a simple invite landing page route:
+  GET /social-dining/invite/:code   → Returns group teaser info (booking branch name, party size, organizer first name)
+  Used by the /join/[code] public page to show who invited them
+
+Return all 4 complete files with full file paths.
+Also add the registration line to app.ts:
+  import socialDiningRoutes from './modules/social-dining/social-dining.routes';
+  app.use(`${API}/social-dining`, socialDiningRoutes);
+```
+
+### 📤 Expected Output
+4 new files in `backend/src/modules/social-dining/`
+
+---
+
+## PROMPT 26 — Coupon Management Module (Backend)
+
+### 📂 Files to Provide to Claude
+
+```
+backend/src/modules/payments/payments.service.ts
+backend/src/modules/payments/payments.routes.ts
+backend/src/modules/payments/payments.schema.ts
+backend/src/modules/orders/orders.service.ts
+backend/prisma/schema.prisma           (for the Coupon model)
+backend/src/config/supabase.ts
+backend/src/utils/response.ts
+backend/src/middleware/auth.middleware.ts
+backend/src/middleware/rbac.middleware.ts
+backend/src/middleware/tenant.middleware.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are building Restaurant OS — Node.js/Express/TypeScript with Supabase.
+
+The Coupon model already exists in the Prisma schema (table: coupons).
+The payments.service.ts references coupon_code but doesn't validate it.
+
+Please create a COMPLETE coupon management module:
+
+=== CREATE THESE 4 FILES ===
+
+FILE 1: backend/src/modules/coupons/coupons.schema.ts
+
+  createCouponSchema: z.object({
+    code: z.string().min(3).max(20).toUpperCase(),
+    discount_type: z.enum(['percentage', 'fixed_amount']),
+    discount_value: z.number().positive(),
+    minimum_order_amount: z.number().min(0).optional().default(0),
+    max_redemptions: z.number().int().positive().optional(),
+    valid_from: z.string().datetime(),
+    valid_to: z.string().datetime(),
+    description: z.string().max(200).optional(),
+    is_single_use_per_customer: z.boolean().default(true),
+    applicable_to: z.enum(['all', 'dine_in', 'delivery', 'takeaway']).default('all'),
+  }).refine(d => d.discount_type !== 'percentage' || d.discount_value <= 100, {
+    message: 'Percentage discount cannot exceed 100%'
+  })
+
+  validateCouponSchema: z.object({
+    code: z.string().min(1).toUpperCase(),
+    order_amount: z.number().positive(),
+    order_type: z.enum(['dine_in', 'delivery', 'takeaway']),
+  })
+
+FILE 2: backend/src/modules/coupons/coupons.service.ts
+  Table: 'coupons', also needs 'coupon_redemptions' (create this table if not in schema)
+
+  IMPORTANT: Check the Prisma schema — if a coupon_redemptions table doesn't exist,
+  add a note that it needs to be added. Use a simplified approach:
+  Store redemption count in coupons.times_redeemed column.
+  For single-use-per-customer: store a Redis key `coupon_used:{couponId}:{userId}` TTL=infinite
+
+  createCoupon(data, restaurantId, createdBy):
+    - Verify code is unique within this restaurant
+    - INSERT into coupons table
+    - Return created coupon
+
+  validateCoupon(code: string, orderId: string, orderAmount: number, orderType: string, userId: string, restaurantId: string):
+    - Returns: { valid: boolean, discount_amount: number, coupon_id: string, error_code?: string }
+    
+    Validation checks in order:
+    1. Find coupon: code + restaurant_id (or global platform coupon if restaurant_id=null)
+    2. Check is_active = true, else: error_code: 'COUPON_INACTIVE'
+    3. Check NOW() between valid_from and valid_to, else: error_code: 'COUPON_EXPIRED'
+    4. Check times_redeemed < max_redemptions (if max set), else: error_code: 'COUPON_EXHAUSTED'
+    5. Check order_amount >= minimum_order_amount, else: error_code: 'MINIMUM_NOT_MET', minimum: X
+    6. Check applicable_to covers this order_type, else: error_code: 'COUPON_NOT_APPLICABLE'
+    7. If is_single_use_per_customer: check Redis key `coupon_used:{couponId}:{userId}` not set
+    8. Calculate discount:
+       - percentage: (discount_value / 100) * orderAmount
+       - fixed_amount: Math.min(discount_value, orderAmount) — can't discount more than order total
+    9. Return { valid: true, discount_amount, coupon_id }
+
+  redeemCoupon(couponId: string, userId: string, orderId: string):
+    - Increment times_redeemed (use atomic UPDATE ... SET times_redeemed = times_redeemed + 1)
+    - If is_single_use_per_customer: set Redis key `coupon_used:{couponId}:{userId}`
+    - Called AFTER payment is confirmed (not before)
+
+  listCoupons(restaurantId: string, page: number, limit: number):
+    - Return paginated coupons with: code, discount, validity, times_redeemed, is_active
+
+  toggleCoupon(couponId: string, restaurantId: string):
+    - Toggle is_active boolean
+
+FILE 3: backend/src/modules/coupons/coupons.controller.ts
+  Standard controllers for all functions above.
+
+FILE 4: backend/src/modules/coupons/coupons.routes.ts
+  GET    /coupons              → requireRole(owner, manager), listCoupons
+  POST   /coupons              → requireRole(owner, manager), validate, createCoupon
+  POST   /coupons/validate     → authenticate, validate, validateCoupon (customer can call)
+  PATCH  /coupons/:id/toggle   → requireRole(owner, manager), toggleCoupon
+
+=== ALSO: Update payments.service.ts ===
+Find where coupon_code is referenced in processPayment.
+Add the coupon validation and redemption call:
+  - Before creating payment: call validateCoupon(coupon_code, order_id, bill_total, order_type, userId, restaurantId)
+  - If valid: subtract discount_amount from the total
+  - After payment confirmed: call redeemCoupon(coupon_id, userId, order_id)
+  - Store coupon_id in the payment record
+
+Return all 4 new files + the payments.service.ts modification.
+```
+
+### 📤 Expected Output
+4 new coupon files + payments.service.ts update
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 15: BACKEND — PLATFORM HEALTH & ADMIN
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 27 — Platform Health Monitoring Backend API
+
+### 📂 Files to Provide to Claude
+
+```
+backend/src/modules/admin/admin.service.ts
+backend/src/modules/admin/admin.routes.ts
+backend/src/config/supabase.ts
+backend/src/config/redis.ts
+backend/src/config/env.ts
+backend/src/server.ts
+backend/src/utils/response.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are building the Platform Health monitoring API for Restaurant OS.
+
+The frontend admin/platform-health/page.tsx already exists and calls:
+  GET /api/v1/admin/health         → basic health check
+  GET /api/v1/admin/health/detailed → detailed system metrics
+
+Please ADD these functions to the existing admin.service.ts and admin.routes.ts:
+
+=== ADD TO admin.service.ts ===
+
+Function getBasicHealth():
+  - Check DB connection: supabaseAdmin.from('restaurants').select('id', {count:'exact', head:true})
+    If error within 500ms: status = 'degraded', else 'ok'
+  - Check Redis connection: redis.ping()  
+    If error: db_ok = false
+  - Calculate db_latency_ms and redis_latency_ms using Date.now() before/after each check
+  - Return: {
+      status: 'ok' | 'degraded' | 'down',
+      db_latency_ms,
+      redis_latency_ms,
+      timestamp: new Date().toISOString()
+    }
+
+Function getDetailedHealth():
+  - Call getBasicHealth() first
+  - Redis metrics:
+    const info = await redis.info('all')
+    Parse: used_memory_human, connected_clients, keyspace_hits, keyspace_misses
+    hit_rate = keyspace_hits / (keyspace_hits + keyspace_misses) * 100
+  - DB metrics:
+    Try to get active connections via Supabase admin API OR estimate from query counts
+    avg_query_ms: track last 100 query times in Redis list `metric:query_times`, return avg
+    (You'll need to add timing middleware — see below)
+  - API metrics:
+    Track error rates in Redis: key `metric:errors:{minute}` TTL=5min
+    Track request count: key `metric:requests:{minute}` TTL=5min  
+    error_rate = errors / total_requests * 100
+  - Active users:
+    COUNT from sessions in Redis: keys matching `session:*`
+    (Or estimate from JWT refresh_token count in DB)
+  - WebSocket stats:
+    Import the io socket server instance from server.ts
+    Use io.engine.clientsCount for total connections
+    Use io.sockets.adapter.rooms.size for room count
+  - Return full detailed object matching what platform-health/page.tsx expects
+
+=== ADD TO admin.routes.ts ===
+Add at the end:
+
+  // Platform Health
+  router.get('/health', getBasicHealth);
+  router.get('/health/detailed', authenticate, requireRole('super_admin'), getDetailedHealth);
+
+=== ADD metrics tracking middleware to app.ts ===
+Create a lightweight metrics tracking middleware that runs on every request.
+Add to backend/src/middleware/metrics.middleware.ts:
+  - Start time: req._startTime = Date.now()
+  - On response finish: 
+    const duration = Date.now() - req._startTime
+    Push to Redis list: LPUSH metric:query_times duration, LTRIM metric:query_times 0 99 (keep last 100)
+    INCR metric:requests:{minute} (expire in 2 min)
+    If res.statusCode >= 500: INCR metric:errors:{minute}
+
+Register this middleware in app.ts BEFORE all routes.
+
+Return: 
+- Updated admin.service.ts (functions appended)
+- Updated admin.routes.ts (routes appended)  
+- New backend/src/middleware/metrics.middleware.ts
+- Updated app.ts import + middleware registration
+```
+
+### 📤 Expected Output
+Updated admin module + new metrics middleware
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 16: FRONTEND — CUSTOMER DISCOVERY FEATURES
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 28 — Customer Home: Mood Tiles + QR Ordering
+
+### 📂 Files to Provide to Claude
+
+```
+app/customer/home/page.tsx             (full existing home page — 21KB)
+app/customer/scan/page.tsx             (existing QR scan page)
+components/customer/FoodCard.tsx
+components/customer/RestaurantCard.tsx
+lib/api-client.ts
+types/api.ts
+hooks/useAuth.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are enhancing Restaurant OS customer app — Next.js 14, TypeScript, TailwindCSS.
+
+I need TWO specific enhancements to existing pages:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENHANCEMENT 1: Add "Mood Tiles" feature to app/customer/home/page.tsx
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Read the current home page carefully. Find the section that shows
+filter pills or the AI recommendations section.
+
+ADD a new "Mood Tiles" section BEFORE the restaurant feed, using this exact spec:
+
+=== MOOD TILES SECTION ===
+
+const MOOD_TILES = [
+  { id: 'quick_bite', label: 'Quick Bite', emoji: '⚡', 
+    filter: { max_prep_time: 15, types: ['takeaway', 'delivery'] },
+    gradient: 'from-orange-400 to-red-500' },
+  { id: 'fine_dining', label: 'Fine Dining', emoji: '🍷',
+    filter: { cuisine: 'fine_dining', dine_in: true },
+    gradient: 'from-purple-600 to-indigo-700' },
+  { id: 'late_night', label: 'Late Night', emoji: '🌙',
+    filter: { open_after: '22:00' },
+    gradient: 'from-indigo-900 to-blue-900' },
+  { id: 'healthy', label: 'Healthy', emoji: '🥗',
+    filter: { dietary: ['vegan', 'vegetarian', 'high_protein'] },
+    gradient: 'from-green-400 to-emerald-600' },
+  { id: 'celebration', label: 'Celebration', emoji: '🎉',
+    filter: { cuisine: 'celebration', rating: 4.5 },
+    gradient: 'from-yellow-400 to-amber-500' },
+  { id: 'date_night', label: 'Date Night', emoji: '💑',
+    filter: { ambiance: 'romantic', dine_in: true },
+    gradient: 'from-rose-400 to-pink-600' },
+]
+
+LAYOUT:
+- Section heading: "What are you in the mood for?" (small, gray)
+- 2-row, 3-column grid on mobile (6 tiles total)
+- Each tile: rounded-2xl, gradient background, white text, 64px tall
+  - Emoji (text-2xl) + label (text-xs font-semibold)
+  - Pressed/active state: ring-2 ring-white ring-offset-2 scale-95
+- When a tile is tapped:
+  - Apply that tile's filter to the restaurant feed (pass as query params)
+  - Highlight the active tile with a checkmark overlay
+  - Show filtered count: "12 restaurants for Quick Bite"
+  - Tap again to deselect
+
+State management:
+  - activeMood: string | null
+  - When activeMood changes: re-fetch the recommendations/restaurants 
+    endpoint with the filter params appended
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENHANCEMENT 2: Improve app/customer/scan/page.tsx — Complete QR Scanner
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Read the existing scan page. It currently checks camera permissions but 
+the actual QR scanning is unfinished.
+
+Complete the QR scan implementation:
+
+1. Use the `html5-qrcode` library (it's available: import Html5Qrcode from 'html5-qrcode')
+   OR use the browser's BarcodeDetector API with fallback
+
+2. QR code format to parse:
+   'restaurant-os://table?branch={branchId}&table={tableId}&table_label={label}'
+   OR a URL like: 'https://dineluxe.app/order?branch={branchId}&table={tableId}'
+   
+3. On successful scan:
+   - Parse the QR data
+   - Show a brief success animation (green checkmark)
+   - Navigate to: /customer/order?branch={branchId}&table={tableId}&table_label={label}
+   - This loads the menu for that specific table for dine-in ordering
+
+4. Error states:
+   - Invalid QR code (not our format): show "This QR code is not from DineLuxe"
+   - Camera permission denied: show step-by-step guide to enable
+   - Table not found (404 from API): show "Table not found, please try again"
+
+5. Also add: Manual entry fallback
+   - "Can't scan? Enter table code manually" link
+   - Opens an input field where they type the table code (e.g., "T3")
+   - POST /api/v1/tables/lookup-by-label  { branch_id, label }
+   - Returns table_id if found
+
+Return both enhanced pages with their full paths.
+```
+
+### 📤 Expected Output
+- ✏️ `app/customer/home/page.tsx` — with Mood Tiles section added
+- ✏️ `app/customer/scan/page.tsx` — with complete QR scanner
+
+---
+
+## PROMPT 29 — Customer Delivery Live Tracking Page
+
+### 📂 Files to Provide to Claude
+
+```
+app/customer/order/[orderId]/page.tsx        (full existing order tracking page)
+app/customer/payment/success/page.tsx        (for after-payment flow reference)
+lib/socket.ts
+hooks/useAuth.ts
+lib/api-client.ts
+types/api.ts
+components/shared/StatusBadge.tsx
+```
+
+### 🎯 Task for Claude
+
+```
+You are building Restaurant OS — Next.js 14 TypeScript frontend.
+I need a customer delivery LIVE TRACKING page.
+
+Create: app/customer/order/[orderId]/tracking/page.tsx
+
+This page shows real-time location of the delivery partner on a map.
+
+=== PAGE SPECIFICATION ===
+
+Props: { params: { orderId: string } }
+
+API calls:
+  GET /api/v1/orders/:orderId → fetch order details (type must be 'delivery')
+  WebSocket: join room 'order:{orderId}' → listen for 'location_update' events
+
+=== LAYOUT ===
+
+HEADER (sticky):
+  - Back arrow + "Track Order" title
+  - Order status badge (e.g., "Out for Delivery")
+
+MAP SECTION (takes 50% of screen height):
+  Since React-Leaflet or Google Maps may not be available, use a SIMPLE approach:
+  - Show a static map placeholder with an animated delivery icon
+  - OR embed a Google Maps Static API URL:
+    `https://maps.googleapis.com/maps/api/staticmap?center={lat},{lon}&markers=icon:person|{partnerLat},{partnerLon}&markers=icon:restaurant|{branchLat},{branchLon}&key={API_KEY}`
+  - Update the static map URL whenever location_update WebSocket event fires
+  - Show pulsing dot if real location is loading
+  
+  NOTE: If NEXT_PUBLIC_GOOGLE_MAPS_KEY env var is not set, show a text-based location display instead
+
+STATUS STEPS (below map):
+  Animated step tracker with 4 steps:
+  ✅ Order Confirmed
+  ✅ Preparing your order
+  🔵 Out for delivery (current — pulsing)
+  ⬜ Delivered
+  
+  Show elapsed time under each completed step.
+
+DELIVERY PARTNER CARD:
+  - Avatar circle with initials
+  - Name: "Your delivery partner" (no full name for privacy)
+  - Rating: ⭐ 4.8
+  - Phone: masked number + "Call" button (tel: link)
+  - Estimated time: "Arriving in ~12 minutes"
+  - Distance: "1.2 km away"
+  
+  These update when WebSocket 'location_update' fires.
+
+ORDER SUMMARY (collapsed accordion):
+  - Toggle to show items ordered
+  - Total amount
+
+FOOTER:
+  - "Get Help" button → navigates to support chat
+
+=== WEBSOCKET INTEGRATION ===
+On mount:
+  import { getSocket } from '@/lib/socket'
+  const socket = getSocket()
+  socket.emit('join_room', `order:${orderId}`)
+  socket.on('location_update', (data: { lat, lon, distance_km, eta_minutes }) => {
+    setPartnerLocation({ lat: data.lat, lon: data.lon })
+    setEta(data.eta_minutes)
+    setDistance(data.distance_km)
+  })
+  socket.on('delivery_complete', () => {
+    setStatus('delivered')
+    // Show success animation
+    // Navigate to rating page after 3 seconds
+  })
+
+On unmount:
+  socket.emit('leave_room', `order:${orderId}`)
+  socket.off('location_update')
+  socket.off('delivery_complete')
+
+Return the complete tracking page.
+```
+
+### 📤 Expected Output
+- 🆕 `app/customer/order/[orderId]/tracking/page.tsx`
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 17: FRONTEND — TABLE MERGE UI
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 30 — Table Merge Feature (Frontend)
+
+### 📂 Files to Provide to Claude
+
+```
+app/staff/host/floor/page.tsx            (full host floor page)
+app/staff/manager/floor/page.tsx         (the updated manager floor from Prompt 11)
+components/floor/FloorMap.tsx            (full component)
+lib/api-client.ts
+types/api.ts
+hooks/useAuth.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are building Restaurant OS — Next.js 14 frontend.
+The backend already supports table merging (POST /api/v1/tables/merge, POST /api/v1/tables/:id/unmerge).
+
+Add Table Merge feature to the Host floor page and Manager floor page.
+
+=== TABLE MERGE SPECIFICATION ===
+
+TRIGGER: In the host/floor and manager/floor pages, add a "Merge Tables" mode button.
+
+When "Merge Mode" is ACTIVE:
+  - Button shows "Merge Mode: ON" with a chain-link icon
+  - Clicking any FREE table adds it to the merge selection (highlight with blue ring)
+  - Can select exactly 2 tables
+  - After selecting 2 tables:
+    - Show a floating action bar at bottom: "Merge T3 + T4 → Combined Table (Capacity: 8)"
+    - "Confirm Merge" button (primary) + "Cancel" button
+    - Validate adjacency — show warning if tables are not adjacent: 
+      "These tables may not be adjacent. Merge anyway?" (still allow it)
+  - On confirm: POST /api/v1/tables/merge  { table_id_1, table_id_2 }
+  - On success: both tables show as merged on the floor map
+    - Display as a combined entity with both labels: "T3+T4"
+    - Show combined capacity: sum of both tables
+
+MERGED TABLE DISPLAY:
+  - Show a visual bracket connecting the two merged table cells on the canvas
+  - Color: navy blue (#1A3C5E) for merged tables
+  - Label shows both: "T3 + T4" (if space) or "T3+T4"
+  - Capacity shows combined total
+
+UNMERGE:
+  - When a merged table is clicked: show "Unmerge" button in the table details panel
+  - POST /api/v1/tables/:mergedTableId/unmerge
+  - Both tables return to their individual statuses
+
+IMPLEMENTATION NOTES:
+  - The FloorMap component needs a new prop: 
+    mergeMode: boolean
+    selectedForMerge: string[] (table ids)
+    onTableSelectForMerge: (tableId: string) => void
+    mergedTables?: MergedTableInfo[]
+  
+  - Add these props to FloorMap WITHOUT breaking existing usage.
+    All new props should be optional with defaults.
+  
+  - The floor page manages merge state (mergeMode, selectedTables, etc.)
+  - Keep all existing FloorMap functionality 100% intact.
+
+Return:
+1. Updated components/floor/FloorMap.tsx (with merge support props)
+2. Updated app/staff/host/floor/page.tsx (with merge mode button + logic)
+3. Updated app/staff/manager/floor/page.tsx (same merge mode)
+
+Clearly mark every change with // MERGE FEATURE ADDITION comments.
+```
+
+### 📤 Expected Output
+3 modified files with table merge feature
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 18: FRONTEND — KITCHEN STATION BALANCING
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 31 — Kitchen Display System: Station Load Balancing
+
+### 📂 Files to Provide to Claude
+
+```
+app/staff/chef/kitchen/page.tsx          (full existing KDS page — 11.5KB)
+app/staff/chef/page.tsx                  (chef home page — 12.5KB)
+lib/api-client.ts
+lib/socket.ts
+types/api.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are enhancing Restaurant OS Kitchen Display System.
+
+Read the existing app/staff/chef/kitchen/page.tsx carefully.
+This is the Kitchen Display System (KDS) showing order tickets.
+
+=== ADD KITCHEN STATION FEATURE ===
+
+Current behavior: all orders appear in one view.
+New behavior: orders can be filtered by "kitchen station" (prep area).
+
+STEP 1 — Add Station Filter UI
+
+At the TOP of the kitchen page, add a horizontal tab bar:
+  [All] [🔥 Grill] [🍟 Fryer] [❄️ Cold Station] [🥗 Prep] [🍰 Desserts]
+
+The active tab is highlighted with the primary navy color.
+Selecting a tab filters visible tickets to that station.
+"All" shows everything (default).
+
+Station assignment is based on menu item categories or tags.
+For now use this mapping (simple, can be expanded):
+  GRILL_ITEMS = ['grills', 'tandoor', 'bbq', 'kebab', 'tikka']
+  FRYER_ITEMS = ['fried', 'fries', 'crispy', 'tempura']
+  COLD_ITEMS = ['salad', 'dessert', 'ice cream', 'cold', 'shake']
+  PREP_ITEMS = ['pasta', 'curry', 'biryani', 'rice', 'bread']
+
+When a station filter is active:
+  - Show only tickets that contain at least one item matching that station
+  - Within each ticket, HIGHLIGHT the relevant items in amber/yellow
+  - Other items in the ticket are still shown but dimmed
+  - If a ticket has ALL items for this station completed: fade the ticket out
+
+STEP 2 — Station Assignment in Menu
+
+Add a note in the chef page (or a small "Station Tags" chip on each menu item) 
+that shows which station will handle it. This is read-only for the chef.
+
+STEP 3 — Station Workload indicator
+
+At the top of each station tab, show a badge with the ticket count:
+  [All 12] [🔥 Grill 4] [🍟 Fryer 5] [❄️ Cold 2] ...
+
+This gives chefs instant visibility of which stations are overloaded.
+
+STEP 4 — Background ticket routing
+
+When orders are created, add station tags to each order_item based on the 
+item's name/category. This requires a helper function:
+  function getStationForItem(itemName: string, categoryName?: string): string
+  Use the GRILL_ITEMS etc. arrays above for simple keyword matching.
+
+Note: This classification is done on the FRONTEND (in the KDS) for now.
+A future backend enhancement could tag items at the DB level.
+
+Return the COMPLETE updated kitchen/page.tsx with station feature.
+Mark all additions with // STATION FEATURE comments.
+```
+
+### 📤 Expected Output
+- ✏️ `app/staff/chef/kitchen/page.tsx` — with station tabs added
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 19: BACKEND — NOTIFICATION PUSH SETUP
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 32 — Push Notification Setup (Backend)
+
+### 📂 Files to Provide to Claude
+
+```
+backend/src/modules/notifications/notifications.service.ts
+backend/src/modules/notifications/notifications.routes.ts
+backend/src/modules/notifications/notifications.schema.ts
+backend/src/modules/notifications/notifications.controller.ts
+backend/src/config/env.ts
+backend/.env.example
+backend/src/utils/response.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are setting up push notifications for Restaurant OS.
+
+The current notifications.service.ts shows push notifications are DISABLED 
+(Firebase removed, sendPush is a no-op).
+
+Please implement a proper push notification system using Web Push 
+(the web standard, works without Firebase for web apps).
+
+=== IMPLEMENTATION PLAN ===
+
+Web Push uses:
+- Server sends push via VAPID keys
+- Browser stores subscription endpoint
+- Service worker receives push on client
+
+STEP 1 — Install dependencies (add to package.json note):
+  npm install web-push
+  npm install @types/web-push --save-dev
+
+STEP 2 — Update backend/src/config/env.ts to add:
+  VAPID_PUBLIC_KEY: z.string().optional()
+  VAPID_PRIVATE_KEY: z.string().optional()
+  VAPID_CONTACT_EMAIL: z.string().email().optional()
+  
+  Also add to .env.example:
+  # Push Notifications (Web Push VAPID)
+  VAPID_PUBLIC_KEY=your-vapid-public-key
+  VAPID_PRIVATE_KEY=your-vapid-private-key
+  VAPID_CONTACT_EMAIL=push@yourdomain.com
+
+STEP 3 — Update notifications.service.ts:
+
+  Add a new table check: push_subscriptions (users store their push endpoint)
+  Schema for this table (add to Supabase separately):
+    CREATE TABLE push_subscriptions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+      subscription_data JSONB NOT NULL,  -- { endpoint, keys: { p256dh, auth } }
+      device_type VARCHAR(20) DEFAULT 'web',  -- 'web', 'android', 'ios'
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, subscription_data->>'endpoint')
+    );
+
+  Function registerPushSubscription(userId: string, subscriptionData: object):
+    - INSERT OR REPLACE into push_subscriptions
+    - Return: { success: true }
+
+  Function sendPush(userId: string, title: string, body: string, data?: object):
+    - If VAPID keys not configured: log warning, return (graceful degradation)
+    - Fetch user's push_subscriptions from DB
+    - For each subscription:
+      await webpush.sendNotification(subscription_data, JSON.stringify({
+        title, body, data, icon: '/icon-192.png', badge: '/badge-72.png'
+      }))
+    - On error 410 (Gone) or 404: delete that subscription (invalid endpoint)
+    - Log push attempt to notifications table
+
+  Function sendPushToRole(branchId: string, role: string, title: string, body: string):
+    - Find all users with this role in this branch
+    - Call sendPush for each
+
+STEP 4 — Add to notifications.routes.ts:
+  POST /notifications/push/subscribe → authenticate, registerPushSubscription
+  GET  /notifications/push/vapid-key → public endpoint, returns VAPID_PUBLIC_KEY
+                                        (client needs this to subscribe)
+
+STEP 5 — Frontend hint:
+  Add a comment explaining how the frontend service worker setup works:
+  // Frontend needs a service worker at /public/sw.js with push event listener
+  // And the client needs to call navigator.serviceWorker.ready then 
+  // registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidPublicKey })
+  // Then POST the subscription object to /api/v1/notifications/push/subscribe
+
+Return:
+- Updated notifications.service.ts
+- Updated notifications.routes.ts
+- Updated env.ts additions
+- Updated .env.example
+- New file: backend/src/utils/push.ts (contains the webpush.setVapidDetails setup)
+- New file: frontend/public/sw.js (basic service worker for push notifications)
+```
+
+### 📤 Expected Output
+Updated notification files + new push utility + service worker
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 20: FRONTEND — REFUND MANAGEMENT
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 33 — Refund Management System (Frontend + Backend)
+
+### 📂 Files to Provide to Claude
+
+```
+app/customer/profile/support/page.tsx    (full support page)
+app/customer/order/[orderId]/page.tsx    (full order detail page)
+app/admin/restaurants/page.tsx           (for admin refund pattern reference)
+backend/src/modules/payments/payments.service.ts
+backend/src/modules/payments/payments.routes.ts
+backend/src/modules/support/support.service.ts
+lib/api-client.ts
+types/api.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are building a Refund Management system for Restaurant OS.
+
+=== BACKEND: Add to payments module ===
+
+ADD to backend/src/modules/payments/payments.service.ts:
+
+Function requestRefund(orderId: string, userId: string, reason: string, items?: string[]):
+  - Verify order belongs to userId
+  - Verify order status is 'paid' or 'closed'
+  - Verify no existing pending refund for this order
+  - INSERT into support_tickets: {
+      user_id: userId,
+      subject: 'Refund Request - Order #' + orderId.slice(-8),
+      conversation: [{ role: 'user', content: reason, timestamp }],
+      status: 'open',
+      reference_type: 'refund',
+      reference_id: orderId  (if support_tickets has this field — check schema)
+    }
+  - UPDATE payments: SET refund_requested_at = NOW(), refund_reason = reason
+    (Check if payments table has these columns — if not, use status = 'refund_requested')
+  - Notify super admin via notifications
+  - Return: { ticket_id, message: 'Refund request submitted. We will review within 24 hours.' }
+
+Function processRefund(paymentId: string, adminId: string, action: 'approve' | 'reject', notes?: string):
+  - Only for super_admin role
+  - If approve: UPDATE payments SET status = 'refunded', refunded_at = NOW(), refunded_by = adminId
+  - Update the linked support ticket status = 'resolved'
+  - Send email to customer: refundInitiatedEmail() (from email templates Prompt 20)
+  - If reject: Update ticket, notify customer with reason
+
+ADD to payments.routes.ts:
+  POST /payments/:orderId/refund-request → authenticate, requestRefund (customer)
+  PATCH /payments/:paymentId/process-refund → authenticate, requireRole(super_admin), processRefund
+
+=== FRONTEND COMPONENT: Refund Request UI ===
+
+Create: components/payment/RefundRequest.tsx
+Props: { orderId: string; paymentId: string; amount: number; onSuccess?: () => void }
+
+DESIGN:
+  Trigger: "Request Refund" button (ghost/outline style, shown on order detail page)
+  
+  Opens a bottom sheet / modal with:
+  1. Order summary (brief)
+  2. Reason selection (radio buttons):
+     ○ Food quality issue
+     ○ Wrong items delivered
+     ○ Order never arrived
+     ○ Charged incorrectly
+     ○ Other (shows text area)
+  3. "Describe the issue" textarea (optional for preset reasons, required for "Other")
+  4. "Submit Refund Request" button → calls POST /api/v1/payments/:orderId/refund-request
+  5. On success: show "✅ Refund request submitted. You'll hear from us within 24 hours."
+
+Also add to app/customer/order/[orderId]/page.tsx:
+  Find where the order status is shown.
+  Add the RefundRequest component for orders with status 'paid' that are older than 1 hour:
+  { order.status === 'paid' && isOlderThan1Hour && (
+    <RefundRequest orderId={order.id} paymentId={order.payment_id} amount={order.total} />
+  )}
+
+=== ADMIN REFUND MANAGEMENT ===
+
+Create: app/admin/refunds/page.tsx
+Simple admin page showing:
+  - List of all refund requests (from support_tickets where reference_type='refund')
+  - Each row: order ID, customer name, amount, reason, date, status
+  - Action buttons: Approve Refund / Reject (with notes)
+  - Filter: Pending / Approved / Rejected
+
+Return all modified/new files.
+```
+
+### 📤 Expected Output
+Backend updates + new refund component + admin refunds page
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 21: COMPREHENSIVE TESTING PROMPTS
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 34 — End-to-End Test Suite: Critical Flows
+
+### 📂 Files to Provide to Claude
+
+```
+backend/src/modules/auth/auth.service.ts
+backend/src/modules/orders/orders.service.ts
+backend/src/modules/bookings/bookings.service.ts
+backend/src/modules/payments/payments.service.ts
+backend/src/modules/queue/queue.service.ts
+backend/src/app.ts
+backend/package.json
+```
+
+### 🎯 Task for Claude
+
+```
+You are writing end-to-end tests for Restaurant OS critical flows.
+Use Supertest + Jest (already in package.json as devDependencies).
+
+Create: backend/src/__tests__/e2e/critical-flows.test.ts
+
+Write complete E2E test suites for these 4 critical flows:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FLOW 1: Customer Signup → Login → Browse → Book Table
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tests:
+  POST /auth/signup → 201, OTP sent
+  POST /auth/verify-otp → 200, JWT returned
+  GET /restaurants?lat=28.6&lon=77.2 → 200, array of restaurants
+  POST /bookings → 201, booking created
+  GET /bookings/:id → 200, booking details
+  PATCH /bookings/:id/cancel → 200, booking cancelled
+  
+Use beforeAll to create a test restaurant + branch for booking tests.
+Use afterAll to clean up test data.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FLOW 2: Order Lifecycle (Dine-In): Order → Kitchen → Served → Paid
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tests:
+  POST /orders → 201, order created
+  GET /kitchen/:branchId/orders → 200, includes new order
+  PATCH /orders/:id/kitchen-status (preparing) → 200
+  PATCH /orders/:id/kitchen-status (ready) → 200
+  PATCH /order-items/:id/serve → 200, item marked served
+  POST /payments → 201, payment processed
+  GET /orders/:id → 200, status = 'paid'
+  
+Verify:
+  - Order goes through correct status sequence
+  - Payment fails if order not ready
+  - Double payment blocked (idempotency)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FLOW 3: Booking Conflict Prevention (Race Condition Test)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tests:
+  Setup: One table, one available time slot
+  Test: Send 3 concurrent POST /bookings requests for same slot
+  Expect: Only 1 succeeds (201), 2 fail with 409 Conflict
+  Use: Promise.all([req1, req2, req3])
+  Verify: DB has exactly 1 booking for that slot
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  
+FLOW 4: RBAC — Unauthorized Access Tests
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tests:
+  Customer tries POST /staff/create → 403
+  Chef tries PATCH /menu/items/:id/status → 403
+  Waiter tries GET /admin/dashboard → 403
+  Owner from Restaurant A tries GET /branches of Restaurant B → 403
+  Expired JWT on any protected route → 401
+  No JWT on protected route → 401
+
+Setup helpers:
+  createTestUser(role: string): Promise<{ user, accessToken }>
+  createTestRestaurant(): Promise<{ restaurant, owner }>
+  createTestBranch(restaurantId): Promise<Branch>
+
+Config: Use a test database (separate DATABASE_URL_TEST env var).
+All test data uses prefix 'TEST_' to allow easy cleanup.
+
+Return the complete test file.
+```
+
+### 📤 Expected Output
+`backend/src/__tests__/e2e/critical-flows.test.ts`
+
+---
+
+## PROMPT 35 — Frontend Component Tests
+
+### 📂 Files to Provide to Claude
+
+```
+components/customer/FoodCard.tsx
+components/floor/FloorMap.tsx
+components/shared/StatusBadge.tsx
+components/auth/SignupWizard.tsx
+components/ai/ChatbotWidget.tsx       (from Prompt 14)
+package.json
+tsconfig.json
+```
+
+### 🎯 Task for Claude
+
+```
+You are writing frontend component tests for Restaurant OS.
+Use Jest + React Testing Library (check if configured in package.json).
+
+Create these test files:
+
+FILE 1: components/customer/__tests__/FoodCard.test.tsx
+  - Renders food card with correct name and price
+  - Shows "Sold Out" overlay when status is 'sold_out'
+  - Calls onAddToCart when Add button clicked
+  - Shows allergen warning icon when allergens present
+  - Price shows as currency format (₹240.00)
+  - Discounted price shows with strikethrough on original
+
+FILE 2: components/floor/__tests__/FloorMap.test.tsx
+  - Renders correct number of table units
+  - Shows correct color for each table status
+  - Calls onTableClick when table is clicked in non-readOnly mode
+  - Does NOT call onTableClick in readOnly mode
+  - Shows legend with all 5 status colors
+
+FILE 3: components/shared/__tests__/StatusBadge.test.tsx
+  - Renders correct label for each status enum value
+  - Applies correct color class for each status
+  - Shows custom label if provided
+  - Snapshot test for consistency
+
+FILE 4: components/auth/__tests__/SignupWizard.test.tsx
+  - Renders Step 1 fields (name, email, phone)
+  - Shows validation errors for empty required fields on submit
+  - Email field shows 'email taken' error when API returns conflict
+  - Password strength meter updates as password is typed
+  - Back button is not shown on Step 1
+  - Back button IS shown on Step 2
+
+For each test file:
+  - Use mock for apiClient (jest.mock('@/lib/api-client'))
+  - Use renderWithProviders wrapper (React Query + Auth providers)
+  - All tests should be self-contained (no shared state between tests)
+
+Create also: jest.setup.ts (if it doesn't exist):
+  - @testing-library/jest-dom setup
+  - Mock next/navigation (useRouter, useParams)
+  - Mock next/image
+
+Return all test files with their full paths.
+```
+
+### 📤 Expected Output
+4 component test files + jest setup
+
+---
+
+# ═══════════════════════════════════════════════
+# GROUP 22: FINAL POLISH & DEPLOYMENT PREP
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 36 — Frontend PWA Setup + Service Worker
+
+### 📂 Files to Provide to Claude
+
+```
+frontend/next.config.ts (or next.config.js)
+frontend/public/          (directory listing only)
+frontend/app/layout.tsx
+frontend/package.json
+```
+
+### 🎯 Task for Claude
+
+```
+You are setting up Progressive Web App (PWA) support for Restaurant OS.
+
+This is important because:
+1. Staff use the app on mobile browsers (not native apps)
+2. Customers want "Add to Home Screen" for quick access
+3. Push notifications require a service worker
+
+Tasks:
+
+=== TASK 1: Next.js PWA Configuration ===
+
+Update next.config.ts to use next-pwa:
+  npm install next-pwa (add to package.json)
+  
+  In next.config.ts:
+  const withPWA = require('next-pwa')({
+    dest: 'public',
+    register: true,
+    skipWaiting: true,
+    disable: process.env.NODE_ENV === 'development',
+    buildExcludes: [/middleware-manifest.json$/],
+    runtimeCaching: [
+      { urlPattern: /^https:\/\/fonts\.googleapis\.com/, handler: 'CacheFirst',
+        options: { cacheName: 'google-fonts', expiration: { maxEntries: 30, maxAgeSeconds: 86400 } }},
+      { urlPattern: /^https:\/\/api\./, handler: 'NetworkFirst',
+        options: { cacheName: 'api-cache', networkTimeoutSeconds: 5 }}
+    ]
+  })
+
+=== TASK 2: App Manifest ===
+
+Create: public/manifest.json
+  {
+    "name": "DineLuxe Restaurant OS",
+    "short_name": "DineLuxe",
+    "description": "Real-time restaurant operating system",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#1A3C5E",
+    "orientation": "portrait-primary",
+    "icons": [
+      { "src": "/icon-72.png", "sizes": "72x72", "type": "image/png" },
+      { "src": "/icon-96.png", "sizes": "96x96", "type": "image/png" },
+      { "src": "/icon-128.png", "sizes": "128x128", "type": "image/png" },
+      { "src": "/icon-144.png", "sizes": "144x144", "type": "image/png" },
+      { "src": "/icon-152.png", "sizes": "152x152", "type": "image/png" },
+      { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+      { "src": "/icon-384.png", "sizes": "384x384", "type": "image/png" },
+      { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    ],
+    "shortcuts": [
+      { "name": "My Orders", "url": "/customer/order", "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]},
+      { "name": "My Bookings", "url": "/customer/booking", "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]}
+    ]
+  }
+
+=== TASK 3: Service Worker for Push Notifications ===
+
+Create: public/sw.js
+  self.addEventListener('install', () => self.skipWaiting());
+  self.addEventListener('activate', e => e.waitUntil(clients.claim()));
+  
+  self.addEventListener('push', event => {
+    const data = event.data?.json() ?? {};
+    const title = data.title || 'DineLuxe';
+    const options = {
+      body: data.body || '',
+      icon: '/icon-192.png',
+      badge: '/badge-72.png',
+      data: data.data || {},
+      vibrate: [200, 100, 200],
+      requireInteraction: data.requireInteraction || false,
+    };
+    event.waitUntil(self.registration.showNotification(title, options));
+  });
+  
+  self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    const url = event.notification.data?.url || '/';
+    event.waitUntil(clients.openWindow(url));
+  });
+
+=== TASK 4: Update app/layout.tsx ===
+Add manifest link + theme-color meta:
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#1A3C5E" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="apple-touch-icon" href="/icon-152.png" />
+
+Return all 4 changes as complete files.
+```
+
+### 📤 Expected Output
+PWA configuration + manifest + service worker + layout update
+
+---
+
+## PROMPT 37 — Environment Setup & Deployment Guide
+
+### 📂 Files to Provide to Claude
+
+```
+backend/.env.example
+frontend/.env.example     (or .env.local.example if it exists)
+backend/package.json
+frontend/package.json
+backend/prisma/schema.prisma
+```
+
+### 🎯 Task for Claude
+
+```
+You are creating a deployment guide for Restaurant OS.
+
+Please create TWO files:
+
+FILE 1: SETUP_GUIDE.md (in project root)
+
+Complete developer onboarding guide:
+
+## Prerequisites
+- Node.js 20+ (LTS)
+- PostgreSQL via Supabase account (free tier works)
+- Redis (Upstash free tier works)
+- Resend account (for email)
+- VAPID key pair (for push notifications)
+
+## Quick Setup (15 minutes)
+
+### 1. Clone & Install
+  git clone ...
+  cd restaurant-os
+  npm install (in backend/ and frontend/)
+
+### 2. Supabase Setup
+Step-by-step with screenshots description:
+  - Create Supabase project
+  - Copy DATABASE_URL and DIRECT_URL from Settings > Database
+  - Copy SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from API settings
+  - Copy SUPABASE_JWT_SECRET from JWT settings
+  - Run migrations: npx prisma migrate deploy (in backend/)
+  - Run SQL functions: paste content of supabase/functions.sql in Supabase SQL editor
+
+### 3. Redis Setup
+  Using Upstash: create Redis database, copy REDIS_URL
+
+### 4. Environment Variables
+  List ALL required environment variables with descriptions
+  Split into: Backend (.env) and Frontend (.env.local)
+  Mark which are optional vs required
+
+### 5. VAPID Keys Setup
+  Run: node -e "const wp = require('web-push'); const keys = wp.generateVAPIDKeys(); console.log(keys);"
+  Add generated keys to backend .env
+
+### 6. Run Development
+  Backend: npm run dev (starts on port 4000)
+  Frontend: npm run dev (starts on port 3000)
+
+### 7. First Login
+  Default super admin: create via POST /api/v1/auth/signup/admin
+  Or run seeder: npm run seed (if exists)
+
+## Production Deployment
+
+### Backend: Railway / Render / Fly.io
+  - Environment variables setup
+  - Build command: npm run build
+  - Start command: npm run start
+
+### Frontend: Vercel
+  - Import from GitHub
+  - Set NEXT_PUBLIC_API_URL to your backend URL
+  - Set all NEXT_PUBLIC_* env vars
+
+### Database: Supabase (already covered)
+### Redis: Upstash (already covered)
+
+## Troubleshooting
+Common errors and their fixes:
+  - CORS errors: check FRONTEND_URLS env var
+  - JWT verification fails: check SUPABASE_JWT_SECRET
+  - WebSocket connection refused: check CORS origins
+  - Prisma migration fails: check DATABASE_URL vs DIRECT_URL
+
+FILE 2: backend/.env.example (COMPLETE version)
+
+Update the existing .env.example to include ALL new variables:
+  - All original variables (PORT, DATABASE_URL, etc.)
+  - VAPID keys
+  - Loyalty configuration vars
+  - Geo fence radius
+  - OTP settings
+  - Feature flags (optional)
+
+Format: KEY=description # comment explaining the value
+
+Return both files.
+```
+
+### 📤 Expected Output
+`SETUP_GUIDE.md` + updated `backend/.env.example`
+
+---
+
+# ═══════════════════════════════════════════════
+# ADDITIONAL BACKEND TABLE: Lookup by Label
+# ═══════════════════════════════════════════════
+
+---
+
+## PROMPT 38 — Tables Module: Lookup by Label (Backend)
+
+### 📂 Files to Provide to Claude
+
+```
+backend/src/modules/tables/tables.service.ts
+backend/src/modules/tables/tables.routes.ts
+backend/src/modules/tables/tables.schema.ts
+backend/src/modules/tables/tables.controller.ts
+```
+
+### 🎯 Task for Claude
+
+```
+You are adding a small but important feature to the existing tables module.
+
+The QR scanner page (customer/scan) needs to look up a table by its label 
+(e.g., "T3") within a branch, for the manual entry fallback.
+
+ADD to the existing tables module:
+
+=== ADD TO tables.service.ts ===
+
+Function lookupTableByLabel(branchId: string, label: string):
+  - SELECT FROM tables WHERE branch_id = branchId AND label = label.toUpperCase()
+  - Return: { id, label, capacity, floor_number, zone, status } or throw 404
+  - Case-insensitive: normalize label to uppercase before query
+
+=== ADD TO tables.schema.ts ===
+
+lookupByLabelSchema: z.object({
+  branch_id: z.string().uuid(),
+  label: z.string().min(1).max(10).toUpperCase(),
+})
+
+=== ADD TO tables.routes.ts ===
+
+POST /tables/lookup-by-label → (public OR customer auth) → lookupTableByLabel
+  No requireRole — customers need to call this from QR scan page
+
+=== ADD TO tables.controller.ts ===
+
+lookupByLabel controller wrapping the service function.
+
+Return the complete updated 4 table module files.
+```
+
+### 📤 Expected Output
+4 updated table module files
+
+---
+
+# ═══════════════════════════════════════════════
+# COMPLETE FILE CREATION CHECKLIST
+# ═══════════════════════════════════════════════
+
+## 📂 FINAL COMPLETE LIST OF ALL NEW FILES TO CREATE
+
+### Backend: New Module Files (36 files)
+
+```
+backend/src/modules/
+├── recipe-ingredients/           → 4 files (Prompt 2)
+├── shifts/                       → 4 files (Prompt 3)
+├── dynamic-pricing/              → 4 files (Prompt 4)
+├── customer-preferences/         → 4 files (Prompt 4)
+├── recommendations/              → 3 files (Prompt 5)
+├── staff-feedback/               → 4 files (Prompt 5)
+├── chatbot/                      → 3 files (Prompt 6)
+├── staffing/                     → 3 files (Prompt 6)
+├── social-dining/                → 4 files (Prompt 25)
+└── coupons/                      → 4 files (Prompt 26)
+```
+
+### Backend: Modified Files (8 files)
+
+```
+backend/src/app.ts                         ← Prompt 7
+backend/src/modules/staff/staff.routes.ts  ← Prompt 22
+backend/src/modules/admin/admin.service.ts ← Prompt 27
+backend/src/modules/admin/admin.routes.ts  ← Prompt 27
+backend/src/modules/notifications/notifications.service.ts ← Prompt 32
+backend/src/modules/payments/payments.service.ts ← Prompts 26, 33
+backend/src/modules/tables/tables.service.ts ← Prompt 38
+backend/prisma/schema.prisma               ← Prompt 1
+```
+
+### Backend: New Utility/Config Files (3 files)
+
+```
+backend/src/middleware/metrics.middleware.ts   ← Prompt 27
+backend/src/utils/push.ts                      ← Prompt 32
+backend/src/__tests__/e2e/critical-flows.test.ts ← Prompt 34
+```
+
+### Database: SQL Files (1 file)
+
+```
+supabase/functions.sql                         ← Prompt 19
+```
+
+### Frontend: New Pages (8 files)
+
+```
+app/owner/floor/page.tsx                  ← Prompt 9
+app/owner/floor/[branchId]/page.tsx       ← Prompt 9
+app/owner/floor/layout.tsx                ← Prompt 9
+app/admin/staff-reviews/page.tsx          ← Prompt 13
+app/customer/order/[orderId]/tracking/page.tsx ← Prompt 29
+app/admin/refunds/page.tsx                ← Prompt 33
+```
+
+### Frontend: New Components (12 files)
+
+```
+components/floor/FloorLayoutDesigner.tsx       ← Prompt 8
+components/ai/ChatbotWidget.tsx                ← Prompt 14
+components/ai/DemandPrediction.tsx             ← Prompt 14
+components/ai/SmartPricingWidget.tsx           ← Prompt 15
+components/customer/SocialDining.tsx           ← Prompt 15
+components/customer/DietaryProfile.tsx         ← Prompt 16
+components/admin/StaffFeedbackViewer.tsx       ← Prompt 13
+components/payment/RefundRequest.tsx           ← Prompt 33
+components/__tests__/customer/FoodCard.test.tsx      ← Prompt 35
+components/__tests__/floor/FloorMap.test.tsx         ← Prompt 35
+components/__tests__/shared/StatusBadge.test.tsx     ← Prompt 35
+components/__tests__/auth/SignupWizard.test.tsx       ← Prompt 35
+```
+
+### Frontend: Modified Pages (9 files)
+
+```
+app/auth/onboarding/step-2/page.tsx     ← Prompt 10
+app/auth/onboarding/step-3/page.tsx     ← Prompt 10
+app/auth/onboarding/step-4/page.tsx     ← Prompt 10
+app/auth/onboarding/step-5/page.tsx     ← Prompt 10
+app/staff/manager/floor/page.tsx        ← Prompt 11
+app/staff/dashboard/page.tsx            ← Prompt 11
+app/owner/menu/page.tsx                 ← Prompt 11
+app/owner/settings/page.tsx             ← Prompt 12
+app/customer/home/page.tsx              ← Prompt 28
+app/customer/scan/page.tsx              ← Prompt 28
+app/staff/chef/kitchen/page.tsx         ← Prompt 31
+```
+
+### Frontend: Modified Components (4 files)
+
+```
+components/layout/Sidebar.tsx           ← Prompt 21
+components/layout/BottomNav.tsx         ← Prompt 21
+components/floor/FloorMap.tsx           ← Prompt 30
+app/customer/layout.tsx                 ← Prompt 17
+```
+
+### Frontend: PWA & Config Files (4 files)
+
+```
+public/manifest.json                    ← Prompt 36
+public/sw.js                            ← Prompt 36, 32
+next.config.ts                          ← Prompt 36
+app/layout.tsx                          ← Prompt 36
+```
+
+### Email Templates (4 files)
+
+```
+backend/src/email/templates/staff-welcome.ts          ← Prompt 20
+backend/src/email/templates/password-reset-success.ts ← Prompt 20
+backend/src/email/templates/refund-initiated.ts        ← Prompt 20
+backend/src/email/templates/weekly-report.ts           ← Prompt 20
+```
+
+### Documentation (2 files)
+
+```
+SETUP_GUIDE.md                          ← Prompt 37
+backend/.env.example                    ← Prompt 37 (updated)
+```
+
+---
+
+## 📊 UPDATED IMPLEMENTATION SEQUENCE
+
+```
+Phase 1 — Database & Schema (Start Here)
+  → Prompt 1:  Schema additions (shifts, dynamic pricing, social dining)
+  → Prompt 19: Supabase SQL RPC functions
+
+Phase 2 — Core Backend Modules
+  → Prompt 2:  Recipe Ingredients
+  → Prompt 3:  Shifts
+  → Prompt 4:  Dynamic Pricing + Customer Preferences
+  → Prompt 25: Social Dining
+  → Prompt 26: Coupons
+  → Prompt 38: Tables Lookup by Label
+
+Phase 3 — AI & Smart Modules
+  → Prompt 5:  Recommendations + Staff Feedback
+  → Prompt 6:  Chatbot + Staffing Prediction
+  → Prompt 27: Platform Health Monitoring
+
+Phase 4 — Wiring & Notifications
+  → Prompt 7:  Wire all modules in app.ts
+  → Prompt 22: Wire shift routes in staff module
+  → Prompt 32: Push Notification Setup
+  → Prompt 20: Email Templates
+
+Phase 5 — Frontend Core Gaps
+  → Prompt 8:  Floor Layout Designer Component
+  → Prompt 9:  Owner Floor Layout Pages
+  → Prompt 10: Onboarding Steps
+  → Prompt 11: Stub Page Fixes
+  → Prompt 12: Owner Settings
+
+Phase 6 — Frontend New Features
+  → Prompt 13: Admin Staff Reviews
+  → Prompt 28: Mood Tiles + QR Scanner
+  → Prompt 29: Delivery Live Tracking
+  → Prompt 30: Table Merge UI
+  → Prompt 31: Kitchen Station Feature
+
+Phase 7 — AI Frontend Components
+  → Prompt 14: Chatbot Widget + Demand Prediction
+  → Prompt 15: Smart Pricing + Social Dining
+  → Prompt 16: Dietary Profile
+  → Prompt 17: Integrate AI into existing pages
+  → Prompt 33: Refund Management
+
+Phase 8 — Polish & Types
+  → Prompt 18: Update TypeScript types
+  → Prompt 21: Update Navigation
+  → Prompt 36: PWA Setup
+
+Phase 9 — Testing & Deployment
+  → Prompt 34: Backend E2E Tests
+  → Prompt 35: Frontend Component Tests
+  → Prompt 23: Redis Caching Audit
+  → Prompt 24: WebSocket Coverage
+  → Prompt 37: Setup Guide & Deployment
+```
+
+**Total: 38 Detailed Prompts | ~90+ New Files | ~30 Modified Files**
+
+---
+
+*Restaurant OS — Complete Implementation Prompt Library*
+*Priyanshu Kumar Gupta & Ronit Gupta | Version 2.0 | 2025*
+*Built for production — every prompt outputs real, working code*

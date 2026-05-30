@@ -160,6 +160,12 @@ enum InventoryStatus {
   critical
 }
 
+// NEW: Used by DynamicPricingRule.discount_type
+enum DiscountType {
+  percentage
+  fixed_amount
+}
+
 // ============================================================
 // CORE TABLES
 // ============================================================
@@ -193,21 +199,27 @@ model User {
   updated_at             DateTime @default(now()) @updatedAt
 
   // Relations
-  restaurant             Restaurant?      @relation("OwnerRestaurants", fields: [restaurant_id], references: [id])
-  managed_branch         Branch?          @relation("BranchManager")
-  staff_branch           Branch?          @relation("StaffBranch", fields: [branch_id], references: [id])
-  bookings               Booking[]
-  queue_entries          QueueEntry[]
-  orders_as_customer     Order[]          @relation("CustomerOrders")
-  orders_as_waiter       Order[]          @relation("WaiterOrders")
-  reviews                Review[]
-  notifications          Notification[]
-  staff_feedback         StaffFeedback[]
-  delivery_partner       DeliveryPartner?
-  support_tickets        SupportTicket[]
-  dietary_profile        UserDietaryProfile?
-  customer_preferences   CustomerPreference[]
-  audit_logs             AuditLog[]       @relation("ActorLogs")
+  restaurant                  Restaurant?         @relation("OwnerRestaurants", fields: [restaurant_id], references: [id])
+  managed_branch              Branch?             @relation("BranchManager")
+  staff_branch                Branch?             @relation("StaffBranch", fields: [branch_id], references: [id])
+  bookings                    Booking[]
+  queue_entries               QueueEntry[]
+  orders_as_customer          Order[]             @relation("CustomerOrders")
+  orders_as_waiter            Order[]             @relation("WaiterOrders")
+  reviews                     Review[]
+  notifications               Notification[]
+  staff_feedback              StaffFeedback[]
+  delivery_partner            DeliveryPartner?
+  support_tickets             SupportTicket[]
+  dietary_profile             UserDietaryProfile?
+  customer_preferences        CustomerPreference[]
+  audit_logs                  AuditLog[]          @relation("ActorLogs")
+  // NEW relations
+  shifts_assigned             Shift[]             @relation("shiftStaff")
+  shifts_created              Shift[]             @relation("shiftCreator")
+  social_dining_organized     SocialDiningGroup[] @relation("SocialDiningOrganizer")
+  social_dining_memberships   SocialDiningMember[]
+  dynamic_pricing_created     DynamicPricingRule[]
 
   @@index([email])
   @@index([phone])
@@ -229,12 +241,12 @@ model Restaurant {
   updated_at   DateTime @default(now()) @updatedAt
 
   // Relations
-  owners       User[]           @relation("OwnerRestaurants")
-  branches     Branch[]
-  branding     RestaurantBranding?
-  reviews      Review[]
+  owners         User[]             @relation("OwnerRestaurants")
+  branches       Branch[]
+  branding       RestaurantBranding?
+  reviews        Review[]
   staff_feedback StaffFeedback[]
-  menu_items   MenuItem[]       // For platform-wide menu queries
+  menu_items     MenuItem[]         // For platform-wide menu queries
 
   @@map("restaurants")
 }
@@ -257,20 +269,23 @@ model Branch {
   updated_at      DateTime @default(now()) @updatedAt
 
   // Relations
-  restaurant      Restaurant        @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
-  manager         User?             @relation("BranchManager", fields: [manager_id], references: [id])
-  staff           User[]            @relation("StaffBranch")
-  tables          Table[]
-  merged_tables   MergedTable[]
-  floor_layouts   FloorLayout[]
-  bookings        Booking[]
-  queue           QueueEntry[]
-  orders          Order[]
-  menu_categories MenuCategory[]
-  menu_items      MenuItem[]
-  inventory_items InventoryItem[]
-  branch_alerts   BranchAlert[]
-  reviews         Review[]
+  restaurant            Restaurant          @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+  manager               User?               @relation("BranchManager", fields: [manager_id], references: [id])
+  staff                 User[]              @relation("StaffBranch")
+  tables                Table[]
+  merged_tables         MergedTable[]
+  floor_layouts         FloorLayout[]
+  bookings              Booking[]
+  queue                 QueueEntry[]
+  orders                Order[]
+  menu_categories       MenuCategory[]
+  menu_items            MenuItem[]
+  inventory_items       InventoryItem[]
+  branch_alerts         BranchAlert[]
+  reviews               Review[]
+  // NEW relations
+  shifts                Shift[]
+  dynamic_pricing_rules DynamicPricingRule[]
 
   @@index([restaurant_id])
   @@map("branches")
@@ -327,18 +342,18 @@ model FloorLayout {
 // Individual physical tables in a branch
 // ----------------------------------------------------------
 model Table {
-  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  branch_id    String      @db.Uuid
-  label        String      @db.VarChar(10)          // e.g. T1, VIP3
-  capacity     Int
-  floor_number Int         @default(0)               // 0 = Ground
-  shape        TableShape  @default(square)
-  zone         String      @default("indoor") @db.VarChar(50) // indoor/outdoor/vip/family/bar
-  photo_url    String?     @db.Text                 // Customer-facing table photo
-  status       TableStatus @default(free)
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_id       String      @db.Uuid
+  label           String      @db.VarChar(10)          // e.g. T1, VIP3
+  capacity        Int
+  floor_number    Int         @default(0)               // 0 = Ground
+  shape           TableShape  @default(square)
+  zone            String      @default("indoor") @db.VarChar(50) // indoor/outdoor/vip/family/bar
+  photo_url       String?     @db.Text                 // Customer-facing table photo
+  status          TableStatus @default(free)
   x_pos           Int?                                  // Grid position (for floor designer)
   y_pos           Int?
-  merged_table_id String?  @db.Uuid                    // Set when this table is part of an active merge
+  merged_table_id String?     @db.Uuid                  // Set when this table is part of an active merge
   created_at      DateTime @default(now())
   updated_at      DateTime @default(now()) @updatedAt
 
@@ -396,8 +411,10 @@ model MenuCategory {
   is_active     Boolean  @default(true)
   created_at    DateTime @default(now())
 
-  branch        Branch     @relation(fields: [branch_id], references: [id], onDelete: Cascade)
-  menu_items    MenuItem[]
+  branch                Branch               @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  menu_items            MenuItem[]
+  // NEW relation
+  dynamic_pricing_rules DynamicPricingRule[]
 
   @@index([branch_id, is_active])
   @@map("menu_categories")
@@ -428,11 +445,13 @@ model MenuItem {
   updated_at        DateTime @default(now()) @updatedAt
 
   // Relations
-  category            MenuCategory        @relation(fields: [category_id], references: [id])
-  branch              Branch              @relation(fields: [branch_id], references: [id], onDelete: Cascade)
-  restaurant          Restaurant          @relation(fields: [restaurant_id], references: [id])
-  order_items         OrderItem[]
-  recipe_ingredients  RecipeIngredient[]
+  category              MenuCategory         @relation(fields: [category_id], references: [id])
+  branch                Branch               @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  restaurant            Restaurant           @relation(fields: [restaurant_id], references: [id])
+  order_items           OrderItem[]
+  recipe_ingredients    RecipeIngredient[]
+  // NEW relation
+  dynamic_pricing_rules DynamicPricingRule[]
 
   @@index([branch_id, status])
   @@index([restaurant_id])
@@ -454,7 +473,7 @@ model Booking {
   table_id                  String?       @db.Uuid         // Assigned on confirmation
   people_count              Int
   arrival_time              DateTime
-(now())   status                    BookingStatus @default(pending)
+  status                    BookingStatus @default(pending)
   source                    BookingSource @default(app)
   special_requests          String?       @db.Text
   preferred_table_remembered Boolean      @default(false)
@@ -464,9 +483,11 @@ model Booking {
   updated_at                DateTime @default(now()) @updatedAt
 
   // Relations
-  user                      User          @relation(fields: [user_id], references: [id])
-  branch                    Branch        @relation(fields: [branch_id], references: [id])
-  table                     Table?        @relation(fields: [table_id], references: [id])
+  user                      User              @relation(fields: [user_id], references: [id])
+  branch                    Branch            @relation(fields: [branch_id], references: [id])
+  table                     Table?            @relation(fields: [table_id], references: [id])
+  // NEW relation
+  social_dining_group       SocialDiningGroup?
 
   @@index([branch_id, arrival_time])
   @@index([user_id, status])
@@ -478,23 +499,23 @@ model Booking {
 // Walk-in or digital queue management
 // ----------------------------------------------------------
 model QueueEntry {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  branch_id   String      @db.Uuid
-  user_id     String?     @db.Uuid          // Null for anonymous walk-ins
-  table_id    String?     @db.Uuid          // Assigned when seated
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_id    String        @db.Uuid
+  user_id      String?       @db.Uuid          // Null for anonymous walk-ins
+  table_id     String?       @db.Uuid          // Assigned when seated
   people_count Int
-  position    Int
-  status      QueueStatus @default(waiting)
-  source      BookingSource @default(walk_in)
-  guest_name  String?     @db.VarChar(100)  // For walk-ins without app
-  guest_phone String?     @db.VarChar(20)
-  arrived_at  DateTime?
-  seated_at   DateTime?
-  created_at  DateTime @default(now())
+  position     Int
+  status       QueueStatus   @default(waiting)
+  source       BookingSource @default(walk_in)
+  guest_name   String?       @db.VarChar(100)  // For walk-ins without app
+  guest_phone  String?       @db.VarChar(20)
+  arrived_at   DateTime?
+  seated_at    DateTime?
+  created_at   DateTime @default(now())
 
-  branch      Branch  @relation(fields: [branch_id], references: [id])
-  user        User?   @relation(fields: [user_id], references: [id])
-  table       Table?  @relation(fields: [table_id], references: [id])
+  branch       Branch  @relation(fields: [branch_id], references: [id])
+  user         User?   @relation(fields: [user_id], references: [id])
+  table        Table?  @relation(fields: [table_id], references: [id])
 
   @@index([branch_id, status, position])
   @@map("queue_entries")
@@ -523,10 +544,10 @@ model Order {
   updated_at           DateTime @default(now()) @updatedAt
 
   // Relations
-  table                Table?      @relation(fields: [table_id], references: [id])
-  customer             User?       @relation("CustomerOrders", fields: [customer_id], references: [id])
-  waiter               User?       @relation("WaiterOrders", fields: [waiter_id], references: [id])
-  branch               Branch      @relation(fields: [branch_id], references: [id])
+  table                Table?              @relation(fields: [table_id], references: [id])
+  customer             User?               @relation("CustomerOrders", fields: [customer_id], references: [id])
+  waiter               User?               @relation("WaiterOrders", fields: [waiter_id], references: [id])
+  branch               Branch              @relation(fields: [branch_id], references: [id])
   order_items          OrderItem[]
   payment              Payment?
   delivery             DeliveryAssignment?
@@ -545,20 +566,20 @@ model Order {
 // Individual line items within an order
 // ----------------------------------------------------------
 model OrderItem {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  order_id        String    @db.Uuid
-  menu_item_id    String    @db.Uuid
-  quantity        Int
-  unit_price      Decimal   @db.Decimal(10, 2)    // Price at time of order (snapshot)
-  notes           String?   @db.Text               // "No onions", "Extra spicy"
-  addons          Json?                             // Selected addons at time of order
-  status          String    @default("pending")     // pending / preparing / ready / served
-  prepared_at     DateTime?
-  served_at       DateTime?
-  created_at      DateTime @default(now())
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_id     String    @db.Uuid
+  menu_item_id String    @db.Uuid
+  quantity     Int
+  unit_price   Decimal   @db.Decimal(10, 2)    // Price at time of order (snapshot)
+  notes        String?   @db.Text               // "No onions", "Extra spicy"
+  addons       Json?                             // Selected addons at time of order
+  status       String    @default("pending")     // pending / preparing / ready / served
+  prepared_at  DateTime?
+  served_at    DateTime?
+  created_at   DateTime @default(now())
 
-  order           Order     @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  menu_item       MenuItem  @relation(fields: [menu_item_id], references: [id])
+  order        Order     @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  menu_item    MenuItem  @relation(fields: [menu_item_id], references: [id])
 
   @@index([order_id])
   @@map("order_items")
@@ -569,24 +590,24 @@ model OrderItem {
 // ============================================================
 
 model Payment {
-  id                      String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  order_id                String        @unique @db.Uuid
-  amount                  Decimal       @db.Decimal(10, 2)
-  tax_amount              Decimal?      @db.Decimal(10, 2)
-  service_charge          Decimal?      @db.Decimal(10, 2)
-  discount_amount         Decimal?      @db.Decimal(10, 2)
-  method                  PaymentMethod
-  status                  PaymentStatus @default(pending)
-  transaction_ref         String?       @db.VarChar(200) // Gateway transaction ID
-  gateway_order_id        String?       @db.VarChar(200) // Razorpay order_id
-  gateway_payment_id      String?       @db.VarChar(200) // Razorpay payment_id
-  receipt_url             String?       @db.Text         // S3 URL to PDF receipt
-  coupon_id               String?       @db.Uuid
-  split_details           Json?         // Split bill breakdown per person
-  created_at              DateTime @default(now())
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_id           String        @unique @db.Uuid
+  amount             Decimal       @db.Decimal(10, 2)
+  tax_amount         Decimal?      @db.Decimal(10, 2)
+  service_charge     Decimal?      @db.Decimal(10, 2)
+  discount_amount    Decimal?      @db.Decimal(10, 2)
+  method             PaymentMethod
+  status             PaymentStatus @default(pending)
+  transaction_ref    String?       @db.VarChar(200) // Gateway transaction ID
+  gateway_order_id   String?       @db.VarChar(200) // Razorpay order_id
+  gateway_payment_id String?       @db.VarChar(200) // Razorpay payment_id
+  receipt_url        String?       @db.Text         // S3 URL to PDF receipt
+  coupon_id          String?       @db.Uuid
+  split_details      Json?         // Split bill breakdown per person
+  created_at         DateTime @default(now())
 
-  order                   Order         @relation(fields: [order_id], references: [id])
-  coupon                  Coupon?       @relation(fields: [coupon_id], references: [id])
+  order              Order         @relation(fields: [order_id], references: [id])
+  coupon             Coupon?       @relation(fields: [coupon_id], references: [id])
 
   @@index([order_id])
   @@map("payments")
@@ -619,17 +640,17 @@ model Coupon {
 // ============================================================
 
 model DeliveryPartner {
-  id                String  @id @db.Uuid
-  is_online         Boolean @default(false)
-  current_lat       Decimal? @db.Decimal(10, 8)
-  current_lon       Decimal? @db.Decimal(11, 8)
-  active_delivery_id String? @unique @db.Uuid
-  rating            Decimal? @db.Decimal(3, 2)
-  total_deliveries  Int     @default(0)
-  updated_at        DateTime @default(now()) @updatedAt
+  id                 String   @id @db.Uuid
+  is_online          Boolean  @default(false)
+  current_lat        Decimal? @db.Decimal(10, 8)
+  current_lon        Decimal? @db.Decimal(11, 8)
+  active_delivery_id String?  @unique @db.Uuid
+  rating             Decimal? @db.Decimal(3, 2)
+  total_deliveries   Int      @default(0)
+  updated_at         DateTime @default(now()) @updatedAt
 
-  user              User    @relation(fields: [id], references: [id])
-  deliveries        DeliveryAssignment[]
+  user               User                 @relation(fields: [id], references: [id])
+  deliveries         DeliveryAssignment[]
 
   @@map("delivery_partners")
 }
@@ -649,7 +670,7 @@ model DeliveryAssignment {
   delivered_at     DateTime?
   created_at       DateTime @default(now())
 
-  order            Order          @relation(fields: [order_id], references: [id])
+  order            Order           @relation(fields: [order_id], references: [id])
   partner          DeliveryPartner @relation(fields: [partner_id], references: [id])
 
   @@map("delivery_assignments")
@@ -688,17 +709,17 @@ model Review {
 // ============================================================
 
 model InventoryItem {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  branch_id          String    @db.Uuid
-  ingredient_name    String    @db.VarChar(200)
-  unit               String    @db.VarChar(20)    // g, kg, ml, l, pcs
-  current_quantity   Decimal   @db.Decimal(10, 3)
-  reorder_threshold  Decimal   @db.Decimal(10, 3)
-  cost_per_unit      Decimal?  @db.Decimal(10, 2)
-  last_updated       DateTime @default(now()) @updatedAt
-  updated_by         String?   @db.Uuid
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_id         String    @db.Uuid
+  ingredient_name   String    @db.VarChar(200)
+  unit              String    @db.VarChar(20)    // g, kg, ml, l, pcs
+  current_quantity  Decimal   @db.Decimal(10, 3)
+  reorder_threshold Decimal   @db.Decimal(10, 3)
+  cost_per_unit     Decimal?  @db.Decimal(10, 2)
+  last_updated      DateTime @default(now()) @updatedAt
+  updated_by        String?   @db.Uuid
 
-  branch             Branch              @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  branch             Branch               @relation(fields: [branch_id], references: [id], onDelete: Cascade)
   recipe_ingredients RecipeIngredient[]
   waste_logs         InventoryWasteLog[]
 
@@ -738,17 +759,17 @@ model InventoryWasteLog {
 // ============================================================
 
 model Notification {
-  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id          String           @db.Uuid
-  title            String           @db.VarChar(200)
-  body             String           @db.Text
-  type             NotificationType
-  is_read          Boolean          @default(false)
-  reference_id     String?          @db.Uuid       // order_id, booking_id etc.
-  reference_type   String?          @db.VarChar(50)
-  created_at       DateTime @default(now())
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id        String           @db.Uuid
+  title          String           @db.VarChar(200)
+  body           String           @db.Text
+  type           NotificationType
+  is_read        Boolean          @default(false)
+  reference_id   String?          @db.Uuid       // order_id, booking_id etc.
+  reference_type String?          @db.VarChar(50)
+  created_at     DateTime @default(now())
 
-  user             User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id, is_read])
   @@map("notifications")
@@ -799,16 +820,16 @@ model StaffFeedback {
 // ============================================================
 
 model CustomerPreference {
-  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id                String   @db.Uuid
-  branch_id              String?  @db.Uuid
-  preferred_table_id     String?  @db.Uuid
-  preferred_table_label  String?  @db.VarChar(10)
-  times_selected         Int      @default(1)
-  last_selected          DateTime @default(now())
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id               String   @db.Uuid
+  branch_id             String?  @db.Uuid
+  preferred_table_id    String?  @db.Uuid
+  preferred_table_label String?  @db.VarChar(10)
+  times_selected        Int      @default(1)
+  last_selected         DateTime @default(now())
 
-  user                   User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  table                  Table?   @relation(fields: [preferred_table_id], references: [id])
+  user                  User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  table                 Table?   @relation(fields: [preferred_table_id], references: [id])
 
   @@unique([user_id, branch_id])
   @@map("customer_preferences")
@@ -830,27 +851,27 @@ model UserDietaryProfile {
 // ============================================================
 
 model LoyaltyAccount {
-  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id        String          @unique @db.Uuid
-  restaurant_id  String          @db.Uuid
-  points_balance Int             @default(0)
-  total_earned   Int             @default(0)
-  updated_at     DateTime @default(now()) @updatedAt
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id       String               @unique @db.Uuid
+  restaurant_id String               @db.Uuid
+  points_balance Int                 @default(0)
+  total_earned  Int                  @default(0)
+  updated_at    DateTime @default(now()) @updatedAt
 
-  transactions   LoyaltyTransaction[]
+  transactions  LoyaltyTransaction[]
 
   @@map("loyalty_accounts")
 }
 
 model LoyaltyTransaction {
-  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   loyalty_account_id String         @db.Uuid
-  points_change     Int             // Positive = earned, Negative = redeemed
-  reason            String          @db.VarChar(100)  // "order_purchase" | "redeemed"
-  reference_id      String?         @db.Uuid          // order_id
-  created_at        DateTime @default(now())
+  points_change      Int            // Positive = earned, Negative = redeemed
+  reason             String         @db.VarChar(100)  // "order_purchase" | "redeemed"
+  reference_id       String?        @db.Uuid          // order_id
+  created_at         DateTime @default(now())
 
-  account           LoyaltyAccount  @relation(fields: [loyalty_account_id], references: [id])
+  account            LoyaltyAccount @relation(fields: [loyalty_account_id], references: [id])
 
   @@map("loyalty_transactions")
 }
@@ -860,18 +881,18 @@ model LoyaltyTransaction {
 // ============================================================
 
 model SupportTicket {
-  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id           String              @db.Uuid
-  restaurant_id     String?             @db.Uuid
-  subject           String              @db.VarChar(200)
-  conversation      Json                // Array of { role: "user"|"ai"|"agent", message, timestamp }
-  status            SupportTicketStatus @default(open)
-  agent_id          String?             @db.Uuid
-  created_at        DateTime @default(now())
-  updated_at        DateTime @default(now()) @updatedAt
-  resolved_at       DateTime?
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id       String              @db.Uuid
+  restaurant_id String?             @db.Uuid
+  subject       String              @db.VarChar(200)
+  conversation  Json                // Array of { role: "user"|"ai"|"agent", message, timestamp }
+  status        SupportTicketStatus @default(open)
+  agent_id      String?             @db.Uuid
+  created_at    DateTime @default(now())
+  updated_at    DateTime @default(now()) @updatedAt
+  resolved_at   DateTime?
 
-  user              User                @relation(fields: [user_id], references: [id])
+  user          User                @relation(fields: [user_id], references: [id])
 
   @@index([user_id])
   @@map("support_tickets")
@@ -882,20 +903,161 @@ model SupportTicket {
 // ============================================================
 
 model AuditLog {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  actor_id      String   @db.Uuid
-  action        String   @db.VarChar(100)   // "staff.create" | "table.status_changed"
-  target_type   String   @db.VarChar(50)    // "User" | "Order" | "Table"
-  target_id     String?  @db.Uuid
-  old_value     Json?
-  new_value     Json?
-  ip_address    String?  @db.VarChar(45)
-  created_at    DateTime @default(now())
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_id    String   @db.Uuid
+  action      String   @db.VarChar(100)   // "staff.create" | "table.status_changed"
+  target_type String   @db.VarChar(50)    // "User" | "Order" | "Table"
+  target_id   String?  @db.Uuid
+  old_value   Json?
+  new_value   Json?
+  ip_address  String?  @db.VarChar(45)
+  created_at  DateTime @default(now())
 
-  actor         User     @relation("ActorLogs", fields: [actor_id], references: [id])
+  actor       User     @relation("ActorLogs", fields: [actor_id], references: [id])
 
   @@index([actor_id])
   @@index([target_type, target_id])
   @@index([created_at(sort: Desc)])
   @@map("audit_logs")
+}
+
+// ============================================================
+// NEW MODELS
+// ============================================================
+
+// ----------------------------------------------------------
+// SHIFT
+// SQL: CREATE TABLE shifts (
+//   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+//   branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+//   staff_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+//   date DATE NOT NULL,
+//   start_time VARCHAR(8) NOT NULL,
+//   end_time VARCHAR(8) NOT NULL,
+//   role_for_shift VARCHAR(50),
+//   notes VARCHAR(500),
+//   created_by UUID NOT NULL REFERENCES users(id),
+//   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+//   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+//   UNIQUE (staff_id, branch_id, date)
+// );
+// ----------------------------------------------------------
+model Shift {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_id      String   @db.Uuid
+  staff_id       String   @db.Uuid
+  date           DateTime @db.Date                       // Specific working date e.g. 2025-08-15
+  start_time     String   @db.VarChar(8)                 // HH:MM:SS e.g. "09:00:00"
+  end_time       String   @db.VarChar(8)                 // HH:MM:SS e.g. "17:00:00"
+  role_for_shift String?  @db.VarChar(50)                // Optional role override for this shift
+  notes          String?  @db.VarChar(500)
+  created_by     String   @db.Uuid
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
+
+  branch            Branch @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  staff             User   @relation("shiftStaff", fields: [staff_id], references: [id], onDelete: Cascade)
+  created_by_user   User   @relation("shiftCreator", fields: [created_by], references: [id])
+
+  @@unique([staff_id, branch_id, date])
+  @@index([branch_id, date])
+  @@index([staff_id, date])
+  @@map("shifts")
+}
+
+// ----------------------------------------------------------
+// DYNAMIC PRICING RULE
+// SQL: CREATE TABLE dynamic_pricing_rules (
+//   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+//   branch_id UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+//   menu_item_id UUID REFERENCES menu_items(id) ON DELETE CASCADE,
+//   menu_category_id UUID REFERENCES menu_categories(id) ON DELETE SET NULL,
+//   rule_name VARCHAR(100) NOT NULL,
+//   discount_type discount_type_enum NOT NULL,
+//   discount_value NUMERIC(10,2) NOT NULL,
+//   days_of_week INTEGER[] NOT NULL,
+//   start_time VARCHAR(8) NOT NULL,
+//   end_time VARCHAR(8) NOT NULL,
+//   is_active BOOLEAN NOT NULL DEFAULT true,
+//   created_by UUID NOT NULL REFERENCES users(id),
+//   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+//   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+// );
+// ----------------------------------------------------------
+model DynamicPricingRule {
+  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branch_id          String       @db.Uuid
+  menu_item_id       String?      @db.Uuid                 // Null = applies to whole category
+  menu_category_id   String?      @db.Uuid                 // Null = per item rule
+  rule_name          String       @db.VarChar(100)         // e.g. "Happy Hour", "Weekend Special"
+  discount_type      DiscountType                          // "percentage" | "fixed_amount"
+  discount_value     Decimal      @db.Decimal(10, 2)       // 20.00 = 20% or ₹20
+  days_of_week       Int[]                                 // [1,2,3,4,5] Mon–Fri (0=Sun, 6=Sat)
+  start_time         String       @db.VarChar(8)           // "15:00:00"
+  end_time           String       @db.VarChar(8)           // "17:00:00"
+  is_active          Boolean      @default(true)
+  created_by         String       @db.Uuid
+  created_at         DateTime     @default(now())
+  updated_at         DateTime     @default(now()) @updatedAt
+
+  branch             Branch       @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  menu_item          MenuItem?    @relation(fields: [menu_item_id], references: [id], onDelete: Cascade)
+  menu_category      MenuCategory? @relation(fields: [menu_category_id], references: [id], onDelete: SetNull)
+  created_by_user    User         @relation(fields: [created_by], references: [id])
+
+  @@index([branch_id, is_active])
+  @@map("dynamic_pricing_rules")
+}
+
+// ----------------------------------------------------------
+// SOCIAL DINING GROUP
+// SQL: CREATE TABLE social_dining_groups (
+//   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+//   booking_id UUID NOT NULL UNIQUE REFERENCES bookings(id) ON DELETE CASCADE,
+//   invite_code VARCHAR(12) NOT NULL UNIQUE,
+//   organizer_id UUID NOT NULL REFERENCES users(id),
+//   max_members INTEGER NOT NULL DEFAULT 10,
+//   is_open BOOLEAN NOT NULL DEFAULT true,
+//   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+// );
+// ----------------------------------------------------------
+model SocialDiningGroup {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  booking_id   String   @unique @db.Uuid
+  invite_code  String   @unique @db.VarChar(12)   // Random alphanumeric code
+  organizer_id String   @db.Uuid
+  max_members  Int      @default(10)
+  is_open      Boolean  @default(true)             // Whether new members can join
+  created_at   DateTime @default(now())
+
+  booking      Booking              @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+  organizer    User                 @relation("SocialDiningOrganizer", fields: [organizer_id], references: [id])
+  members      SocialDiningMember[]
+
+  @@map("social_dining_groups")
+}
+
+// ----------------------------------------------------------
+// SOCIAL DINING MEMBER
+// SQL: CREATE TABLE social_dining_members (
+//   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+//   group_id UUID NOT NULL REFERENCES social_dining_groups(id) ON DELETE CASCADE,
+//   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+//   joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+//   pre_orders JSONB,
+//   UNIQUE (group_id, user_id)
+// );
+// ----------------------------------------------------------
+model SocialDiningMember {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  group_id   String   @db.Uuid
+  user_id    String   @db.Uuid
+  joined_at  DateTime @default(now())
+  pre_orders Json?                     // [{ menu_item_id, quantity, notes }]
+
+  group      SocialDiningGroup @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  user       User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([group_id, user_id])
+  @@map("social_dining_members")
 }
