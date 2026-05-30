@@ -4,7 +4,10 @@ import { otpTemplate } from './templates/otp-verify';
 import { bookingConfirmedTemplate } from './templates/booking-confirmed';
 import { bookingReminderTemplate } from './templates/booking-reminder';
 import { orderReceiptTemplate } from './templates/order-receipt';
-
+import { staffWelcomeEmail }        from './templates/staff-welcome';
+import { passwordResetSuccessEmail } from './templates/password-reset-success';
+import { refundInitiatedEmail }      from './templates/refund-initiated';
+import { weeklyReportEmail }         from './templates/weekly-report';
 // ─── Template Registry ────────────────────────────────────────────────────────
 const templates: Record<string, (data: any) => { subject: string; html: string }> = {
   welcome: welcomeTemplate,
@@ -12,6 +15,10 @@ const templates: Record<string, (data: any) => { subject: string; html: string }
   'booking-confirmed': bookingConfirmedTemplate,
   'booking-reminder': bookingReminderTemplate,
   'order-receipt': orderReceiptTemplate,
+  'staff-welcome':           (d: any) => staffWelcomeEmail(d.staffName, d.restaurantName, d.role, d.tempPassword, d.loginUrl),
+  'password-reset-success':  (d: any) => passwordResetSuccessEmail(d.userName, d.loginUrl),
+  'refund-initiated':        (d: any) => refundInitiatedEmail(d.customerName, d.orderId, d.amount, d.restaurantName, d.estimatedDays),
+  'weekly-report':           (d: any) => weeklyReportEmail(d.ownerName, d.restaurantName, d.reportData, d.reportUrl),
 };
 
 // ─── Send Email ───────────────────────────────────────────────────────────────
