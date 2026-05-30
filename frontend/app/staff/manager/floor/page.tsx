@@ -6,11 +6,14 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   X, Loader2, Users, MapPin, RefreshCw, Wifi, WifiOff,
   ChevronDown, ExternalLink, UserCheck, AlertCircle,
+  // MERGE FEATURE ADDITION
+  Link2, Link2Off, AlertTriangle, Unlink,
+  // END MERGE FEATURE ADDITION
 } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { PageWrapper } from "@/components/layout/PageWrapper"
-import { FloorMap, type FloorTable } from "@/components/floor/FloorMap"
+import { FloorMap, type FloorTable, type MergedTableInfo } from "@/components/floor/FloorMap"
 import { StatusBadge } from "@/components/shared/StatusBadge"
 import { SkeletonCard } from "@/components/shared/SkeletonCard"
 import { apiClient } from "@/lib/api-client"
@@ -34,6 +37,19 @@ interface TableActiveOrder {
     menu_items: { name: string } | null
   }>
 }
+
+// MERGE FEATURE ADDITION ───────────────────────────────────────────────────────
+/** Shape returned by POST /api/v1/tables/merge */
+interface MergeApiResponse {
+  id: string
+  table_id_1: string
+  table_id_2: string
+  branch_id: string
+  merged_by: string
+  merged_at: string
+  unmerged_at: string | null
+}
+// END MERGE FEATURE ADDITION ───────────────────────────────────────────────────
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +77,6 @@ function toFloorTable(t: Table, index: number): FloorTable {
   }
 }
 
-// All 5 statuses the manager can override a table to
 const OVERRIDE_OPTIONS: { value: TableStatus; label: string; color: string }[] = [
   { value: TABLE_STATUS.FREE,        label: "Free",        color: TABLE_STATUS_COLORS.free        },
   { value: TABLE_STATUS.OCCUPIED,    label: "Occupied",    color: TABLE_STATUS_COLORS.occupied    },
@@ -76,7 +91,32 @@ const LEGEND = [
   { label: "Reserved",    cls: "bg-[#2980B9]"  },
   { label: "Cleaning",    cls: "bg-[#F1C40F]"  },
   { label: "Maintenance", cls: "bg-[#7F8C8D]"  },
+  // MERGE FEATURE ADDITION
+  { label: "Merged",      cls: "bg-[#1A3C5E]"  },
+  // END MERGE FEATURE ADDITION
 ]
+
+// MERGE FEATURE ADDITION ───────────────────────────────────────────────────────
+/**
+ * Rough adjacency check — identical to host page implementation.
+ * Tables are adjacent when any edges are within 30 px.
+ */
+function areAdjacent(a: FloorTable, b: FloorTable): boolean {
+  const GAP = 30
+  const aRight  = a.x + a.width
+  const aBottom = a.y + a.height
+  const bRight  = b.x + b.width
+  const bBottom = b.y + b.height
+
+  const vOverlap = a.y < bBottom + GAP && aBottom + GAP > b.y
+  const hClose   = Math.abs(aRight - b.x) <= GAP || Math.abs(bRight - a.x) <= GAP
+
+  const hOverlap = a.x < bRight + GAP && aRight + GAP > b.x
+  const vClose   = Math.abs(aBottom - b.y) <= GAP || Math.abs(bBottom - a.y) <= GAP
+
+  return (vOverlap && hClose) || (hOverlap && vClose)
+}
+// END MERGE FEATURE ADDITION ───────────────────────────────────────────────────
 
 // ── Override Status Dropdown ────────────────────────────────────────────────────
 
@@ -163,16 +203,25 @@ function TableDetailsSheet({
   currentStatus,
   onClose,
   onStatusChanged,
+  // MERGE FEATURE ADDITION
+  mergeInfo,
+  onUnmerge,
+  isUnmerging,
+  // END MERGE FEATURE ADDITION
 }: {
   table: FloorTable
   rawTable: Table | undefined
   currentStatus: TableStatus
   onClose: () => void
   onStatusChanged: (status: TableStatus) => void
+  // MERGE FEATURE ADDITION
+  mergeInfo?: MergedTableInfo
+  onUnmerge?: () => void
+  isUnmerging?: boolean
+  // END MERGE FEATURE ADDITION
 }) {
   const router = useRouter()
 
-  // Fetch the active order for this table (if occupied)
   const { data: activeOrder, isLoading: orderLoading } = useQuery<TableActiveOrder | null>({
     queryKey: ["manager", "table-order", table.id],
     queryFn: async () => {
@@ -205,9 +254,20 @@ function TableDetailsSheet({
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
         <div>
-          <h2 className="font-bold text-gray-900 text-base">Table {table.label}</h2>
+          {/* MERGE FEATURE ADDITION: show combined label when merged */}
+          <h2 className="font-bold text-gray-900 text-base">
+            {mergeInfo
+              ? `Table ${mergeInfo.label1} + ${mergeInfo.label2}`
+              : `Table ${table.label}`}
+          </h2>
+          {/* END MERGE FEATURE ADDITION */}
           <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
-            <span className="flex items-center gap-1"><Users size={11} /> {table.capacity} capacity</span>
+            <span className="flex items-center gap-1">
+              <Users size={11} />
+              {/* MERGE FEATURE ADDITION: combined capacity */}
+              {mergeInfo ? mergeInfo.combinedCapacity : table.capacity} capacity
+              {/* END MERGE FEATURE ADDITION */}
+            </span>
             {rawTable?.zone && (
               <span className="flex items-center gap-1"><MapPin size={11} /> {rawTable.zone}</span>
             )}
@@ -228,6 +288,33 @@ function TableDetailsSheet({
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
 
+        {/* MERGE FEATURE ADDITION: Merge info + unmerge action */}
+        {mergeInfo && (
+          <div className="px-4 py-3 bg-[#1A3C5E]/5 border border-[#1A3C5E]/15 rounded-xl space-y-3">
+            <div className="flex items-center gap-2">
+              <Link2 size={14} className="text-[#1A3C5E]" />
+              <p className="text-xs font-semibold text-[#1A3C5E]">
+                Merged — {mergeInfo.label1} + {mergeInfo.label2}
+              </p>
+            </div>
+            <p className="text-xs text-gray-500">
+              Combined capacity: {mergeInfo.combinedCapacity} guests
+            </p>
+            <button
+              onClick={onUnmerge}
+              disabled={isUnmerging}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-[#1A3C5E] text-white text-xs font-semibold hover:bg-[#15304d] disabled:opacity-50 transition"
+            >
+              {isUnmerging ? (
+                <><Loader2 size={12} className="animate-spin" /> Unmerging…</>
+              ) : (
+                <><Unlink size={12} /> Unmerge Tables</>
+              )}
+            </button>
+          </div>
+        )}
+        {/* END MERGE FEATURE ADDITION */}
+
         {/* Current status */}
         <div>
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
@@ -236,7 +323,7 @@ function TableDetailsSheet({
           <StatusBadge status={currentStatus} size="md" />
         </div>
 
-        {/* Active order summary (occupied only) */}
+        {/* Active order summary */}
         {currentStatus === TABLE_STATUS.OCCUPIED && (
           <div>
             <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
@@ -300,40 +387,41 @@ function TableDetailsSheet({
         )}
 
         {/* Manager actions */}
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-            Manager Actions
-          </p>
+        {/* MERGE FEATURE ADDITION: hide override/reassign for merged tables */}
+        {!mergeInfo && (
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+              Manager Actions
+            </p>
 
-          {/* Override status dropdown */}
-          <OverrideDropdown
-            tableId={table.id}
-            currentStatus={currentStatus}
-            onChanged={onStatusChanged}
-          />
+            <OverrideDropdown
+              tableId={table.id}
+              currentStatus={currentStatus}
+              onChanged={onStatusChanged}
+            />
 
-          {/* View order — only when occupied and order exists */}
-          {currentStatus === TABLE_STATUS.OCCUPIED && activeOrder && (
-            <button
-              onClick={() => router.push(`/staff/manager/orders?table=${table.id}`)}
-              className="flex items-center gap-1.5 w-full px-3 py-2.5 rounded-xl border border-[#1A3C5E]/20 bg-[#1A3C5E]/5 text-sm font-medium text-[#1A3C5E] hover:bg-[#1A3C5E]/10 transition"
-            >
-              <ExternalLink size={13} />
-              View Full Order
-            </button>
-          )}
+            {currentStatus === TABLE_STATUS.OCCUPIED && activeOrder && (
+              <button
+                onClick={() => router.push(`/staff/manager/orders?table=${table.id}`)}
+                className="flex items-center gap-1.5 w-full px-3 py-2.5 rounded-xl border border-[#1A3C5E]/20 bg-[#1A3C5E]/5 text-sm font-medium text-[#1A3C5E] hover:bg-[#1A3C5E]/10 transition"
+              >
+                <ExternalLink size={13} />
+                View Full Order
+              </button>
+            )}
 
-          {/* Reassign waiter */}
-          {currentStatus === TABLE_STATUS.OCCUPIED && (
-            <button
-              onClick={() => router.push(`/staff/manager/staff-duty?table=${table.id}`)}
-              className="flex items-center gap-1.5 w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
-            >
-              <UserCheck size={13} />
-              Reassign Waiter
-            </button>
-          )}
-        </div>
+            {currentStatus === TABLE_STATUS.OCCUPIED && (
+              <button
+                onClick={() => router.push(`/staff/manager/staff-duty?table=${table.id}`)}
+                className="flex items-center gap-1.5 w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
+              >
+                <UserCheck size={13} />
+                Reassign Waiter
+              </button>
+            )}
+          </div>
+        )}
+        {/* END MERGE FEATURE ADDITION */}
 
         {/* Table metadata */}
         <div className="px-4 py-3 bg-gray-50 rounded-xl space-y-2">
@@ -384,41 +472,120 @@ function FloorTabs({
   )
 }
 
+// MERGE FEATURE ADDITION ───────────────────────────────────────────────────────
+/**
+ * Floating action bar shown at the bottom of the screen when exactly 2 tables
+ * are selected in merge mode — identical UX to the host floor page.
+ */
+function MergeActionBar({
+  table1,
+  table2,
+  onConfirm,
+  onCancel,
+  isMerging,
+}: {
+  table1: FloorTable
+  table2: FloorTable
+  onConfirm: () => void
+  onCancel: () => void
+  isMerging: boolean
+}) {
+  const adjacent = areAdjacent(table1, table2)
+  const combinedCapacity = table1.capacity + table2.capacity
+
+  return (
+    <motion.div
+      initial={{ y: 80, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 80, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 400, damping: 32 }}
+      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-60 w-full max-w-lg px-4"
+    >
+      <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 px-5 py-4 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-[#1A3C5E]/10 rounded-xl">
+            <Link2 size={18} className="text-[#1A3C5E]" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-gray-900">
+              Merge T{table1.label} + T{table2.label} → Combined Table
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Combined capacity: {combinedCapacity} guests
+            </p>
+          </div>
+        </div>
+
+        {!adjacent && (
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+            <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
+            <p className="text-xs text-amber-700">
+              These tables may not be adjacent. Merge anyway?
+            </p>
+          </div>
+        )}
+
+        <div className="flex gap-2.5">
+          <button
+            onClick={onCancel}
+            disabled={isMerging}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isMerging}
+            className="flex-1 py-2.5 rounded-xl bg-[#1A3C5E] text-white text-sm font-semibold flex items-center justify-center gap-2 hover:bg-[#15304d] disabled:opacity-50 transition"
+          >
+            {isMerging ? (
+              <><Loader2 size={14} className="animate-spin" /> Merging…</>
+            ) : (
+              <><Link2 size={14} /> Confirm Merge</>
+            )}
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+// END MERGE FEATURE ADDITION ───────────────────────────────────────────────────
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function ManagerFloorPage() {
   const { branchId } = useAuth()
   const qc = useQueryClient()
   const [selectedTable, setSelectedTable] = useState<FloorTable | null>(null)
-  const [activeFloor, setActiveFloor] = useState(0) // 0 = all
+  const [activeFloor, setActiveFloor] = useState(0)
 
-  // ── Fetch all tables for this branch ──────────────────────────────────────
+  // MERGE FEATURE ADDITION ───────────────────────────────────────────────────
+  const [mergeMode, setMergeMode] = useState(false)
+  const [selectedForMerge, setSelectedForMerge] = useState<string[]>([])
+  const [mergedTables, setMergedTables] = useState<MergedTableInfo[]>([])
+  // END MERGE FEATURE ADDITION ───────────────────────────────────────────────
+
   const { data: rawTables = [], isLoading, refetch } = useQuery<Table[]>({
     queryKey: ["manager", "floor-tables", branchId],
     queryFn: () => apiClient.get<Table[]>(`/branch/${branchId}/tables`),
     enabled: !!branchId,
     staleTime: 30_000,
-    refetchInterval: 30_000,  // fallback auto-refresh every 30 s
+    refetchInterval: 30_000,
   })
 
-  // ── Real-time table status overlay ────────────────────────────────────────
   const { tableStatuses, setTableStatus, isConnected } = useTableStatus({
     branchId: branchId ?? "",
     role: "manager",
   })
 
-  // When a status event arrives, also invalidate the query cache
   useEffect(() => {
     if (!branchId) return
-    // Force query refetch on table:status changes — tableStatuses already
-    // holds the optimistic value, but we want the full table list fresh too.
     const timer = setInterval(() => {
       qc.invalidateQueries({ queryKey: ["manager", "floor-tables", branchId] })
     }, 30_000)
     return () => clearInterval(timer)
   }, [branchId, qc])
 
-  // ── Merge real-time statuses with DB data ─────────────────────────────────
   const floorTables: FloorTable[] = useMemo(
     () =>
       rawTables.map((t, i) => ({
@@ -428,7 +595,6 @@ export default function ManagerFloorPage() {
     [rawTables, tableStatuses]
   )
 
-  // ── Floor numbers for tabs ────────────────────────────────────────────────
   const floorNumbers = useMemo(() => {
     const nums = [...new Set(rawTables.map((t) => t.floor_number ?? 1))].sort(
       (a, b) => a - b
@@ -446,7 +612,6 @@ export default function ManagerFloorPage() {
     [floorTables, rawTables, activeFloor]
   )
 
-  // ── Selected table raw data (for zone / floor_number in sidebar) ──────────
   const selectedRaw = selectedTable
     ? rawTables.find((t) => t.id === selectedTable.id)
     : undefined
@@ -456,7 +621,6 @@ export default function ManagerFloorPage() {
       ? ((tableStatuses[selectedTable.id] ?? selectedTable.status) as TableStatus)
       : TABLE_STATUS.FREE
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
   const statusCounts = useMemo(
     () =>
       floorTables.reduce<Record<string, number>>((acc, t) => {
@@ -465,6 +629,102 @@ export default function ManagerFloorPage() {
       }, {}),
     [floorTables]
   )
+
+  // MERGE FEATURE ADDITION ───────────────────────────────────────────────────
+
+  const { mutate: executeMerge, isPending: isMerging } = useMutation({
+    mutationFn: ({ id1, id2 }: { id1: string; id2: string }) =>
+      apiClient.post<MergeApiResponse>("/tables/merge", {
+        table_id_1: id1,
+        table_id_2: id2,
+      }),
+    onSuccess: (response, { id1, id2 }) => {
+      const t1 = floorTables.find((t) => t.id === id1)!
+      const t2 = floorTables.find((t) => t.id === id2)!
+
+      const newMerge: MergedTableInfo = {
+        mergedId: response.id,
+        tableId1: id1,
+        tableId2: id2,
+        label1: t1.label,
+        label2: t2.label,
+        combinedCapacity: t1.capacity + t2.capacity,
+      }
+      setMergedTables((prev) => [...prev, newMerge])
+
+      setTableStatus(id1, "occupied")
+      setTableStatus(id2, "occupied")
+
+      qc.invalidateQueries({ queryKey: ["manager", "floor-tables", branchId] })
+      toast.success(`Tables ${t1.label} and ${t2.label} merged successfully`)
+
+      setSelectedForMerge([])
+      setMergeMode(false)
+    },
+    onError: (err: any) => {
+      toast.error(err?.message ?? "Failed to merge tables")
+    },
+  })
+
+  const { mutate: executeUnmerge, isPending: isUnmerging } = useMutation({
+    mutationFn: (mergedId: string) =>
+      apiClient.post(`/tables/${mergedId}/unmerge`, {}),
+    onSuccess: (_, mergedId) => {
+      const pair = mergedTables.find((m) => m.mergedId === mergedId)
+      setMergedTables((prev) => prev.filter((m) => m.mergedId !== mergedId))
+
+      if (pair) {
+        setTableStatus(pair.tableId1, "free")
+        setTableStatus(pair.tableId2, "free")
+      }
+
+      qc.invalidateQueries({ queryKey: ["manager", "floor-tables", branchId] })
+      toast.success("Tables unmerged successfully")
+      setSelectedTable(null)
+    },
+    onError: (err: any) => {
+      toast.error(err?.message ?? "Failed to unmerge tables")
+    },
+  })
+
+  function handleTableSelectForMerge(tableId: string) {
+    setSelectedForMerge((prev) => {
+      if (prev.includes(tableId)) return prev.filter((id) => id !== tableId)
+      if (prev.length >= 2) {
+        toast.warning("You can only select 2 tables to merge")
+        return prev
+      }
+      return [...prev, tableId]
+    })
+  }
+
+  function toggleMergeMode() {
+    setMergeMode((v) => {
+      if (v) setSelectedForMerge([])
+      return !v
+    })
+    setSelectedTable(null)
+  }
+
+  function confirmMerge() {
+    if (selectedForMerge.length !== 2) return
+    executeMerge({ id1: selectedForMerge[0], id2: selectedForMerge[1] })
+  }
+
+  const selectedMergeInfo = selectedTable
+    ? mergedTables.find(
+        (m) => m.tableId1 === selectedTable.id || m.tableId2 === selectedTable.id
+      )
+    : undefined
+
+  const mergeTable1 = selectedForMerge[0]
+    ? visibleTables.find((t) => t.id === selectedForMerge[0])
+    : undefined
+  const mergeTable2 = selectedForMerge[1]
+    ? visibleTables.find((t) => t.id === selectedForMerge[1])
+    : undefined
+
+  // END MERGE FEATURE ADDITION ───────────────────────────────────────────────
 
   return (
     <>
@@ -493,9 +753,47 @@ export default function ManagerFloorPage() {
             >
               <RefreshCw size={14} />
             </button>
+
+            {/* MERGE FEATURE ADDITION: Merge mode toggle */}
+            <button
+              onClick={toggleMergeMode}
+              className={cn(
+                "flex items-center gap-2 px-3.5 py-2 rounded-xl border text-sm font-semibold transition",
+                mergeMode
+                  ? "bg-[#1A3C5E] text-white border-[#1A3C5E] shadow-md"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-[#1A3C5E]/30"
+              )}
+            >
+              {mergeMode ? (
+                <><Link2 size={14} /> Merge Mode: ON</>
+              ) : (
+                <><Link2Off size={14} /> Merge Tables</>
+              )}
+            </button>
+            {/* END MERGE FEATURE ADDITION */}
           </div>
         }
       >
+        {/* MERGE FEATURE ADDITION: instruction banner */}
+        {mergeMode && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700"
+          >
+            <Link2 size={16} className="shrink-0 text-blue-500" />
+            <span>
+              <strong>Merge Mode active</strong> — click two free tables to select them for merging.
+              {selectedForMerge.length > 0 && (
+                <span className="ml-1 font-medium">
+                  ({selectedForMerge.length}/2 selected)
+                </span>
+              )}
+            </span>
+          </motion.div>
+        )}
+        {/* END MERGE FEATURE ADDITION */}
+
         {/* Legend */}
         <div className="flex flex-wrap items-center gap-4">
           {LEGEND.map(({ label, cls }) => (
@@ -521,6 +819,15 @@ export default function ManagerFloorPage() {
             <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-100 rounded-xl text-xs font-medium text-gray-500 shadow-sm ml-auto">
               <span>{floorTables.length} total tables</span>
             </div>
+            {/* MERGE FEATURE ADDITION: merged count pill */}
+            {mergedTables.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-[#1A3C5E]/5 border border-[#1A3C5E]/20 rounded-xl text-xs font-medium text-[#1A3C5E] shadow-sm">
+                <Link2 size={11} />
+                <span className="font-mono font-bold">{mergedTables.length}</span>
+                <span>merged</span>
+              </div>
+            )}
+            {/* END MERGE FEATURE ADDITION */}
           </div>
         )}
 
@@ -544,17 +851,41 @@ export default function ManagerFloorPage() {
               branchId={branchId ?? ""}
               readOnly
               height={520}
-              onTableClick={(t) => setSelectedTable(t)}
+              // MERGE FEATURE ADDITION
+              mergeMode={mergeMode}
+              selectedForMerge={selectedForMerge}
+              onTableSelectForMerge={handleTableSelectForMerge}
+              mergedTables={mergedTables}
+              // END MERGE FEATURE ADDITION
+              onTableClick={(t) => {
+                // MERGE FEATURE ADDITION: block sidebar while in merge mode
+                if (mergeMode) return
+                // END MERGE FEATURE ADDITION
+                setSelectedTable(t)
+              }}
             />
           )}
         </div>
       </PageWrapper>
 
+      {/* MERGE FEATURE ADDITION: Floating merge action bar */}
+      <AnimatePresence>
+        {mergeMode && mergeTable1 && mergeTable2 && (
+          <MergeActionBar
+            table1={mergeTable1}
+            table2={mergeTable2}
+            onConfirm={confirmMerge}
+            onCancel={() => setSelectedForMerge([])}
+            isMerging={isMerging}
+          />
+        )}
+      </AnimatePresence>
+      {/* END MERGE FEATURE ADDITION */}
+
       {/* Table Details Sheet */}
       <AnimatePresence>
         {selectedTable && (
           <>
-            {/* Backdrop */}
             <div
               className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px]"
               onClick={() => setSelectedTable(null)}
@@ -573,6 +904,13 @@ export default function ManagerFloorPage() {
                   queryKey: ["manager", "table-order", selectedTable.id],
                 })
               }}
+              // MERGE FEATURE ADDITION
+              mergeInfo={selectedMergeInfo}
+              onUnmerge={() =>
+                selectedMergeInfo && executeUnmerge(selectedMergeInfo.mergedId)
+              }
+              isUnmerging={isUnmerging}
+              // END MERGE FEATURE ADDITION
             />
           </>
         )}
