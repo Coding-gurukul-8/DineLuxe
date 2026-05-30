@@ -8,6 +8,51 @@ const ACTIVE_CUSTOMER_STATUSES = ['created', 'confirmed', 'preparing', 'ready'];
 const PAST_CUSTOMER_STATUSES = ['served', 'paid', 'closed', 'cancelled'];
 const ACTIVE_STAFF_STATUSES = ['created', 'confirmed', 'preparing', 'ready', 'served'];
 
+// ─── Cache constants ──────────────────────────────────────────────────────────
+const ORDER_CACHE_TTL         = 60;  // 60 s — orders change state frequently
+const ACTIVE_ORDERS_CACHE_TTL = 10;  // 10 s — kitchen needs near-realtime data
+
+const orderCacheKey        = (orderId: string)  => `order:${orderId}`;
+const activeOrdersCacheKey = (branchId: string) => `active_orders:${branchId}`;
+
+// ─── Cache helpers ────────────────────────────────────────────────────────────
+
+async function getOrderCache(orderId: string): Promise<unknown | null> {
+  try {
+    const cached = await redis.get(orderCacheKey(orderId));
+    if (cached) return JSON.parse(cached);
+  } catch {
+    // Redis miss or error — fall through to DB
+  }
+  return null;
+}
+
+async function setOrderCache(orderId: string, data: unknown): Promise<void> {
+  try {
+    await redis.setex(orderCacheKey(orderId), ORDER_CACHE_TTL, JSON.stringify(data));
+  } catch {
+    // Cache write failure is non-fatal
+  }
+}
+
+async function bustOrderCache(orderId: string): Promise<void> {
+  try {
+    await redis.del(orderCacheKey(orderId));
+  } catch {
+    // Cache invalidation failure is non-fatal
+  }
+}
+
+async function bustActiveOrdersCache(branchId: string): Promise<void> {
+  try {
+    await redis.del(activeOrdersCacheKey(branchId));
+  } catch {
+    // Cache invalidation failure is non-fatal
+  }
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type OrderItemRow = {
   id: string;
   quantity: number;
@@ -61,7 +106,6 @@ export async function createOrder(
   }
 
   // 2. Validate all menu items belong to this branch and are available
-  // FIX: fetch addons JSONB so we can resolve addon prices by name
   const menuItemIds = items.map((i) => i.menu_item_id);
   const { data: menuItems, error: menuErr } = await supabaseAdmin
     .from('menu_items')
@@ -84,8 +128,6 @@ export async function createOrder(
   }
 
   // 3. Build price map + per-item addon price maps keyed by lowercase name
-  // FIX: no separate menu_addons table — addons live as JSONB on menu_items.
-  // Match by name (case-insensitive) to resolve prices.
   const priceMap = Object.fromEntries(menuItems.map((m) => [m.id, Number(m.price)]));
 
   const addonMap: Record<string, Record<string, number>> = {};
@@ -111,8 +153,7 @@ export async function createOrder(
   // 5. Auto-assign waiter
   const assignedWaiterId = await findLeastBusyWaiter(branchId);
 
-  // 6. Insert order — FIX: status 'confirmed' not 'created'
-  // BUG FIX: also added created_at/updated_at — both are NOT NULL in schema.
+  // 6. Insert order
   const now = new Date().toISOString();
   const { data: order, error: orderErr } = await supabaseAdmin
     .from('orders')
@@ -134,7 +175,6 @@ export async function createOrder(
   if (orderErr || !order) throw orderErr ?? new Error('Failed to create order');
 
   // 7. Insert order items
-  // The live Supabase order_items table has created_at, but not updated_at.
   const orderItemsPayload = items.map((item) => ({
     order_id: order.id,
     menu_item_id: item.menu_item_id,
@@ -184,6 +224,9 @@ export async function createOrder(
     console.error('[inventory] deduction failed:', err)
   );
 
+  // ✅ PATCH: Bust active orders cache so kitchen/cashier see the new order
+  await bustActiveOrdersCache(branchId);
+
   return { ...order, computed_total: total, items: orderItemsPayload };
 }
 
@@ -198,8 +241,14 @@ async function deductInventory(branchId: string, items: CreateOrderInput['items'
   }
 }
 
-// ─── Get Order by ID ─────────────────────────────────────────────────────────
+// ─── Get Order by ID ──────────────────────────────────────────────────────────
+// ✅ PATCH: Redis cache added (GET → SET on miss)
 export async function getOrderById(orderId: string, branchId?: string, userId?: string) {
+  // 1. Try cache
+  const cached = await getOrderCache(orderId);
+  if (cached) return cached;
+
+  // 2. DB fallback
   let query = supabaseAdmin
     .from('orders')
     .select('*, order_items(*, menu_items(name, price))')
@@ -216,6 +265,10 @@ export async function getOrderById(orderId: string, branchId?: string, userId?: 
   if (error || !data) {
     throw Object.assign(new Error('Order not found'), { statusCode: 404 });
   }
+
+  // 3. Populate cache
+  await setOrderCache(orderId, data);
+
   return data;
 }
 
@@ -226,10 +279,6 @@ export async function getOrdersByTable(tableId: string, branchId: string) {
     .select('*, order_items(*, menu_items(name, price))')
     .eq('table_id', tableId)
     .eq('branch_id', branchId)
-    // BUG FIX: .not() forces Postgres to cast every value against the OrderStatus
-    // enum. If 'cancelled' hasn't been added to the live DB enum yet, Postgres
-    // throws "invalid input value for enum". Use .in() whitelist of statuses
-    // confirmed to exist in the DB so the filter never touches unknown enum values.
     .in('status', ['created', 'confirmed', 'preparing', 'ready', 'served'])
     .order('created_at', { ascending: false });
 
@@ -358,17 +407,35 @@ export async function getStaffOrders(
 }
 
 // ─── Get Active Orders for Branch ────────────────────────────────────────────
+// ✅ PATCH: Redis cache added (GET → SET on miss)
 export async function getActiveBranchOrders(branchId: string) {
+  // 1. Try cache
+  try {
+    const cached = await redis.get(activeOrdersCacheKey(branchId));
+    if (cached) return JSON.parse(cached);
+  } catch {
+    // Redis miss or error — fall through to DB
+  }
+
+  // 2. DB query
   const { data, error } = await supabaseAdmin
     .from('orders')
     .select('*, order_items(id, status, menu_items(name)), tables(label)')
     .eq('branch_id', branchId)
-    // BUG FIX: same whitelist fix — avoid casting 'cancelled' against DB enum
     .in('status', ['created', 'confirmed', 'preparing', 'ready', 'served'])
     .order('created_at', { ascending: true });
 
   if (error) throw error;
-  return data ?? [];
+  const result = data ?? [];
+
+  // 3. Populate cache
+  try {
+    await redis.setex(activeOrdersCacheKey(branchId), ACTIVE_ORDERS_CACHE_TTL, JSON.stringify(result));
+  } catch {
+    // Cache write failure is non-fatal
+  }
+
+  return result;
 }
 
 // ─── Cancel Order ─────────────────────────────────────────────────────────────
@@ -398,7 +465,6 @@ export async function cancelOrder(orderId: string, branchId: string, reason?: st
     );
   }
 
-  // FIX: 'cancelled' added to OrderStatus enum via migration (ALTER TYPE)
   const { data: updated, error: updateErr } = await supabaseAdmin
     .from('orders')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
@@ -407,6 +473,12 @@ export async function cancelOrder(orderId: string, branchId: string, reason?: st
     .single();
 
   if (updateErr) throw updateErr;
+
+  // ✅ PATCH: Invalidate both the single-order cache and the branch active-orders cache
+  await Promise.all([
+    bustOrderCache(orderId),
+    bustActiveOrdersCache(branchId),
+  ]);
 
   if (reason) {
     await redis.setex(`order_cancel_reason:${orderId}`, 60 * 60 * 24, reason);

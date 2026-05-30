@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../../config/supabase';
+import { redis } from '../../config/redis';
 import { parsePagination } from '../../utils/pagination';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -11,6 +12,74 @@ interface JoinQueueInput {
   user_id?: string;
 }
 
+// ─── Cache constants ──────────────────────────────────────────────────────────
+const QUEUE_POSITION_TTL = 30;   // 30 s — queue state changes frequently
+const AVG_TURN_TIME_TTL  = 300;  // 5 min — historical average is stable
+
+const queuePositionCacheKey = (queueId: string)  => `queue_position:${queueId}`;
+const avgTurnTimeCacheKey   = (branchId: string) => `avg_turn_time:${branchId}`;
+
+// ─── Cache helpers ────────────────────────────────────────────────────────────
+
+async function bustQueuePositionCache(queueId: string): Promise<void> {
+  try {
+    await redis.del(queuePositionCacheKey(queueId));
+  } catch {
+    // Cache invalidation failure is non-fatal
+  }
+}
+
+async function bustAvgTurnTimeCache(branchId: string): Promise<void> {
+  try {
+    await redis.del(avgTurnTimeCacheKey(branchId));
+  } catch {
+    // Cache invalidation failure is non-fatal
+  }
+}
+
+// ─── Internal: get (or compute + cache) avg table turn time ──────────────────
+// ✅ PATCH: Extracted into a cached helper — was recomputed inline on every call
+async function getAvgTurnTime(branchId: string): Promise<number> {
+  // 1. Try cache
+  try {
+    const cached = await redis.get(avgTurnTimeCacheKey(branchId));
+    if (cached) return Number(cached);
+  } catch {
+    // Fall through to DB
+  }
+
+  // 2. Compute from DB
+  const { data: recentBookings } = await supabaseAdmin
+    .from('bookings')
+    .select('seated_at, completed_at')
+    .eq('branch_id', branchId)
+    .eq('status', 'completed')
+    .not('seated_at', 'is', null)
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(10);
+
+  let avgTurnTimeMinutes = 45; // sensible default
+  if (recentBookings && recentBookings.length > 0) {
+    const totalMs = recentBookings.reduce((acc, b) => {
+      const diff =
+        new Date(b.completed_at).getTime() - new Date(b.seated_at).getTime();
+      return acc + (diff > 0 ? diff : 0);
+    }, 0);
+    const computed = Math.round(totalMs / recentBookings.length / 60000);
+    if (computed > 0) avgTurnTimeMinutes = computed;
+  }
+
+  // 3. Cache the result
+  try {
+    await redis.setex(avgTurnTimeCacheKey(branchId), AVG_TURN_TIME_TTL, String(avgTurnTimeMinutes));
+  } catch {
+    // Cache write failure is non-fatal
+  }
+
+  return avgTurnTimeMinutes;
+}
+
 // ─── Broadcast helper (REST-based, works without a persistent WS connection) ──
 
 async function broadcastToChannel(channel: string, event: string, payload: object) {
@@ -18,7 +87,6 @@ async function broadcastToChannel(channel: string, event: string, payload: objec
     .channel(channel)
     .send({ type: 'broadcast', event, payload })
     .catch((err: Error) => {
-      // Non-fatal: log but don't crash the request
       console.warn(`[queue] broadcast failed on ${channel}:`, err.message);
     });
 }
@@ -26,12 +94,10 @@ async function broadcastToChannel(channel: string, event: string, payload: objec
 // ─── Join queue ───────────────────────────────────────────────────────────────
 
 export async function joinQueue(input: JoinQueueInput) {
-  // FIX: validate people_count is a positive integer (guard against bad callers)
   if (!Number.isInteger(input.people_count) || input.people_count < 1) {
     throw Object.assign(new Error('people_count must be a positive integer'), { statusCode: 400 });
   }
 
-  // Get current max position for this branch
   const { data: lastEntry } = await supabaseAdmin
     .from('queue_entries')
     .select('position')
@@ -60,7 +126,6 @@ export async function joinQueue(input: JoinQueueInput) {
 
   if (error) throw error;
 
-  // FIX: use helper so broadcast errors are non-fatal
   await broadcastToChannel(`branch:${input.branch_id}`, 'queue_updated', {
     action: 'joined',
     queue_id: data.id,
@@ -88,8 +153,18 @@ export async function getBranchQueue(branchId: string, query: Record<string, str
 }
 
 // ─── Get position + ETA ───────────────────────────────────────────────────────
-
+// ✅ PATCH: Full result cached + avg turn time moved to a separate cached helper
+//           DB queries parallelised with Promise.all (was sequential)
 export async function getQueuePosition(queueId: string) {
+  // 1. Try position cache
+  try {
+    const cached = await redis.get(queuePositionCacheKey(queueId));
+    if (cached) return JSON.parse(cached);
+  } catch {
+    // Fall through to DB
+  }
+
+  // 2. Fetch queue entry
   const { data: entry } = await supabaseAdmin
     .from('queue_entries')
     .select('*')
@@ -98,49 +173,26 @@ export async function getQueuePosition(queueId: string) {
 
   if (!entry) throw Object.assign(new Error('Queue entry not found'), { statusCode: 404 });
 
-  // Count entries ahead in queue
-  const { count: entriesAhead } = await supabaseAdmin
-    .from('queue_entries')
-    .select('id', { count: 'exact', head: true })
-    .eq('branch_id', entry.branch_id)
-    .in('status', ['waiting', 'arrived'])
-    .lt('position', entry.position);
+  // 3. Run DB queries in parallel (was 3 sequential round-trips + avg_turn_time)
+  const [{ count: entriesAhead }, { count: freeTables }, avgTurnTimeMinutes] = await Promise.all([
+    supabaseAdmin
+      .from('queue_entries')
+      .select('id', { count: 'exact', head: true })
+      .eq('branch_id', entry.branch_id)
+      .in('status', ['waiting', 'arrived'])
+      .lt('position', entry.position),
+    supabaseAdmin
+      .from('tables')
+      .select('id', { count: 'exact', head: true })
+      .eq('branch_id', entry.branch_id)
+      .eq('status', 'free'),
+    getAvgTurnTime(entry.branch_id),  // uses 5-min cache
+  ]);
 
-  // Count free tables
-  const { count: freeTables } = await supabaseAdmin
-    .from('tables')
-    .select('id', { count: 'exact', head: true })
-    .eq('branch_id', entry.branch_id)
-    .eq('status', 'free');
-
-  // Avg table turn time from last 10 completed bookings (seconds → minutes)
-  const { data: recentBookings } = await supabaseAdmin
-    .from('bookings')
-    .select('seated_at, completed_at')
-    .eq('branch_id', entry.branch_id)
-    .eq('status', 'completed')
-    .not('seated_at', 'is', null)
-    .not('completed_at', 'is', null)
-    .order('completed_at', { ascending: false })
-    .limit(10);
-
-  let avgTurnTimeMinutes = 45; // sensible default
-  if (recentBookings && recentBookings.length > 0) {
-    const totalMs = recentBookings.reduce((acc, b) => {
-      const diff =
-        new Date(b.completed_at).getTime() - new Date(b.seated_at).getTime();
-      return acc + (diff > 0 ? diff : 0); // FIX: ignore negative diffs (data anomalies)
-    }, 0);
-    const computed = Math.round(totalMs / recentBookings.length / 60000);
-    // FIX: guard against zero turn-time (divide-by-zero / nonsense ETA)
-    if (computed > 0) avgTurnTimeMinutes = computed;
-  }
-
-  // FIX: net waiting groups = groups ahead minus immediately available tables
   const netAhead = Math.max(0, (entriesAhead ?? 0) - (freeTables ?? 0));
   const estimatedWaitMinutes = netAhead * avgTurnTimeMinutes;
 
-  return {
+  const result = {
     queue_id: queueId,
     position: entry.position,
     status: entry.status,
@@ -150,12 +202,20 @@ export async function getQueuePosition(queueId: string) {
     estimated_wait_minutes: estimatedWaitMinutes,
     avg_turn_time_minutes: avgTurnTimeMinutes,
   };
+
+  // 4. Cache result (short TTL — queue changes frequently)
+  try {
+    await redis.setex(queuePositionCacheKey(queueId), QUEUE_POSITION_TTL, JSON.stringify(result));
+  } catch {
+    // Cache write failure is non-fatal
+  }
+
+  return result;
 }
 
 // ─── Mark arrived ─────────────────────────────────────────────────────────────
 
 export async function markQueueArrived(queueId: string) {
-  // FIX: fetch first so we can validate current status before update
   const { data: existing } = await supabaseAdmin
     .from('queue_entries')
     .select('id, status')
@@ -181,13 +241,16 @@ export async function markQueueArrived(queueId: string) {
     .single();
 
   if (error) throw error;
+
+  // ✅ PATCH: Bust position cache so next poll reflects 'arrived' status
+  await bustQueuePositionCache(queueId);
+
   return data;
 }
 
 // ─── Assign table ─────────────────────────────────────────────────────────────
 
 export async function assignTable(queueId: string, tableId: string, hostId: string) {
-  // Fetch queue entry
   const { data: entry } = await supabaseAdmin
     .from('queue_entries')
     .select('*')
@@ -197,7 +260,6 @@ export async function assignTable(queueId: string, tableId: string, hostId: stri
   if (!entry) throw Object.assign(new Error('Queue entry not found'), { statusCode: 404 });
   if (entry.status === 'seated') throw Object.assign(new Error('Customer already seated'), { statusCode: 409 });
 
-  // FIX: also block assigning to a removed/no_show entry
   if (!['waiting', 'arrived'].includes(entry.status)) {
     throw Object.assign(
       new Error(`Cannot assign table to a queue entry with status "${entry.status}"`),
@@ -205,7 +267,6 @@ export async function assignTable(queueId: string, tableId: string, hostId: stri
     );
   }
 
-  // Check table is free
   const { data: table } = await supabaseAdmin
     .from('tables')
     .select('id, status, capacity')
@@ -216,7 +277,6 @@ export async function assignTable(queueId: string, tableId: string, hostId: stri
   if (table.status !== 'free') throw Object.assign(new Error(`Table is currently ${table.status}`), { statusCode: 409 });
   if (table.capacity < entry.people_count) throw Object.assign(new Error('Table capacity too small'), { statusCode: 422 });
 
-  // FIX: RPC 'assign_queue_to_table' doesn't exist — use direct fallback instead
   // 1. Mark queue entry as seated
   const { data: updatedEntry, error: qErr } = await supabaseAdmin
     .from('queue_entries')
@@ -234,7 +294,6 @@ export async function assignTable(queueId: string, tableId: string, hostId: stri
     .eq('id', tableId);
 
   if (tErr) {
-    // Rollback queue entry if table update fails
     await supabaseAdmin
       .from('queue_entries')
       .update({ status: 'arrived', seated_at: null })
@@ -244,7 +303,7 @@ export async function assignTable(queueId: string, tableId: string, hostId: stri
 
   // 3. Create a booking from the queue entry
   const now = new Date();
-  const futureArrival = new Date(now.getTime() + 15 * 60000); // 15 min from now (default wait)
+  const futureArrival = new Date(now.getTime() + 15 * 60000);
   const { data: booking, error: bErr } = await supabaseAdmin
     .from('bookings')
     .insert({
@@ -261,7 +320,6 @@ export async function assignTable(queueId: string, tableId: string, hostId: stri
     .single();
 
   if (bErr) {
-    // Rollback queue and table if booking fails
     await supabaseAdmin
       .from('queue_entries')
       .update({ status: 'arrived', seated_at: null })
@@ -273,8 +331,13 @@ export async function assignTable(queueId: string, tableId: string, hostId: stri
     throw bErr;
   }
 
-  // Recalculate queue positions after seating
   await recalculatePositions(entry.branch_id);
+
+  // ✅ PATCH: Bust position cache + avg turn time so next booking factors in
+  await Promise.all([
+    bustQueuePositionCache(queueId),
+    bustAvgTurnTimeCache(entry.branch_id),
+  ]);
 
   await broadcastToChannel(`branch:${entry.branch_id}`, 'queue_updated', {
     action: 'seated',
@@ -294,7 +357,6 @@ export async function assignTable(queueId: string, tableId: string, hostId: stri
 // ─── Mark no-show ─────────────────────────────────────────────────────────────
 
 export async function markQueueNoShow(queueId: string) {
-  // FIX: was querying non-existent table 'queue' — correct table is 'queue_entries'
   const { data: entry } = await supabaseAdmin
     .from('queue_entries')
     .select('*')
@@ -303,8 +365,6 @@ export async function markQueueNoShow(queueId: string) {
 
   if (!entry) throw Object.assign(new Error('Queue entry not found'), { statusCode: 404 });
 
-  // FIX: .update() was not chained with .select() so the original returned { removed:true }
-  // but nothing confirmed the update happened. Now we return the updated row.
   const { data, error } = await supabaseAdmin
     .from('queue_entries')
     .update({ status: 'no_show' })
@@ -314,15 +374,16 @@ export async function markQueueNoShow(queueId: string) {
 
   if (error) throw error;
 
-  // Recalculate positions (no gaps)
   await recalculatePositions(entry.branch_id);
+
+  // ✅ PATCH: Bust position cache for this entry
+  await bustQueuePositionCache(queueId);
 
   await broadcastToChannel(`branch:${entry.branch_id}`, 'queue_updated', {
     action: 'no_show',
     queue_id: queueId,
   });
 
-  // FIX: return the updated record, not a plain {removed:true}
   return data;
 }
 
@@ -337,7 +398,6 @@ export async function removeFromQueue(queueId: string) {
 
   if (!entry) throw Object.assign(new Error('Queue entry not found'), { statusCode: 404 });
 
-  // FIX: don't allow removing an already-seated/no_show/removed entry silently
   if (['seated', 'no_show', 'cancelled'].includes(entry.status)) {
     throw Object.assign(
       new Error(`Queue entry is already "${entry.status}" — cannot remove again`),
@@ -354,7 +414,9 @@ export async function removeFromQueue(queueId: string) {
 
   await recalculatePositions(entry.branch_id);
 
-  // FIX: broadcast the removal so clients update live
+  // ✅ PATCH: Bust position cache for this entry
+  await bustQueuePositionCache(queueId);
+
   await broadcastToChannel(`branch:${entry.branch_id}`, 'queue_updated', {
     action: 'removed',
     queue_id: queueId,
@@ -375,7 +437,6 @@ async function recalculatePositions(branchId: string) {
 
   if (!activeQueue || activeQueue.length === 0) return;
 
-  // FIX: N+1 individual updates replaced with a single upsert batch
   const upsertPayload = activeQueue.map((entry, idx) => ({
     id: entry.id,
     position: idx + 1,
@@ -386,7 +447,11 @@ async function recalculatePositions(branchId: string) {
     .upsert(upsertPayload, { onConflict: 'id' });
 
   if (error) {
-    // Log but don't crash – positions are cosmetic; seating is already committed
     console.warn('[queue] recalculatePositions upsert failed:', error.message);
   }
+
+  // ✅ PATCH: Bust all affected entries' position caches after reorder
+  await Promise.all(
+    activeQueue.map((entry) => bustQueuePositionCache(entry.id))
+  );
 }
