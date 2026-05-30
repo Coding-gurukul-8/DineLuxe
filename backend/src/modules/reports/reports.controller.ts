@@ -8,6 +8,16 @@ type AuthenticatedRequest = Request & {
   branchId: string;
 };
 
+const ORDER_STATUSES = [
+  'created',
+  'confirmed',
+  'preparing',
+  'ready',
+  'served',
+  'paid',
+  'closed',
+];
+
 // ─── Existing endpoints ───────────────────────────────────────────────────────
 
 export async function getSales(req: Request, res: Response, next: NextFunction) {
@@ -81,6 +91,23 @@ export async function getCustomerInsights(req: Request, res: Response, next: Nex
 export async function getAdminPlatform(req: Request, res: Response, next: NextFunction) {
   try {
     const data = await reportsService.getAdminPlatformReport();
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /reports/platform?period=7d|30d|90d
+export async function getPlatformReport(req: Request, res: Response, next: NextFunction) {
+  try {
+    const period = (req.query.period as string) || '30d';
+    if (!['7d', '30d', '90d'].includes(period)) {
+      return res
+        .status(400)
+        .json(error('VALIDATION_ERROR', 'period must be 7d, 30d, or 90d'));
+    }
+
+    const data = await reportsService.getAdminPlatformReportForPeriod(period);
     res.json(success(data));
   } catch (err) {
     next(err);
@@ -203,7 +230,7 @@ export async function getOrdersReport(req: Request, res: Response, next: NextFun
       .from('orders')
       .select('id, order_type')
       .eq('restaurant_id', restaurant_id)
-      .neq('status', 'cancelled');
+      .in('status', ORDER_STATUSES);
 
     if (branch_id) query = query.eq('branch_id', branch_id);
     if (from) query = query.gte('created_at', from);
@@ -288,7 +315,7 @@ export async function getStaffReport(req: Request, res: Response, next: NextFunc
         users!waiter_id (name)
       `)
       .eq('restaurant_id', restaurant_id)
-      .neq('status', 'cancelled');
+      .in('status', ORDER_STATUSES);
 
     if (branch_id) query = query.eq('branch_id', branch_id);
     if (from) query = query.gte('created_at', from);

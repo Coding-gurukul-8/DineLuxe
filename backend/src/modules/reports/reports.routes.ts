@@ -10,6 +10,7 @@ import {
   getCustomerInsights,
   getAdminPlatform,
   getAdminTrends,
+  getPlatformReport,
   exportReport,
   // NEW frontend-shaped endpoints
   getRevenueReport,
@@ -58,6 +59,12 @@ router.get(
   '/admin/platform',
   requireRole('admin', 'super_admin'),
   getAdminPlatform,
+);
+
+router.get(
+  '/platform',
+  requireRole('admin', 'super_admin'),
+  getPlatformReport,
 );
 
 router.get(

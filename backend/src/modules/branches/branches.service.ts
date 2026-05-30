@@ -33,7 +33,7 @@ export async function getAll(restaurantId: string) {
   const { data, error } = await supabaseAdmin
     .from('branches')
     .select(`
-      id, name, address, lat, lon, phone, seating_capacity,
+      id, name, address, lat, lon,
       is_active, operating_hours, created_at, updated_at,
       manager:users!manager_id ( id, name )
     `)
@@ -65,8 +65,6 @@ export async function create(
       lon: geo?.lon ?? null,
       manager_id: input.manager_id ?? null,
       operating_hours: input.operating_hours ?? null,
-      seating_capacity: input.seating_capacity,
-      phone: input.phone ?? null,
       is_active: true,
       created_at: now,
       updated_at: now,
@@ -120,7 +118,6 @@ export async function update(
       pincode: input.pincode ?? '',
       seating_capacity: input.seating_capacity ?? 0,
       address_line2: input.address_line2,
-      phone: input.phone,
     };
     updateData.address = buildAddress(merged);
     const geo = await geocodeAddress(updateData.address as string);
@@ -133,8 +130,6 @@ export async function update(
   if (input.name) updateData.name = input.name;
   if (input.manager_id !== undefined) updateData.manager_id = input.manager_id;
   if (input.operating_hours) updateData.operating_hours = input.operating_hours;
-  if (input.seating_capacity !== undefined) updateData.seating_capacity = input.seating_capacity;
-  if (input.phone !== undefined) updateData.phone = input.phone;
 
   const { data, error } = await supabaseAdmin
     .from('branches')

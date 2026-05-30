@@ -20,6 +20,7 @@ router.delete('/me', authenticate, ctrl.deleteMe);
 // Manager / Owner / Admin only
 // BUG FIX: injectTenant added so restaurantId is always on req and the
 // getUserById controller doesn't need a fragile JWT fallback.
+router.get('/', authenticate, injectTenant, requireRole('manager', 'owner', 'admin'), ctrl.listUsers);
 router.get('/:id', authenticate, injectTenant, requireRole('manager', 'owner', 'admin'), ctrl.getUserById);
 
 export default router;

@@ -77,3 +77,21 @@ export async function getRestaurantAnalytics(req: Request, res: Response, next: 
     next(err);
   }
 }
+
+// ─── Platform overview (admin) ───────────────────────────────────────────────
+// GET /analytics/overview?period=7d|30d|90d
+export async function getPlatformOverview(req: Request, res: Response, next: NextFunction) {
+  try {
+    const period = (req.query.period as string) || '30d';
+    if (!['7d', '30d', '90d'].includes(period)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'period must be 7d, 30d, or 90d' },
+      });
+    }
+    const data = await analyticsService.getPlatformOverview(period);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+}

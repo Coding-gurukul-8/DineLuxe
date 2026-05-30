@@ -20,15 +20,23 @@ interface InventoryItem {
   name: string;
   unit: string;
   quantity: number;
-  min_quantity: number;
-  is_low_stock: boolean;
+  min_threshold: number;
 }
+
+type InventoryResponse = {
+  data: InventoryItem[];
+  count: number | null;
+};
+
+type InventoryItemWithStatus = InventoryItem & {
+  is_low_stock: boolean;
+};
 
 interface AddItemForm {
   name: string;
   unit: string;
   quantity: string;
-  min_quantity: string;
+  min_threshold: string;
 }
 
 // ── Add Item Modal ────────────────────────────────────────────────────────────
@@ -47,7 +55,7 @@ function AddItemModal({
     name: "",
     unit: "",
     quantity: "",
-    min_quantity: "",
+    min_threshold: "",
   });
   const [errors, setErrors] = useState<Partial<AddItemForm>>({});
 
@@ -57,13 +65,13 @@ function AddItemModal({
       name: string;
       unit: string;
       quantity: number;
-      min_quantity: number;
+      min_threshold: number;
     }) => apiClient.post("/inventory", body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["inventory", "branch", branchId] });
       toast.success("Item added to inventory");
       onClose();
-      setForm({ name: "", unit: "", quantity: "", min_quantity: "" });
+      setForm({ name: "", unit: "", quantity: "", min_threshold: "" });
       setErrors({});
     },
     onError: () => toast.error("Failed to add item"),
@@ -75,8 +83,8 @@ function AddItemModal({
     if (!form.unit.trim()) e.unit = "Unit is required";
     if (!form.quantity || isNaN(Number(form.quantity)) || Number(form.quantity) < 0)
       e.quantity = "Enter a valid quantity";
-    if (!form.min_quantity || isNaN(Number(form.min_quantity)) || Number(form.min_quantity) < 0)
-      e.min_quantity = "Enter a valid minimum";
+    if (!form.min_threshold || isNaN(Number(form.min_threshold)) || Number(form.min_threshold) < 0)
+      e.min_threshold = "Enter a valid minimum";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -88,7 +96,7 @@ function AddItemModal({
       name: form.name.trim(),
       unit: form.unit.trim(),
       quantity: Number(form.quantity),
-      min_quantity: Number(form.min_quantity),
+      min_threshold: Number(form.min_threshold),
     });
   };
 
@@ -180,23 +188,23 @@ function AddItemModal({
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Min Qty
+                Min Threshold
               </label>
               <input
                 type="number"
                 min={0}
-                value={form.min_quantity}
+                value={form.min_threshold}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, min_quantity: e.target.value }))
+                  setForm((f) => ({ ...f, min_threshold: e.target.value }))
                 }
                 placeholder="0"
                 className={cn(
                   "w-full px-3 py-2 text-sm rounded-lg border outline-none focus:ring-2 focus:ring-brand-primary/30 transition",
-                  errors.min_quantity ? "border-red-400" : "border-gray-200"
+                  errors.min_threshold ? "border-red-400" : "border-gray-200"
                 )}
               />
-              {errors.min_quantity && (
-                <p className="text-xs text-red-500 mt-1">{errors.min_quantity}</p>
+              {errors.min_threshold && (
+                <p className="text-xs text-red-500 mt-1">{errors.min_threshold}</p>
               )}
             </div>
           </div>
@@ -234,18 +242,18 @@ function InventoryRow({
   branchId,
   onDeleteRequest,
 }: {
-  item: InventoryItem;
+  item: InventoryItemWithStatus;
   branchId: string;
   onDeleteRequest: (item: InventoryItem) => void;
 }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [qty, setQty] = useState(String(item.quantity));
-  const [minQty, setMinQty] = useState(String(item.min_quantity));
+  const [minQty, setMinQty] = useState(String(item.min_threshold));
   const [name, setName] = useState(item.name);
 
   const patchMutation = useMutation({
-    mutationFn: (body: { quantity?: number; min_quantity?: number; name?: string }) =>
+    mutationFn: (body: { quantity?: number; min_threshold?: number; name?: string }) =>
       apiClient.patch(`/inventory/${item.id}`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["inventory", "branch", branchId] });
@@ -256,12 +264,12 @@ function InventoryRow({
   });
 
   const handleUpdate = () => {
-    const body: { quantity?: number; min_quantity?: number; name?: string } = {};
+    const body: { quantity?: number; min_threshold?: number; name?: string } = {};
     const newQty = Number(qty);
     const newMin = Number(minQty);
     const newName = name.trim();
     if (!isNaN(newQty) && newQty !== item.quantity) body.quantity = newQty;
-    if (!isNaN(newMin) && newMin !== item.min_quantity) body.min_quantity = newMin;
+    if (!isNaN(newMin) && newMin !== item.min_threshold) body.min_threshold = newMin;
     if (newName && newName !== item.name) body.name = newName;
     if (Object.keys(body).length === 0) { setEditing(false); return; }
     patchMutation.mutate(body);
@@ -269,7 +277,7 @@ function InventoryRow({
 
   const handleCancel = () => {
     setQty(String(item.quantity));
-    setMinQty(String(item.min_quantity));
+    setMinQty(String(item.min_threshold));
     setName(item.name);
     setEditing(false);
   };
@@ -325,7 +333,7 @@ function InventoryRow({
         )}
       </td>
 
-      {/* Min Qty */}
+      {/* Min Threshold */}
       <td className="px-4 py-3">
         {editing ? (
           <input
@@ -337,7 +345,7 @@ function InventoryRow({
           />
         ) : (
           <span className="text-sm text-gray-500">
-            {item.min_quantity}{" "}
+            {item.min_threshold}{" "}
             <span className="text-xs text-gray-400">{item.unit}</span>
           </span>
         )}
@@ -420,20 +428,25 @@ export default function OwnerInventoryPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<InventoryItem | null>(null);
 
-  const { data: rawItems = [], isLoading, isError, refetch } = useQuery<InventoryItem[]>({
+  const { data: inventoryResponse, isLoading, isError, refetch } = useQuery<InventoryResponse>({
     queryKey: ["inventory", "branch", branchId],
     queryFn: () =>
-      apiClient.get<InventoryItem[]>(`/inventory/branch/${branchId}`),
+      apiClient.get<InventoryResponse>(`/inventory/branch/${branchId}`),
     enabled: !!branchId,
     refetchInterval: 60_000,
   });
 
   // Sort low-stock items to the top
-  const items = [...rawItems].sort((a, b) => {
-    if (a.is_low_stock && !b.is_low_stock) return -1;
-    if (!a.is_low_stock && b.is_low_stock) return 1;
-    return a.name.localeCompare(b.name);
-  });
+  const items: InventoryItemWithStatus[] = (inventoryResponse?.data ?? [])
+    .map((item) => ({
+      ...item,
+      is_low_stock: item.quantity <= item.min_threshold,
+    }))
+    .sort((a, b) => {
+      if (a.is_low_stock && !b.is_low_stock) return -1;
+      if (!a.is_low_stock && b.is_low_stock) return 1;
+      return a.name.localeCompare(b.name);
+    });
 
   const lowCount = items.filter((i) => i.is_low_stock).length;
 
@@ -523,7 +536,7 @@ export default function OwnerInventoryPage() {
                     Quantity
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Min Qty
+                    Min Threshold
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     Status

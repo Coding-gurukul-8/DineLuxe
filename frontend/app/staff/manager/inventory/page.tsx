@@ -19,6 +19,11 @@ interface InventoryItem extends Record<string, unknown> {
   cost_per_unit?: number;
 }
 
+type InventoryResponse = {
+  data: InventoryItem[];
+  count: number | null;
+};
+
 const columns: Column<InventoryItem>[] = [
   {
     key: "name",
@@ -90,13 +95,14 @@ const columns: Column<InventoryItem>[] = [
 export default function InventoryPage() {
   const { branchId } = useAuth();
 
-  const { data: items = [], isLoading } = useQuery({
+  const { data: inventoryResponse, isLoading } = useQuery<InventoryResponse>({
     queryKey: ["inventory", "branch", branchId],
-    queryFn: () => apiClient.get<InventoryItem[]>(`/inventory/branch/${branchId}`),
+    queryFn: () => apiClient.get<InventoryResponse>(`/inventory/branch/${branchId}`),
     enabled: !!branchId,
     refetchInterval: 60_000,
   });
 
+  const items = inventoryResponse?.data ?? [];
   const lowStockCount = items.filter((i) => i.quantity <= i.min_threshold).length;
 
   return (

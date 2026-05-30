@@ -131,6 +131,25 @@ export async function getUserById(userId: string, restaurantId: string) {
   return mapUserRow(data);
 }
 
+// ─── List Users (owner/manager/admin) ───────────────────────────────────────
+export async function listUsers(restaurantId: string, role?: string) {
+  let query = supabaseAdmin
+    .from('users')
+    .select(
+      `id, name, email, phone, role, is_active, created_at, profile_pic_url`
+    )
+    .eq('restaurant_id', restaurantId);
+
+  if (role) {
+    query = query.eq('role', role);
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: false });
+
+  if (error) throw new Error(`Failed to fetch users: ${error.message}`);
+  return (data ?? []).map(mapUserRow);
+}
+
 // ─── Check Email Availability ────────────────────────────────────────────────
 export async function checkEmail(email: string): Promise<{ available: boolean }> {
   // BUG FIX: email should be normalised before the DB query — the original code

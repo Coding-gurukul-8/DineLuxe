@@ -1,8 +1,19 @@
 import { supabaseAdmin } from '../../config/supabase';
+import { getPlatformPeriodReport } from '../../utils/platform-analytics';
 
 function isMissingRpc(error: { message?: string } | null): boolean {
   return (error?.message ?? '').includes('Could not find the function');
 }
+
+const ORDER_STATUSES = [
+  'created',
+  'confirmed',
+  'preparing',
+  'ready',
+  'served',
+  'paid',
+  'closed',
+];
 
 // ─── Menu suggestions ─────────────────────────────────────────────────────────
 export async function getMenuSuggestions(branchId: string) {
@@ -176,7 +187,7 @@ export async function getRestaurantOverview(restaurantId: string) {
       .select('id, total_amount', { count: 'exact' })
       .eq('restaurant_id', restaurantId)
       .gte('created_at', startOfToday)
-      .neq('status', 'cancelled')
+      .in('status', ORDER_STATUSES)
       .then(({ data, count }) => ({ data: data ?? [], count: count ?? 0 })),
 
     // Tables for occupancy
@@ -242,7 +253,7 @@ export async function getBranchHourly(branchId: string) {
     .select('id, created_at, total_amount, status')
     .eq('branch_id', branchId)
     .gte('created_at', startOfToday)
-    .neq('status', 'cancelled');
+    .in('status', ORDER_STATUSES);
 
   if (error) throw error;
 
@@ -346,5 +357,22 @@ export async function getRestaurantAnalytics(
       total_revenue: Math.round(totalRevenue * 100) / 100,
       total_orders:  totalOrders,
     },
+  };
+}
+
+// ─── Platform overview (admin) ───────────────────────────────────────────────
+// GET /analytics/overview?period=7d|30d|90d
+export async function getPlatformOverview(period: string) {
+  const report = await getPlatformPeriodReport(period);
+  return {
+    daily_revenue: report.period_breakdowns.map((row) => ({
+      date: row.date,
+      revenue: row.revenue,
+    })),
+    daily_orders: report.period_breakdowns.map((row) => ({
+      date: row.date,
+      orders: row.orders,
+    })),
+    top_categories: [],
   };
 }

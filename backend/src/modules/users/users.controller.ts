@@ -19,6 +19,29 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+// GET /users?role=&restaurant_id=
+export async function listUsers(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const role = typeof req.query.role === 'string' ? req.query.role : undefined;
+    const queryRestaurantId = typeof req.query.restaurant_id === 'string'
+      ? req.query.restaurant_id
+      : undefined;
+    const restaurantId = authReq.restaurantId || authReq.user?.restaurant_id || queryRestaurantId;
+
+    if (!restaurantId) {
+      return res
+        .status(400)
+        .json(error('VALIDATION_ERROR', 'Restaurant context is required'));
+    }
+
+    const users = await usersService.listUsers(restaurantId, role);
+    res.json(success(users));
+  } catch (err) {
+    next(err);
+  }
+}
+
 // PATCH /users/me
 export async function updateMe(req: Request, res: Response, next: NextFunction) {
   try {

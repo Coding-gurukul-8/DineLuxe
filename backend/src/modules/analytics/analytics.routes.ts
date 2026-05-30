@@ -10,12 +10,21 @@ import {
   getRestaurantOverview,
   getBranchHourly,
   getRestaurantAnalytics,
+  getPlatformOverview,
 } from './analytics.controller';
 
 const router: import('express').Router = Router();
 
 // ── All analytics routes require authentication ───────────────────────────────
 router.use(authenticate);
+
+// ── Platform overview (admin) ───────────────────────────────────────────────
+// GET /analytics/overview?period=7d|30d|90d
+router.get(
+  '/overview',
+  requireRole('admin', 'super_admin'),
+  getPlatformOverview,
+);
 
 // ── Existing AI/forecast routes (owner + manager) ─────────────────────────────
 router.get(

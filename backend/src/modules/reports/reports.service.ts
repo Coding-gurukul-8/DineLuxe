@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../../config/supabase';
 import { Parser } from 'json2csv';
 import PDFDocument from 'pdfkit';
+import { getPlatformPeriodReport } from '../../utils/platform-analytics';
 
 function isMissingRpc(error: { message?: string } | null): boolean {
   return (error?.message ?? '').includes('Could not find the function');
@@ -110,6 +111,17 @@ export async function getAdminPlatformReport() {
     throw error;
   }
   return data ?? [];
+}
+
+// ─── Admin platform report (period-based, frontend shape) ───────────────────
+export async function getAdminPlatformReportForPeriod(period: string) {
+  const report = await getPlatformPeriodReport(period);
+  return {
+    revenue_total: report.revenue_total,
+    orders_total: report.orders_total,
+    avg_order_value: report.avg_order_value,
+    period_breakdowns: report.period_breakdowns,
+  };
 }
 
 // ─── Admin trends ─────────────────────────────────────────────────────────────
