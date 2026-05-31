@@ -33,8 +33,8 @@ jest.mock("framer-motion", () => {
 });
 
 jest.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DndContext: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+  DragOverlay: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
   useDraggable: () => ({
     attributes: {},
     listeners: {},
