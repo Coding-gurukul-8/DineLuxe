@@ -17,6 +17,11 @@ export const createTableSchema = z.object({
   y_pos: z.number().int().optional(),
 });
 
+export const lookupByLabelSchema = z.object({
+  branch_id: z.string().uuid(),
+  label: z.string().min(1).max(10).transform((value) => value.trim().toUpperCase()),
+});
+
 export const updateStatusSchema = z.object({
   new_status: TableStatus,
   reason: z.string().max(255).optional(),
@@ -32,6 +37,7 @@ export const mergeSchema = z
   });
 
 export type CreateTableInput = z.infer<typeof createTableSchema>;
+export type LookupByLabelInput = z.infer<typeof lookupByLabelSchema>;
 export type UpdateStatusInput = z.infer<typeof updateStatusSchema>;
 export type MergeInput = z.infer<typeof mergeSchema>;
 

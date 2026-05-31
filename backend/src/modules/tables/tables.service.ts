@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
 import {
   CreateTableInput,
+  LookupByLabelInput,
   UpdateStatusInput,
   MergeInput,
   TableStatusType,
@@ -19,6 +20,28 @@ export async function getTablesByBranch(branchId: string) {
     .order('label', { ascending: true });
 
   if (error) throw error;
+  return data;
+}
+
+// ─── Lookup table by label ───────────────────────────────────────────────────
+
+export async function lookupTableByLabel(branchId: string, label: string) {
+  const normalizedLabel = label.trim().toUpperCase();
+
+  const { data, error } = await supabaseAdmin
+    .from('tables')
+    .select('id, label, capacity, floor_number, zone, status')
+    .eq('branch_id', branchId)
+    .eq('label', normalizedLabel)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) {
+    throw Object.assign(new Error(`Table "${normalizedLabel}" not found in this branch`), {
+      statusCode: 404,
+    });
+  }
+
   return data;
 }
 

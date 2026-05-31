@@ -2,10 +2,17 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
 import { validate } from '../../middleware/validate.middleware';
-import { createTableSchema, updateStatusSchema, mergeSchema } from './tables.schema';
+import { createTableSchema, lookupByLabelSchema, updateStatusSchema, mergeSchema } from './tables.schema';
 import * as ctrl from './tables.controller';
 
 const router: import('express').Router = Router();
+
+// POST /tables/lookup-by-label — public/customer-friendly QR lookup
+router.post(
+  '/lookup-by-label',
+  validate(lookupByLabelSchema),
+  ctrl.lookupByLabel,
+);
 
 // GET /tables/branch/:branchId — any authenticated staff
 router.get(

@@ -21,6 +21,15 @@ export async function getTablesByBranch(req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 }
 
+export async function lookupByLabel(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await tablesService.lookupTableByLabel(req.body.branch_id, req.body.label);
+    res.json(success(data));
+  } catch (err: any) {
+    handleKnownError(err, res, next);
+  }
+}
+
 export async function createTable(req: Request, res: Response, next: NextFunction) {
   try {
     const data = await tablesService.createTable(req.body);
