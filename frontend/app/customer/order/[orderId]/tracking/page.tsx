@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiClient } from "@/lib/api-client";
-import { getSocket, incrementRoomCount, decrementRoomCount } from "@/lib/socket";
 import { formatCurrency, cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import type { Order, OrderItem } from "@/types/api";
@@ -15,6 +14,8 @@ import {
   ChevronDown, ChevronUp, MapPin, Clock,
   Wifi, WifiOff, Navigation,
 } from "lucide-react";
+import { useDeliveryTracking } from "@/hooks/useDeliveryTracking";
+import { useOrderCancelled } from "@/hooks/useOrderCancelled";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -142,7 +143,7 @@ function MapSection({ partnerLoc, branchLoc, isLive }: MapSectionProps) {
 
   // ── Text-based location fallback (no Google key or no location yet) ──────
   return (
-    <div className="relative w-full h-full bg-gradient-to-br from-[#1A3C5E] to-[#0D2A45] flex flex-col items-center justify-center gap-4">
+    <div className="relative w-full h-full bg-linear-to-br from-[#1A3C5E] to-[#0D2A45] flex flex-col items-center justify-center gap-4">
       {/* Animated concentric rings */}
       {[0, 1, 2].map((i) => (
         <motion.div
@@ -306,7 +307,7 @@ function PartnerCard({ eta, distance, partnerPhone, rating = 4.8 }: PartnerCardP
     <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
       <div className="flex items-center gap-4">
         {/* Avatar */}
-        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#1A3C5E] to-[#2A5C8E] flex items-center justify-center shrink-0 shadow-lg">
+        <div className="w-14 h-14 rounded-full bg-linear-to-br from-[#1A3C5E] to-[#2A5C8E] flex items-center justify-center shrink-0 shadow-lg">
           <Bike size={24} className="text-white" />
         </div>
 
@@ -570,7 +571,6 @@ export default function DeliveryTrackingPage() {
   const [distance, setDistance] = useState<number | null>(null);
   const [currentStatus, setCurrentStatus] = useState<string>("confirmed");
   const [isDelivered, setIsDelivered] = useState(false);
-  const [socketConnected, setSocketConnected] = useState(false);
   const [stepTimes] = useState<Record<string, string>>({
     confirmed: "Just now",
   });
@@ -583,6 +583,31 @@ export default function DeliveryTrackingPage() {
     refetchInterval: isDelivered ? false : 20_000,
   });
 
+  const deliveryId = (order as any)?.delivery?.id ?? (order as any)?.delivery_id ?? undefined;
+
+  const { isConnected: socketConnected } = useDeliveryTracking({
+    orderId,
+    deliveryId,
+    onLocationUpdate: (data) => {
+      setPartnerLocation({ lat: data.lat, lon: data.lon });
+      setEta(data.eta_minutes ?? null);
+      setDistance(data.distance_km ?? null);
+      setCurrentStatus("out_for_delivery");
+    },
+    onDelivered: () => {
+      setCurrentStatus("delivered");
+      setIsDelivered(true);
+    },
+  });
+
+  useOrderCancelled({
+    orderId,
+    onOrderCancelled: () => {
+      setCurrentStatus("cancelled");
+      setIsDelivered(false);
+    },
+  });
+
   // Sync order status to local state on first load
   useEffect(() => {
     if (order?.status) {
@@ -593,54 +618,6 @@ export default function DeliveryTrackingPage() {
       router.replace(`/customer/order/${orderId}`);
     }
   }, [order, orderId, router]);
-
-  // ── WebSocket setup ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!orderId) return;
-
-    const socket = getSocket();
-    incrementRoomCount();
-
-    const room = `order:${orderId}`;
-
-    // Connection events
-    const onConnect = () => setSocketConnected(true);
-    const onDisconnect = () => setSocketConnected(false);
-
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-
-    if (socket.connected) setSocketConnected(true);
-
-    // Join the order room
-    socket.emit("join_room", room);
-
-    // Live location updates from the delivery partner
-    const onLocationUpdate = (data: LocationUpdate) => {
-      setPartnerLocation({ lat: data.lat, lon: data.lon });
-      setEta(data.eta_minutes);
-      setDistance(data.distance_km);
-      setCurrentStatus("out_for_delivery");
-    };
-
-    // Delivery completed event
-    const onDeliveryComplete = () => {
-      setCurrentStatus("delivered");
-      setIsDelivered(true);
-    };
-
-    socket.on("location_update", onLocationUpdate);
-    socket.on("delivery_complete", onDeliveryComplete);
-
-    return () => {
-      socket.emit("leave_room", room);
-      socket.off("location_update", onLocationUpdate);
-      socket.off("delivery_complete", onDeliveryComplete);
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      decrementRoomCount();
-    };
-  }, [orderId]);
 
   // ── Branch location (from order → branch) ──────────────────────────────────
   const branchLoc =
@@ -683,7 +660,7 @@ export default function DeliveryTrackingPage() {
       <div className="min-h-screen bg-[#FAF7F4] pb-24">
 
         {/* ── Sticky header ────────────────────────────────────────────── */}
-        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-md border-b border-gray-100 relative">
+        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-md border-b border-gray-100">
           <div className="flex items-center justify-between px-4 py-3.5">
             <button
               onClick={() => router.back()}

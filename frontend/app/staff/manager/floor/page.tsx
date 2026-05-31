@@ -19,6 +19,7 @@ import { SkeletonCard } from "@/components/shared/SkeletonCard"
 import { apiClient } from "@/lib/api-client"
 import { useAuth } from "@/hooks/useAuth"
 import { useTableStatus } from "@/hooks/useTableStatus"
+import { useFloorLayoutUpdated } from "@/hooks/useFloorLayoutUpdated"
 import { TABLE_STATUS, TABLE_STATUS_COLORS, type TableStatus } from "@/lib/constants"
 import { cn, elapsedMinutes } from "@/lib/utils"
 import type { Table } from "@/types/api"
@@ -576,6 +577,13 @@ export default function ManagerFloorPage() {
   const { tableStatuses, setTableStatus, isConnected } = useTableStatus({
     branchId: branchId ?? "",
     role: "manager",
+  })
+
+  useFloorLayoutUpdated({
+    branchId: branchId ?? undefined,
+    onFloorLayoutUpdated: () => {
+      qc.invalidateQueries({ queryKey: ["manager", "floor-tables", branchId] })
+    },
   })
 
   useEffect(() => {

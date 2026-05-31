@@ -242,6 +242,14 @@ export async function markQueueArrived(queueId: string) {
 
   if (error) throw error;
 
+  await broadcastToChannel(`branch:${data.branch_id}`, 'queue_updated', {
+    action: 'arrived',
+    queue_id: queueId,
+    branch_id: data.branch_id,
+    position: data.position,
+    status: data.status,
+  });
+
   // ✅ PATCH: Bust position cache so next poll reflects 'arrived' status
   await bustQueuePositionCache(queueId);
 

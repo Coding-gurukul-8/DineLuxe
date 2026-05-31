@@ -12,6 +12,7 @@ import {
   handleGetMyOrders,
   handleGetStaffOrders,
   handleCancelOrder,
+  handleCallWaiter,
 } from './orders.controller';
 
 const router: import('express').Router = Router();
@@ -71,6 +72,14 @@ router.patch(
   requireRole('manager', 'owner'),
   validate(cancelOrderSchema),
   handleCancelOrder
+);
+
+// POST /orders/:orderId/call-waiter — customer or staff call the waiter
+router.post(
+  '/:orderId/call-waiter',
+  injectTenant,
+  requireRole('customer', 'waiter', 'manager', 'owner'),
+  handleCallWaiter
 );
 
 export default router;

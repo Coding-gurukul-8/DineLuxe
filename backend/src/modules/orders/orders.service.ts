@@ -474,6 +474,22 @@ export async function cancelOrder(orderId: string, branchId: string, reason?: st
 
   if (updateErr) throw updateErr;
 
+  try {
+    await supabaseAdmin.channel(`branch:${branchId}`).send({
+      type: 'broadcast',
+      event: 'order_cancelled',
+      payload: {
+        order_id: orderId,
+        branch_id: branchId,
+        reason: reason ?? null,
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+      },
+    });
+  } catch (broadcastErr: any) {
+    console.warn('[orders] cancel broadcast failed:', broadcastErr.message);
+  }
+
   // ✅ PATCH: Invalidate both the single-order cache and the branch active-orders cache
   await Promise.all([
     bustOrderCache(orderId),

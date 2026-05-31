@@ -1,12 +1,13 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { DataTable, Column } from "@/components/shared/DataTable";
 import { AlertTriangle, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useInventoryLow } from "@/hooks/useInventoryLow";
 
 interface InventoryItem extends Record<string, unknown> {
   id: string;
@@ -94,6 +95,14 @@ const columns: Column<InventoryItem>[] = [
 
 export default function InventoryPage() {
   const { branchId } = useAuth();
+  const qc = useQueryClient();
+
+  useInventoryLow({
+    branchId: branchId ?? undefined,
+    onInventoryLow: () => {
+      qc.invalidateQueries({ queryKey: ["inventory", "branch", branchId] });
+    },
+  });
 
   const { data: inventoryResponse, isLoading } = useQuery<InventoryResponse>({
     queryKey: ["inventory", "branch", branchId],

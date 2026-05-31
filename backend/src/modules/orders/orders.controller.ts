@@ -10,6 +10,7 @@ import {
   getActiveBranchOrders,
   cancelOrder,
 } from './orders.service';
+import { callWaiter } from './waiter-call.service';
 import type { CreateOrderInput } from './orders.schema';
 
 const STAFF_ORDER_ROLES = ['waiter', 'manager', 'owner', 'cashier', 'host'];
@@ -95,6 +96,15 @@ export async function handleCancelOrder(req: Request, res: Response, next: NextF
   try {
     const order = await cancelOrder(req.params.id, req.branchId!, req.body.reason);
     res.json(success(order, 'Order cancelled'));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function handleCallWaiter(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await callWaiter(req.params.orderId, req.user?.id);
+    res.status(201).json(success(data, 'Waiter called'));
   } catch (err) {
     next(err);
   }

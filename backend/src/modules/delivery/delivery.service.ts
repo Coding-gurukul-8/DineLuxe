@@ -149,6 +149,34 @@ export async function updateDeliveryStatus(
       .update({ active_delivery_id: null })
       .eq('id', partnerId);
 
+    try {
+      await supabaseAdmin.channel(`delivery:${deliveryId}`).send({
+        type: 'broadcast',
+        event: 'delivery_complete',
+        payload: {
+          delivery_id: deliveryId,
+          order_id: order.id,
+          branch_id: order.branch_id,
+          restaurant_id: order.restaurant_id,
+          delivered_at: now,
+        },
+      });
+
+      await supabaseAdmin.channel(`order:${order.id}`).send({
+        type: 'broadcast',
+        event: 'delivery_complete',
+        payload: {
+          delivery_id: deliveryId,
+          order_id: order.id,
+          branch_id: order.branch_id,
+          restaurant_id: order.restaurant_id,
+          delivered_at: now,
+        },
+      });
+    } catch (broadcastErr: any) {
+      console.warn('[delivery] completion broadcast failed:', broadcastErr.message);
+    }
+
     // TODO: trigger payment release if COD
     // TODO: queue rating request push notification (30min delay)
     console.log(`[delivery] TODO: trigger payment release and rating request for order ${order.id}`);

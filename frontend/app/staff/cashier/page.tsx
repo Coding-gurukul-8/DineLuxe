@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge"
 import { Button } from "@/components/ui/button"
 import { apiClient } from "@/lib/api-client"
 import { useAuth } from "@/hooks/useAuth"
+import { usePaymentConfirmed } from "@/hooks/usePaymentConfirmed"
 import {
   ChevronDown,
   ChevronUp,
@@ -74,6 +75,14 @@ export default function CashierPage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash")
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null)
   const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null)
+
+  usePaymentConfirmed({
+    branchId: branchId ?? undefined,
+    onPaymentConfirmed: () => {
+      qc.invalidateQueries({ queryKey: ["cashier", "active-orders", branchId] })
+      qc.invalidateQueries({ queryKey: ["cashier", "order-detail"] })
+    },
+  })
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 

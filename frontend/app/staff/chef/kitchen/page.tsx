@@ -11,6 +11,9 @@ import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
 import { useAuth } from "@/hooks/useAuth"
+import { useFoodReady } from "@/hooks/useFoodReady"
+import { useOrderCancelled } from "@/hooks/useOrderCancelled"
+import { useOverdueOrder } from "@/hooks/useOverdueOrder"
 import {
   Clock,
   RefreshCw,
@@ -352,6 +355,27 @@ function StationChip({ stationId }: { stationId: StationId }) {
 export default function KitchenDisplayPage() {
   const { branchId } = useAuth()
   const qc = useQueryClient()
+
+  useFoodReady({
+    branchId: branchId ?? undefined,
+    onFoodReady: () => {
+      qc.invalidateQueries({ queryKey: ["kitchen", "tickets", branchId] })
+    },
+  })
+
+  useOrderCancelled({
+    branchId: branchId ?? undefined,
+    onOrderCancelled: () => {
+      qc.invalidateQueries({ queryKey: ["kitchen", "tickets", branchId] })
+    },
+  })
+
+  useOverdueOrder({
+    branchId: branchId ?? undefined,
+    onOverdueOrder: () => {
+      qc.invalidateQueries({ queryKey: ["kitchen", "tickets", branchId] })
+    },
+  })
 
   // STATION FEATURE — active station state (default: "all")
   const [activeStation, setActiveStation] = useState<StationId>("all")

@@ -61,7 +61,7 @@ function DesignerSkeleton() {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden animate-pulse">
       {/* Simulated 3-col layout */}
-      <div className="flex h-[640px]">
+      <div className="flex h-160">
         {/* Left sidebar */}
         <div className="w-48 border-r border-gray-100 bg-gray-50 p-4 space-y-4">
           <div className="skeleton h-3 w-20 rounded" />
@@ -370,7 +370,7 @@ export default function OwnerFloorBranchPage() {
                   Floor Layout
                 </Link>
                 <span>/</span>
-                <span className="text-gray-600 font-medium truncate max-w-[200px]">
+                <span className="text-gray-600 font-medium truncate max-w-50">
                   {branch?.name ?? "Branch"}
                 </span>
               </nav>
@@ -439,7 +439,7 @@ export default function OwnerFloorBranchPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
           // Ensure the designer fills available vertical space
-          className="min-h-[680px]"
+          className="min-h-170"
         >
           <FloorLayoutDesigner
             branchId={branchId}

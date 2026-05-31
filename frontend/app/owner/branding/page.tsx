@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
+import { useBrandingUpdated } from "@/hooks/useBrandingUpdated";
 import PageWrapper from "@/components/layout/PageWrapper";
 import { SkeletonCard } from "@/components/shared/SkeletonCard";
 import { cn } from "@/lib/utils";
@@ -337,6 +338,14 @@ export default function BrandingPage() {
     queryFn: () =>
       apiClient.get<BrandingData>(`/restaurants/${restaurantId}/branding`),
     enabled: !!restaurantId,
+  });
+
+  useBrandingUpdated({
+    restaurantId: restaurantId ?? undefined,
+    onBrandingUpdated: () => {
+      qc.invalidateQueries({ queryKey: ["branding", restaurantId] });
+      void refetch();
+    },
   });
 
   // Pre-fill form when branding loads

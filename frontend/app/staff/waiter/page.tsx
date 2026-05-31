@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { apiClient } from "@/lib/api-client"
 import { useAuth } from "@/hooks/useAuth"
+import { toast } from "sonner"
+import { useFoodReady } from "@/hooks/useFoodReady"
+import { useWaiterCall } from "@/hooks/useWaiterCall"
 import {
   Search,
   Plus,
@@ -99,6 +102,21 @@ export default function WaiterPage() {
   const [menuSearch, setMenuSearch] = useState("")
   const [draft, setDraft] = useState<DraftItem[]>([])
   const [specialInstructions, setSpecialInstructions] = useState("")
+
+  useFoodReady({
+    branchId: branchId ?? undefined,
+    onFoodReady: () => {
+      qc.invalidateQueries({ queryKey: ["waiter"] })
+      toast.success("An order is ready to serve")
+    },
+  })
+
+  useWaiterCall({
+    branchId: branchId ?? undefined,
+    onWaiterCall: () => {
+      toast.info("A guest requested a waiter")
+    },
+  })
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 

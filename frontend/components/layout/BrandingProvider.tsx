@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
 import { ensureSafeBrowserStorage } from "@/lib/safe-browser-storage";
+import { useBrandingUpdated } from "@/hooks/useBrandingUpdated";
 
 interface Branding {
   primaryColor: string;
@@ -78,6 +79,7 @@ function resolveRestaurantId(): string | null {
 export function BrandingProvider({ children }: { children: React.ReactNode }) {
   const [branding, setBranding] = useState<Branding>(DEFAULT_BRANDING);
   const [loading,  setLoading]  = useState(false);
+  const restaurantId = resolveRestaurantId();
 
   const fetchFresh = useCallback(async (restaurantId: string) => {
     try {
@@ -126,6 +128,13 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
       await fetchFresh(rid);
     }
   };
+
+  useBrandingUpdated({
+    restaurantId: restaurantId ?? undefined,
+    onBrandingUpdated: () => {
+      void refresh();
+    },
+  });
 
   return (
     <BrandingContext.Provider value={{ branding, loading, refresh }}>

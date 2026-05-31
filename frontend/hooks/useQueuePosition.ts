@@ -1,28 +1,8 @@
 "use client";
 
-/**
- * hooks/useQueuePosition.ts
- *
- * Returns the current user's own queue entry for a branch:
- *   { position, estimatedWait, entry }
- *
- * Fixes vs. old version:
- * - Event name: "queue:update"  (was WS_EVENTS.QUEUE_UPDATED = "queue_updated")
- * - API endpoint: GET /queue/me?branch_id=:branchId  (was /queue/branch/:branchId)
- * - Returns { position, estimatedWait, entry } for the current user's entry
- *   (was the entire branch queue array + unrelated helpers)
- * - No joinQueue / markArrived / markNoShow / removeFromQueue — out of scope
- *
- * The backend "queue:update" event payload contains the full queue array;
- * we find the user's own entry by matching against the entry returned by
- * GET /queue/me (or by userId if available).
- */
-
-import { useState, useEffect, useCallback } from "react";
-import { useRealtime } from "@/hooks/useRealtime";
+import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "@/lib/api-client";
-
-// ── Types ──────────────────────────────────────────────────────────────────────
+import { useSupabaseRealtime } from "@/hooks/useSupabaseRealtime";
 
 export type QueueStatus =
   | "waiting"
@@ -47,44 +27,35 @@ export interface QueueEntry {
 }
 
 interface QueueUpdateEvent {
-  queue: QueueEntry[];
+  branch_id?: string;
+  action?: string;
+  queue_id?: string;
+  position?: number;
 }
 
 interface UseQueuePositionReturn {
-  /** The current user's 1-based position in the queue, or null if not found */
   position: number | null;
-  /** Estimated wait in minutes, or null */
   estimatedWait: number | null;
-  /** The full QueueEntry for the current user, or null */
   entry: QueueEntry | null;
   isLoading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
 }
 
-// ── Hook ───────────────────────────────────────────────────────────────────────
-
 export function useQueuePosition(branchId: string): UseQueuePositionReturn {
-  const { on, off } = useRealtime({ branchId, role: "host" });
-
-  const [entry, setEntry]             = useState<QueueEntry | null>(null);
-  const [isLoading, setIsLoading]     = useState(false);
-  const [error, setError]             = useState<string | null>(null);
-
-  // ── Initial fetch ────────────────────────────────────────────────────────────
+  const [entry, setEntry] = useState<QueueEntry | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchMyEntry = useCallback(async () => {
     if (!branchId) return;
+
     try {
       setIsLoading(true);
-      // GET /queue/me?branch_id=:branchId — returns the current user's entry
-      const data = await apiClient.get<QueueEntry>(
-        `/queue/me?branch_id=${branchId}`
-      );
+      const data = await apiClient.get<QueueEntry>(`/queue/me?branch_id=${branchId}`);
       setEntry(data);
       setError(null);
     } catch (err) {
-      // 404 means not in queue — treat as null, not an error
       if ((err as { statusCode?: number })?.statusCode === 404) {
         setEntry(null);
         setError(null);
@@ -98,34 +69,26 @@ export function useQueuePosition(branchId: string): UseQueuePositionReturn {
 
   useEffect(() => {
     if (!branchId) return;
-    fetchMyEntry();
+    void fetchMyEntry();
   }, [branchId, fetchMyEntry]);
 
-  // ── Socket subscription ──────────────────────────────────────────────────────
+  const handleQueueUpdate = useCallback(
+    (payload: QueueUpdateEvent) => {
+      if (payload.branch_id && payload.branch_id !== branchId) return;
+      void fetchMyEntry();
+    },
+    [branchId, fetchMyEntry]
+  );
 
-  useEffect(() => {
-    if (!branchId) return;
-
-    const handler = (payload: QueueUpdateEvent) => {
-      // The backend sends the full branch queue array.
-      // Find the current user's entry by matching the entry id we fetched.
-      setEntry((prev) => {
-        if (!prev) return prev;
-        const updated = payload.queue.find((e) => e.id === prev.id);
-        return updated ?? prev;
-      });
-    };
-
-    // Backend emits "queue:update"
-    on<QueueUpdateEvent>("queue:update", handler);
-
-    return () => {
-      off<QueueUpdateEvent>("queue:update", handler);
-    };
-  }, [branchId, on, off]);
+  useSupabaseRealtime<QueueUpdateEvent>({
+    channel: branchId ? `branch:${branchId}` : undefined,
+    event: "queue_updated",
+    enabled: !!branchId,
+    onEvent: handleQueueUpdate,
+  });
 
   return {
-    position:      entry?.position       ?? null,
+    position: entry?.position ?? null,
     estimatedWait: entry?.estimatedWaitMinutes ?? null,
     entry,
     isLoading,

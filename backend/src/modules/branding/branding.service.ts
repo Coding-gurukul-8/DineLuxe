@@ -110,6 +110,19 @@ export async function updateBranding(
     // Cache invalidation failure is non-fatal
   }
 
+  try {
+    await supabaseAdmin.channel(`restaurant:${restaurantId}`).send({
+      type: 'broadcast',
+      event: 'branding_updated',
+      payload: {
+        restaurant_id: restaurantId,
+        updated_at: data.updated_at ?? new Date().toISOString(),
+      },
+    });
+  } catch (broadcastErr: any) {
+    console.warn('[branding] broadcast failed:', broadcastErr.message);
+  }
+
   return data;
 }
 
