@@ -285,7 +285,7 @@ interface StationTabBarProps {
 function StationTabBar({ active, counts, onChange }: StationTabBarProps) {
   return (
     // STATION FEATURE — horizontal scrollable tab bar pinned below the top bar
-    <div className="sticky top-[57px] z-10 bg-gray-950/90 backdrop-blur border-b border-gray-800 px-4 py-2">
+    <div className="sticky top-14.25 z-10 bg-gray-950/90 backdrop-blur border-b border-gray-800 px-4 py-2">
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
         {STATIONS.map((station) => {
           const isActive = active === station.id
@@ -563,7 +563,7 @@ export default function KitchenDisplayPage() {
                   className={`
                     bg-gray-800 rounded-xl border-2 flex flex-col overflow-hidden
                     ${ticketBorderClass(ticket.status, ticket.elapsed_minutes)}
-                    ${ticket._allMatchingItemsDone ? "grayscale-[30%]" : ""}
+                    ${ticket._allMatchingItemsDone ? "grayscale-30" : ""}
                   `}
                 >
                   {/* ── Card header ────────────────────────────────────── */}

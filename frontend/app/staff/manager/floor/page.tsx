@@ -845,11 +845,11 @@ export default function ManagerFloorPage() {
         {/* Floor map canvas */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="h-[520px] flex items-center justify-center">
+            <div className="h-130 flex items-center justify-center">
               <Loader2 size={28} className="text-gray-300 animate-spin" />
             </div>
           ) : visibleTables.length === 0 ? (
-            <div className="h-[520px] flex flex-col items-center justify-center gap-3 text-gray-400">
+            <div className="h-130 flex flex-col items-center justify-center gap-3 text-gray-400">
               <MapPin size={28} className="text-gray-200" />
               <p className="text-sm">No tables on this floor</p>
             </div>
