@@ -9,6 +9,8 @@ import {
   getStaffOrders,
   getActiveBranchOrders,
   cancelOrder,
+  applyCoupon, // P3-1 ADDITION
+  getOrderByTable, // P3-1 ADDITION
 } from './orders.service';
 import { callWaiter } from './waiter-call.service';
 import type { CreateOrderInput } from './orders.schema';
@@ -105,6 +107,40 @@ export async function handleCallWaiter(req: Request, res: Response, next: NextFu
   try {
     const data = await callWaiter(req.params.orderId, req.user?.id);
     res.status(201).json(success(data, 'Waiter called'));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── Apply coupon to an order (customer or cashier) ─────────────────────
+// P3-1 ADDITION
+export async function handleApplyCoupon(req: Request, res: Response, next: NextFunction) {
+  try {
+    const orderId = req.params.orderId;
+    const couponCode = String(req.body?.code ?? '');
+    const userId = req.user!.id;
+    const restaurantId = req.restaurantId!;
+
+    const result = await applyCoupon(orderId, couponCode, userId, restaurantId);
+
+    // Frontend expects: { discount: number }
+    res.json(success({ discount: result.discount }));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── Get active order for a table (waiter app) ─────────────────────────
+// P3-1 ADDITION
+export async function handleGetOrderByTable(req: Request, res: Response, next: NextFunction) {
+  try {
+    const tableId = req.params.tableId;
+    const branchId = req.branchId!;
+
+    const order = await getOrderByTable(tableId, branchId);
+
+    // Either single active order payload or null
+    res.json(success(order));
   } catch (err) {
     next(err);
   }

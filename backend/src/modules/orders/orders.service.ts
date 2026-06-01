@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
 import { parsePagination } from '../../utils/pagination';
 import { assignWaiterToTable, getWaiterWorkloads } from '../waiter-assignment/waiter-assignment.service';
+import { validateCoupon } from '../coupons/coupons.service'; // P3-1 ADDITION
 import type { CreateOrderInput } from './orders.schema';
 
 const ACTIVE_CUSTOMER_STATUSES = ['created', 'confirmed', 'preparing', 'ready'];
@@ -323,6 +324,129 @@ export async function getOrdersByTable(tableId: string, branchId: string) {
 
   if (error) throw error;
   return data ?? [];
+}
+
+// ─── Apply coupon to an order ────────────────────────────────────────────
+// P3-1 ADDITION
+export async function applyCoupon(
+  orderId: string,
+  couponCode: string,
+  userId: string,
+  restaurantId: string
+): Promise<{ discount: number; coupon_id: string; new_total: number }> {
+  // 1) Fetch the order
+  const { data: order, error: orderFetchErr } = await supabaseAdmin
+    .from('orders')
+    .select('id, total_amount, branch_id, order_type, status, coupon_id')
+    .eq('id', orderId)
+    .maybeSingle();
+
+  if (orderFetchErr) throw orderFetchErr;
+
+  if (!order) {
+    throw Object.assign(new Error('Order not found'), { statusCode: 404 });
+  }
+
+  // 2) Verify order belongs to restaurantId (via branch)
+  const { data: branch, error: branchErr } = await supabaseAdmin
+    .from('branches')
+    .select('id, restaurant_id')
+    .eq('id', order.branch_id)
+    .maybeSingle();
+
+  if (branchErr) throw branchErr;
+  if (!branch || branch.restaurant_id !== restaurantId) {
+    throw Object.assign(new Error('Order does not belong to this restaurant'), { statusCode: 403 });
+  }
+
+  // 3) Verify order status is NOT 'paid' or 'cancelled'
+  if (['paid', 'cancelled'].includes(order.status)) {
+    throw Object.assign(new Error('Cannot apply coupon to a paid or cancelled order'), { statusCode: 422 });
+  }
+
+  // 4) Check if coupon already applied
+  if (order.coupon_id) {
+    throw Object.assign(new Error('A coupon is already applied'), { statusCode: 409, errorCode: 'COUPON_ALREADY_APPLIED' });
+  }
+
+  const totalAmount = Number(order.total_amount ?? 0);
+
+  // 5) Call validateCoupon from coupons.service
+  const result = await validateCoupon(
+    couponCode,
+    orderId,
+    totalAmount,
+    order.order_type,
+    userId,
+    restaurantId
+  );
+
+  // validateCoupon throws; but keep type-safe
+  if (!result.valid) {
+    throw Object.assign(new Error(result.error_code ?? 'COUPON_INVALID'), { statusCode: 400, errorCode: result.error_code });
+  }
+
+  // 6) Apply discount
+  const newTotal = totalAmount - result.discount_amount;
+
+  const { error: updateErr } = await supabaseAdmin
+    .from('orders')
+    .update({
+      discount_amount: result.discount_amount,
+      coupon_id: result.coupon_id,
+      final_amount: newTotal,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', orderId);
+
+  if (updateErr) throw updateErr;
+
+  // 7) Return expected payload
+  return { discount: result.discount_amount, coupon_id: result.coupon_id, new_total: newTotal };
+}
+
+// ─── Get ACTIVE order for a table (or null) ────────────────────────────────
+// P3-1 ADDITION
+export async function getOrderByTable(
+  tableId: string,
+  branchId: string
+): Promise<unknown | null> {
+  // ACTIVE = status NOT IN ['paid', 'cancelled', 'closed']
+  const { data: order, error: orderErr } = await supabaseAdmin
+    .from('orders')
+    .select(
+      `
+        *,
+        order_items(
+          id,
+          menu_item_id,
+          quantity,
+          unit_price,
+          status,
+          menu_items:menu_items(name)
+        )
+      `
+    )
+    .eq('table_id', tableId)
+    .eq('branch_id', branchId)
+    .in('status', ['created', 'confirmed', 'preparing', 'ready', 'served'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (orderErr) throw orderErr;
+  if (!order) return null;
+
+  const items = (order.order_items ?? []).map((oi: any) => ({
+    id: oi.id,
+    menu_item_id: oi.menu_item_id,
+    name: oi.menu_items?.name ?? null,
+    quantity: oi.quantity,
+    unit_price: oi.unit_price,
+    status: oi.status,
+  }));
+
+  return { ...order, items };
 }
 
 // ─── Get orders for current customer ─────────────────────────────────────────

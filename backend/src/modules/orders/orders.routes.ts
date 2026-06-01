@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
 import { injectTenant } from '../../middleware/tenant.middleware';
@@ -13,6 +14,8 @@ import {
   handleGetStaffOrders,
   handleCancelOrder,
   handleCallWaiter,
+  handleApplyCoupon, // P3-1 ADDITION
+  handleGetOrderByTable, // P3-1 ADDITION
 } from './orders.controller';
 
 const router: import('express').Router = Router();
@@ -51,7 +54,7 @@ router.get(
   '/table/:tableId',
   injectTenant,
   requireRole('waiter', 'cashier', 'manager', 'owner'),
-  handleGetOrdersByTable
+  handleGetOrderByTable
 );
 
 // GET /orders/branch/:branchId/active — FIX: must be BEFORE /:id
@@ -80,6 +83,15 @@ router.post(
   injectTenant,
   requireRole('customer', 'waiter', 'manager', 'owner'),
   handleCallWaiter
+);
+
+// P3-1 ADDITION: Apply coupon to an order (customer or cashier)
+router.post(
+  '/:orderId/apply-coupon',
+  injectTenant,
+  requireRole('customer', 'cashier', 'manager', 'owner'),
+  validate({ body: z.object({ code: z.string().min(1).toUpperCase() }) }),
+  handleApplyCoupon
 );
 
 export default router;
