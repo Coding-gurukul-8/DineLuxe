@@ -27,6 +27,7 @@ const statusConfig = {
   arrived: { bg: 'bg-status-success/10', text: 'text-status-success', label: 'Arrived' },
   seated: { bg: 'bg-status-info/10', text: 'text-status-info', label: 'Seated' },
   no_show: { bg: 'bg-status-danger/10', text: 'text-status-danger', label: 'No show' },
+  completed: { bg: 'bg-status-neutral/10', text: 'text-status-neutral', label: 'Completed' },
   assigned: { bg: 'bg-status-info/10', text: 'text-status-info', label: 'Assigned' },
   picked_up: { bg: 'bg-status-warning/10', text: 'text-status-warning', label: 'Picked up' },
   delivered: { bg: 'bg-status-success/10', text: 'text-status-success', label: 'Delivered' },
