@@ -3,7 +3,7 @@ import * as reportsService from './reports.service';
 import { success, error } from '../../utils/response';
 
 type AuthenticatedRequest = Request & {
-  user: { id: string; branch_id?: string; role: string; restaurant_id?: string };
+  user: { id: string; branch_id?: string; role: string; restaurant_id?: string; email?: string };
   restaurantId: string;
   branchId: string;
 };
@@ -124,6 +124,12 @@ export async function getAdminTrends(req: Request, res: Response, next: NextFunc
   }
 }
 
+// ─── Synchronous export (POST /reports/export/sync) ──────────────────────────
+/**
+ * Kept for the frontend's "Download CSV" button (small datasets < 500 rows).
+ * Streams the result inline in the HTTP response — will timeout for large data.
+ * For large/async exports use queueExportReport() below.
+ */
 export async function exportReport(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
@@ -160,6 +166,108 @@ export async function exportReport(req: Request, res: Response, next: NextFuncti
       restaurant_id,
       requested_by: authReq.user.id,
     });
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── Async export — queue job (POST /reports/export) ─────────────────────────
+/**
+ * Enqueues a report-export job via the Redis-backed Bull-style queue.
+ * Returns 202 Accepted with a job_id immediately — does not wait for the
+ * report to be generated. The caller polls GET /reports/export/:jobId/status.
+ *
+ * Supports csv | xlsx | pdf and all four report types.
+ * Sends an email to the requester when the report is ready.
+ */
+export async function queueExportReport(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const restaurant_id = authReq.user?.restaurant_id;
+
+    if (!restaurant_id) {
+      return res
+        .status(400)
+        .json(error('VALIDATION_ERROR', 'Restaurant context is required for export'));
+    }
+
+    const reportType = String(req.body.report_type) as
+      | 'sales'
+      | 'menu-performance'
+      | 'kitchen-performance'
+      | 'customer-insights';
+
+    const now = new Date();
+    const defaultFrom = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const from: string = req.body.from ?? defaultFrom;
+    const to: string = req.body.to ?? now.toISOString();
+
+    if (['sales', 'kitchen-performance'].includes(reportType) && (!req.body.from || !req.body.to)) {
+      return res
+        .status(400)
+        .json(error('VALIDATION_ERROR', 'from and to are required for this report_type'));
+    }
+
+    if (new Date(from).getTime() > new Date(to).getTime()) {
+      return res
+        .status(400)
+        .json(error('VALIDATION_ERROR', 'from must be less than or equal to to'));
+    }
+
+    // Resolve the requester's email:
+    //   1. Prefer the email stored on req.user (set by auth middleware if present)
+    //   2. Fall back to looking it up from the users table
+    let requestedByEmail: string = (authReq.user as any).email ?? '';
+
+    if (!requestedByEmail) {
+      const { supabaseAdmin } = await import('../../config/supabase');
+      const { data: userRow } = await supabaseAdmin
+        .from('users')
+        .select('email')
+        .eq('id', authReq.user.id)
+        .single();
+      requestedByEmail = userRow?.email ?? '';
+    }
+
+    if (!requestedByEmail) {
+      return res
+        .status(400)
+        .json(error('VALIDATION_ERROR', 'Could not resolve requester email for notification'));
+    }
+
+    const result = await reportsService.queueReportExport({
+      report_type: reportType,
+      format: req.body.format ?? 'csv',
+      branch_id: req.body.branch_id,
+      restaurant_id,
+      from,
+      to,
+      requested_by_user_id: authReq.user.id,
+      requested_by_email: requestedByEmail,
+    });
+
+    // 202 Accepted — job is queued but not yet complete
+    res.status(202).json(success(result, 'Report queued successfully'));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── Job status endpoint (GET /reports/export/:jobId/status) ─────────────────
+/**
+ * Polls the status of an async export job.
+ * Returns download_url once status === 'completed'.
+ */
+export async function getExportJobStatus(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { jobId } = req.params;
+
+    if (!jobId || typeof jobId !== 'string') {
+      return res.status(400).json(error('VALIDATION_ERROR', 'jobId param is required'));
+    }
+
+    const result = await reportsService.getReportJobStatus(jobId);
     res.json(success(result));
   } catch (err) {
     next(err);

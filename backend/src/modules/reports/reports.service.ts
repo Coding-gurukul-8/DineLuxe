@@ -2,6 +2,12 @@ import { supabaseAdmin } from '../../config/supabase';
 import { Parser } from 'json2csv';
 import PDFDocument from 'pdfkit';
 import { getPlatformPeriodReport } from '../../utils/platform-analytics';
+import {
+  enqueueReportExport,
+  getReportExportJobStatus,
+  type ReportExportJob,
+  type JobStatus,
+} from '../../jobs/report-export';
 
 function isMissingRpc(error: { message?: string } | null): boolean {
   return (error?.message ?? '').includes('Could not find the function');
@@ -137,7 +143,14 @@ export async function getAdminTrends(from: string, to: string) {
   return data ?? [];
 }
 
-// ─── Export report (non-blocking) ─────────────────────────────────────────────
+// ─── Export report — synchronous (kept for /export/sync small datasets) ───────
+/**
+ * Synchronous export — streams file inline.
+ * Suitable for small datasets (< 500 rows). Used by the frontend's
+ * "Download CSV" button via POST /reports/export/sync.
+ *
+ * For large datasets use queueReportExport() + POST /reports/export instead.
+ */
 export async function exportReport(params: {
   report_type: string;
   branch_id?: string;
@@ -227,6 +240,43 @@ export async function exportReport(params: {
   };
 }
 
+// ─── Queue report export (async, Bull-backed via Redis) ───────────────────────
+/**
+ * Enqueues a report-export job and returns a job_id immediately.
+ *
+ * The job runs in the background worker started by startReportExportWorker().
+ * Progress can be polled via getReportJobStatus(jobId).
+ * The requester is emailed when the report is ready.
+ *
+ * Supports CSV, XLSX, and PDF formats (PDF/XLSX handled by the job processor;
+ * the synchronous exportReport only supports CSV + PDF).
+ */
+export async function queueReportExport(
+  params: ReportExportJob,
+): Promise<{ job_id: string; message: string }> {
+  return enqueueReportExport(params);
+}
+
+// ─── Get report job status ─────────────────────────────────────────────────────
+/**
+ * Returns the current status of an async export job.
+ *
+ * Possible statuses:
+ *   'waiting'   — queued, not yet picked up by the worker
+ *   'active'    — currently being processed
+ *   'completed' — file ready; download_url is populated (valid 24 h)
+ *   'failed'    — processing error; error message is populated
+ */
+export async function getReportJobStatus(jobId: string): Promise<{
+  status: JobStatus;
+  download_url?: string;
+  error?: string;
+  created_at?: string;
+}> {
+  return getReportExportJobStatus(jobId);
+}
+
+// ─── PDF generator (used by synchronous exportReport) ─────────────────────────
 async function generatePDF(data: any[], title: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 40 });

@@ -4,6 +4,7 @@ import { Server as SocketIOServer, type Socket } from 'socket.io';
 import { config } from './config/env';
 import { redis } from './config/redis';
 import app from './app';
+import { startReportExportWorker } from './jobs/report-export';
 
 const PORT = Number(config.PORT) || 4000;
 
@@ -53,6 +54,8 @@ httpServer.listen(PORT, () => {
   console.log(`🚀 Restaurant OS API running on port ${PORT} [${config.NODE_ENV}]`);
   console.log(`   Socket.io listening on ws://localhost:${PORT}`);
 });
+
+startReportExportWorker();
 
 // ─── Graceful shutdown ───────────────────────────────────────────────────────
 
