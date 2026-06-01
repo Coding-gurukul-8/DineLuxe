@@ -78,3 +78,129 @@ export async function getHistory(req: Request, res: Response, next: NextFunction
     next(err);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Owner-facing endpoints
+// Routes:
+//   GET  /loyalty/stats           → getStats
+//   PATCH /loyalty/settings       → updateSettings
+//   GET  /loyalty/leaderboard     → getLeaderboard
+//   POST /loyalty/admin/adjust    → adminAdjust
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OWNER_ROLES = ['owner', 'super_admin'] as const;
+
+function requireOwner(req: Request, res: Response): boolean {
+  const role = req.user?.role;
+  if (!OWNER_ROLES.includes(role as any)) {
+    res.status(403).json(error('FORBIDDEN', 'Only restaurant owners can access this endpoint'));
+    return false;
+  }
+  return true;
+}
+
+// ─── GET /loyalty/stats ───────────────────────────────────────────────────────
+
+export async function getStats(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!requireOwner(req, res)) return;
+
+    const restaurant_id = req.query.restaurant_id as string;
+    if (!restaurant_id) {
+      return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id query param is required'));
+    }
+
+    const data = await loyaltyService.getLoyaltyStats(restaurant_id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── PATCH /loyalty/settings ──────────────────────────────────────────────────
+
+export async function updateSettings(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!requireOwner(req, res)) return;
+
+    const { restaurant_id, rupees_per_point, rupees_per_redemption, min_redeem_points } = req.body;
+
+    if (!restaurant_id) {
+      return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id is required'));
+    }
+    if (typeof rupees_per_point !== 'number') {
+      return res.status(400).json(error('VALIDATION_ERROR', 'rupees_per_point must be a number'));
+    }
+    if (typeof rupees_per_redemption !== 'number') {
+      return res.status(400).json(error('VALIDATION_ERROR', 'rupees_per_redemption must be a number'));
+    }
+    if (typeof min_redeem_points !== 'number') {
+      return res.status(400).json(error('VALIDATION_ERROR', 'min_redeem_points must be a number'));
+    }
+
+    const data = await loyaltyService.updateLoyaltySettings(
+      restaurant_id,
+      rupees_per_point,
+      rupees_per_redemption,
+      min_redeem_points,
+    );
+    res.json(success(data));
+  } catch (err: any) {
+    if (err.statusCode) return res.status(err.statusCode).json(error(err.message));
+    next(err);
+  }
+}
+
+// ─── GET /loyalty/leaderboard ─────────────────────────────────────────────────
+
+export async function getLeaderboard(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!requireOwner(req, res)) return;
+
+    const restaurant_id = req.query.restaurant_id as string;
+    if (!restaurant_id) {
+      return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id query param is required'));
+    }
+
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+    const data = await loyaltyService.getLoyaltyLeaderboard(restaurant_id, limit);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── POST /loyalty/admin/adjust ───────────────────────────────────────────────
+
+export async function adminAdjust(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!requireOwner(req, res)) return;
+
+    const { restaurant_id, phone, points, reason } = req.body;
+
+    if (!restaurant_id) {
+      return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id is required'));
+    }
+    if (!phone || typeof phone !== 'string') {
+      return res.status(400).json(error('VALIDATION_ERROR', 'phone is required'));
+    }
+    const pointsNum = Number(points);
+    if (!Number.isFinite(pointsNum) || !Number.isInteger(pointsNum) || pointsNum === 0) {
+      return res.status(400).json(error('VALIDATION_ERROR', 'points must be a non-zero integer'));
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+      return res.status(400).json(error('VALIDATION_ERROR', 'reason is required'));
+    }
+
+    const data = await loyaltyService.adminAdjustPoints(
+      restaurant_id,
+      phone,
+      pointsNum,
+      reason,
+    );
+    res.json(success(data));
+  } catch (err: any) {
+    if (err.statusCode) return res.status(err.statusCode).json(error(err.message));
+    next(err);
+  }
+}

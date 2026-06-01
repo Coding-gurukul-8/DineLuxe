@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  Check,
   Copy,
   Link2,
   MonitorSmartphone,
@@ -18,6 +19,11 @@ import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import { useBrandingUpdated } from "@/hooks/useBrandingUpdated";
+import { useBrandingPreview } from "@/components/layout/BrandingProvider";
+import {
+  BrandingPreviewPanel,
+  type PreviewScreen,
+} from "@/components/layout/BrandingPreviewPanel";
 import PageWrapper from "@/components/layout/PageWrapper";
 import { SkeletonCard } from "@/components/shared/SkeletonCard";
 import { cn } from "@/lib/utils";
@@ -44,6 +50,17 @@ interface BrandingData {
 
 const hexRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
 
+const FONT_OPTIONS = [
+  "Inter",
+  "Poppins",
+  "Roboto",
+  "Nunito",
+  "Lato",
+  "Playfair Display",
+] as const;
+
+type FontOption = (typeof FONT_OPTIONS)[number];
+
 const brandingSchema = z.object({
   app_name: z.string().min(1).max(60).optional(),
   tagline: z.string().max(120).optional(),
@@ -60,13 +77,41 @@ const brandingSchema = z.object({
   logo_url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   banner_url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   font_family: z
-    .enum(["Inter", "Poppins", "Roboto", "Nunito", "Lato", "Playfair Display"])
+    .enum(FONT_OPTIONS)
     .optional(),
 });
 
 type BrandingFormData = z.infer<typeof brandingSchema>;
 
-type PreviewScreen = "Splash" | "Login" | "Home";
+// ── Font URLs (for live preview loading) ──────────────────────────────────────
+
+const FONT_URLS: Record<FontOption, string> = {
+  Inter:
+    "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",
+  Poppins:
+    "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap",
+  Roboto:
+    "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap",
+  Nunito:
+    "https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap",
+  Lato:
+    "https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap",
+  "Playfair Display":
+    "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&display=swap",
+};
+
+/** Preload a font so the picker renders in the correct typeface */
+function preloadFont(name: FontOption) {
+  if (typeof document === "undefined") return;
+  if (document.querySelector(`link[data-preview-font="${name}"]`)) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = FONT_URLS[name];
+  link.dataset.previewFont = name;
+  document.head.appendChild(link);
+}
+
+// ── LogoDropZone ──────────────────────────────────────────────────────────────
 
 function LogoDropZone({
   restaurantId,
@@ -183,118 +228,50 @@ function LogoDropZone({
   );
 }
 
-// ── Phone Preview ─────────────────────────────────────────────────────────────
+// ── Font Picker ───────────────────────────────────────────────────────────────
 
-function BrandLogo({
-  logoUrl,
-  appName,
+function FontPicker({
+  value,
+  onChange,
 }: {
-  logoUrl: string | null;
-  appName: string;
+  value: FontOption;
+  onChange: (f: FontOption) => void;
 }) {
-  if (logoUrl) {
-    return (
-      <img
-        src={logoUrl}
-        alt={`${appName} logo`}
-        className="h-16 w-16 rounded-md object-cover"
-        onError={(e) => {
-          (e.target as HTMLImageElement).style.display = "none";
-        }}
-      />
-    );
-  }
-  return (
-    <span className="flex h-16 w-16 items-center justify-center rounded-md bg-white/20 text-xl font-bold text-white">
-      {appName.slice(0, 2).toUpperCase()}
-    </span>
-  );
-}
-
-function PhonePreview({
-  screen,
-  appName,
-  tagline,
-  logoUrl,
-}: {
-  screen: PreviewScreen;
-  appName: string;
-  tagline: string;
-  logoUrl: string | null;
-}) {
-  if (screen === "Splash") {
-    return (
-      <div className="flex h-full flex-col items-center justify-center bg-(--preview-primary) px-8 text-center text-white">
-        <div className="mb-7">
-          <BrandLogo logoUrl={logoUrl} appName={appName} />
-        </div>
-        <h3 className="text-3xl font-bold">{appName}</h3>
-        <p className="mt-2 text-sm text-white/80">{tagline}</p>
-        <div className="mt-10 flex gap-2">
-          <span className="h-2 w-8 rounded-full bg-(--preview-secondary)" />
-          <span className="h-2 w-2 rounded-full bg-white/40" />
-          <span className="h-2 w-2 rounded-full bg-white/40" />
-        </div>
-      </div>
-    );
-  }
-
-  if (screen === "Login") {
-    return (
-      <div className="flex h-full flex-col bg-gray-50">
-        <div className="bg-(--preview-primary) px-6 pb-10 pt-12 text-white">
-          <BrandLogo logoUrl={logoUrl} appName={appName} />
-          <h3 className="mt-5 text-2xl font-bold">{appName}</h3>
-          <p className="mt-1 text-sm text-white/80">{tagline}</p>
-        </div>
-        <div className="-mt-5 space-y-3 px-5">
-          <div className="rounded-lg bg-white p-4 shadow-sm">
-            <div className="h-11 rounded-lg bg-gray-100" />
-            <div className="mt-3 h-11 rounded-lg bg-gray-100" />
-            <div className="mt-4 h-12 w-full rounded-lg bg-(--preview-secondary) flex items-center justify-center text-sm font-bold text-gray-950">
-              Sign In
-            </div>
-          </div>
-          <p className="text-center text-xs text-gray-500">
-            Create Account · Forgot Password
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Preload all fonts so picker renders each option in its own typeface
+  useEffect(() => {
+    FONT_OPTIONS.forEach(preloadFont);
+  }, []);
 
   return (
-    <div className="h-full bg-gray-50">
-      <div className="bg-(--preview-primary) px-5 pb-5 pt-9 text-white">
-        <div className="flex items-center gap-3">
-          <BrandLogo logoUrl={logoUrl} appName={appName} />
-          <div>
-            <h3 className="text-lg font-bold">{appName}</h3>
-            <p className="text-xs text-white/75">{tagline}</p>
-          </div>
-        </div>
-      </div>
-      <div className="space-y-3 p-5">
-        <div className="rounded-lg bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Recommended
-          </p>
-          <h4 className="mt-2 text-lg font-bold text-gray-950">
-            Chef's tasting menu
-          </h4>
-          <div className="mt-4 h-11 rounded-lg bg-(--preview-secondary) flex items-center px-4 text-sm font-bold text-gray-950">
-            Reserve table
-          </div>
-        </div>
-        {["Live menu", "Queue status", "Order tracking"].map((item) => (
-          <div
-            key={item}
-            className="rounded-lg bg-white p-4 text-sm font-semibold text-gray-800 shadow-sm"
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {FONT_OPTIONS.map((font) => (
+        <button
+          key={font}
+          type="button"
+          onClick={() => onChange(font)}
+          className={cn(
+            "relative flex min-h-14 flex-col items-center justify-center rounded-xl border px-3 py-2.5 text-center transition",
+            value === font
+              ? "border-[#1A3C5E] bg-[#1A3C5E]/5 ring-1 ring-[#1A3C5E]"
+              : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
+          )}
+        >
+          {value === font && (
+            <span className="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-[#1A3C5E]">
+              <Check size={10} className="text-white" />
+            </span>
+          )}
+          <span
+            className="text-base font-semibold text-gray-900"
+            style={{ fontFamily: `'${font}', sans-serif` }}
           >
-            {item}
-          </div>
-        ))}
-      </div>
+            Aa
+          </span>
+          <span className="mt-0.5 text-[10px] font-medium leading-tight text-gray-500">
+            {font}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -306,6 +283,8 @@ export default function BrandingPage() {
   const qc = useQueryClient();
   const [screen, setScreen] = useState<PreviewScreen>("Splash");
   const [shareCopied, setShareCopied] = useState(false);
+
+  const { setPreviewOverride, clearPreview } = useBrandingPreview();
 
   const {
     register,
@@ -385,18 +364,23 @@ export default function BrandingPage() {
   // ── Live preview values ────────────────────────────────────────────────────
   const primaryColor = watch("primary_color") || "#1A3C5E";
   const secondaryColor = watch("secondary_color") || "#E8A020";
+  const fontFamily = (watch("font_family") || "Inter") as FontOption;
   const previewAppName = watch("app_name") || "DineLuxe";
   const previewTagline = watch("tagline") || "Fine dining, made effortless";
   const previewLogoUrl = watch("logo_url") || null;
 
-  const previewVars = useMemo(
-    () =>
-      ({
-        "--preview-primary": primaryColor,
-        "--preview-secondary": secondaryColor,
-      }) as React.CSSProperties,
-    [primaryColor, secondaryColor]
-  );
+  // Sync form changes → BrandingProvider for global CSS var preview
+  useEffect(() => {
+    setPreviewOverride({
+      primaryColor,
+      secondaryColor,
+      fontPreference: fontFamily,
+      appNameDisplay: previewAppName,
+    });
+  }, [primaryColor, secondaryColor, fontFamily, previewAppName, setPreviewOverride]);
+
+  // Restore saved branding on unmount
+  useEffect(() => () => clearPreview(), [clearPreview]);
 
   const copyPreviewLink = async () => {
     const url = `${window.location.origin}/owner/branding?preview=${encodeURIComponent(previewAppName)}`;
@@ -584,28 +568,25 @@ export default function BrandingPage() {
                 )}
               </div>
 
-              {/* Font */}
+              {/* Font family — visual picker */}
               <div className="space-y-1.5">
                 <label className="text-sm font-semibold text-gray-800">
                   Font family
                 </label>
-                <select
-                  {...register("font_family")}
-                  className="min-h-12 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#1A3C5E] bg-white"
-                >
-                  {[
-                    "Inter",
-                    "Poppins",
-                    "Roboto",
-                    "Nunito",
-                    "Lato",
-                    "Playfair Display",
-                  ].map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
+                <FontPicker
+                  value={fontFamily}
+                  onChange={(f) =>
+                    setValue("font_family", f, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                />
+                {errors.font_family && (
+                  <p className="mt-1 text-xs text-red-500">
+                    {errors.font_family.message}
+                  </p>
+                )}
               </div>
 
               {/* Save button */}
@@ -626,54 +607,18 @@ export default function BrandingPage() {
             </section>
 
             {/* ── Right: Live phone preview ─────────────────────────────── */}
-            <aside className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <MonitorSmartphone
-                    size={20}
-                    className="text-[#1A3C5E]"
-                  />
-                  <h2 className="text-base font-semibold text-gray-950">
-                    Live Mockup
-                  </h2>
-                </div>
-                <Smartphone size={18} className="text-gray-400" />
-              </div>
-
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                {(["Splash", "Login", "Home"] as PreviewScreen[]).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setScreen(s)}
-                    className={cn(
-                      "min-h-11 rounded-lg text-sm font-semibold transition",
-                      screen === s
-                        ? "bg-[#1A3C5E] text-white"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                    )}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-6 flex justify-center">
-                <div className="w-70 rounded-[34px] border-10 border-gray-950 bg-gray-950 shadow-lg">
-                  <div
-                    className="h-145 overflow-hidden rounded-3xl bg-white"
-                    style={previewVars}
-                  >
-                    <PhonePreview
-                      screen={screen}
-                      appName={previewAppName}
-                      tagline={previewTagline}
-                      logoUrl={previewLogoUrl}
-                    />
-                  </div>
-                </div>
-              </div>
-            </aside>
+            <div className="xl:sticky xl:top-6 xl:self-start">
+              <BrandingPreviewPanel
+                primaryColor={primaryColor}
+                secondaryColor={secondaryColor}
+                font={fontFamily}
+                appName={previewAppName}
+                tagline={previewTagline}
+                logoUrl={previewLogoUrl}
+                screen={screen}
+                onScreenChange={setScreen}
+              />
+            </div>
           </div>
         </form>
       )}
