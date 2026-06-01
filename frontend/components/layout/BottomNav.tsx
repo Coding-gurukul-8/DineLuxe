@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Home, ShoppingCart, Calendar, User, QrCode, LogOut, Sun, Moon, Bell } from "lucide-react";
+import { Home, ShoppingCart, Calendar, User, QrCode, LogOut, Sun, Moon, Bell, History } from "lucide-react";
 import { useCart } from "@/hooks/useCart";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
@@ -15,8 +15,10 @@ const NAV_ITEMS = [
   { label: "Home",    href: "/customer/home",              icon: Home },
   { label: "Booking", href: "/customer/booking",           icon: Calendar },
   { label: "Scan",    href: "/customer/scan",              icon: QrCode, center: true },
-  { label: "Alerts",  href: "/customer/notifications",     icon: Bell, notifications: true },
+  { label: "Alerts",  href: "/customer/notifications",    icon: Bell, notifications: true },
   { label: "Profile", href: "/customer/profile",           icon: User },
+  // Delivery bottom nav addition (shared component)
+  { label: "History", href: "/delivery/history",        icon: History },
 ];
 
 // ── Dark mode hook ────────────────────────────────────────────────────────────
@@ -90,7 +92,7 @@ function NotifBadge({ count }: { count: number }) {
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0, opacity: 0 }}
           transition={{ type: "spring", stiffness: 500, damping: 22 }}
-          className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-[#C0392B] rounded-full flex items-center justify-center px-1"
+          className="absolute -top-1.5 -right-1.5 min-w-4.5 h-4.5 bg-[#C0392B] rounded-full flex items-center justify-center px-1"
         >
           <span className="text-white text-[10px] font-bold leading-none tabular-nums">
             {count > 9 ? "9+" : count}

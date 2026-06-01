@@ -13,6 +13,7 @@ import {
   QrCode, Shield, ChevronLeft, ChevronRight, LogOut,
   Heart, Package, Palette, Sun, Moon,
   LayoutGrid, Settings2, MessageSquare,
+  Award, CheckSquare, RotateCcw,
 } from "lucide-react"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ interface NavItem {
   icon: React.ReactNode
   roles: string[]
   section: string
+  badge?: "pending_count"
 }
 
 interface BrandingData {
@@ -38,6 +40,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard",       href: "/admin/dashboard",       icon: <LayoutDashboard size={18} />, roles: ["super_admin"], section: "Platform" },
   { label: "Restaurants",     href: "/admin/restaurants",     icon: <Store size={18} />,           roles: ["super_admin"], section: "Platform" },
   { label: "Customers",       href: "/admin/customers",       icon: <Users size={18} />,           roles: ["super_admin"], section: "Platform" },
+  // ── NEW: Admin Approvals ───────────────────────────────────────────────────
+  { label: "Approvals", href: "/admin/approvals", icon: <CheckSquare size={18} />, roles: ["super_admin", "admin"], section: "Platform", badge: "pending_count" },
+  // ── NEW: Admin Refunds ─────────────────────────────────────────────────────
+  { label: "Refunds", href: "/admin/refunds", icon: <RotateCcw size={18} />, roles: ["super_admin"], section: "Platform" },
   // ── ADDED: Staff Reviews ──────────────────────────────────────────────────────
   { label: "Staff Reviews",   href: "/admin/staff-reviews",   icon: <MessageSquare size={18} />,   roles: ["super_admin"], section: "Platform" },
   { label: "Reports",         href: "/admin/reports",         icon: <BarChart3 size={18} />,       roles: ["super_admin"], section: "Analytics" },
@@ -53,6 +59,10 @@ const NAV_ITEMS: NavItem[] = [
   // ── ADDED: Floor Layout (visible to owner + manager) ──────────────────────────
   { label: "Floor Layout", href: "/owner/floor",       icon: <LayoutGrid size={18} />,      roles: ["owner", "manager"], section: "Operations" },
   { label: "Customers",    href: "/owner/customers",   icon: <Heart size={18} />,           roles: ["owner"],            section: "Insights" },
+  // ── NEW: Loyalty Program (owner-only) ────────────────────────────────────────
+  { label: "Loyalty Program", href: "/owner/loyalty",  icon: <Award size={18} />,          roles: ["owner"],            section: "Insights" },
+  // ── NEW: Customers (owner+manager) ──────────────────────────────────────────
+  { label: "Customers", href: "/owner/customers",      icon: <Users size={18} />,         roles: ["owner", "manager"], section: "Insights" },
   { label: "Reports",      href: "/owner/reports",     icon: <BarChart3 size={18} />,       roles: ["owner"],            section: "Insights" },
   { label: "Branding",     href: "/owner/branding",    icon: <Palette size={18} />,         roles: ["owner"],            section: "Settings" },
   // ── ADDED: AI Settings (owner-only) ───────────────────────────────────────────
@@ -167,6 +177,24 @@ export function Sidebar() {
 
   const restaurantId = user?.restaurantId
 
+  const {
+    data: pendingCountRes,
+    refetch: refetchPendingCount,
+  } = useQuery<{ data?: { count?: number } } | any>({
+    queryKey: ["admin", "restaurants", "pending", "count"],
+    queryFn: () => apiClient.get(`/admin/restaurants/pending?count=true`),
+    enabled: role === "super_admin",
+    staleTime: 0,
+    refetchInterval: 300_000, // 5 minutes
+    retry: false,
+  })
+
+  const pendingCount =
+    pendingCountRes?.data?.count ??
+    pendingCountRes?.count ??
+    pendingCountRes?.data ??
+    0
+
   // Fetch restaurant branding — only when restaurantId is available
   const { data: branding, isLoading: brandingLoading } = useQuery<BrandingData>({
     queryKey: ["branding", restaurantId],
@@ -177,9 +205,9 @@ export function Sidebar() {
     retry: false,             // don't spam on 404 / permission errors
   })
 
-  const filteredItems = role
-    ? NAV_ITEMS.filter((item) => item.roles.includes(role))
-    : []
+const filteredItems = role
+  ? NAV_ITEMS.filter((item) => item.roles.includes(role as string))
+  : []
 
   const sections: Record<string, NavItem[]> = {}
   for (const item of filteredItems) {
@@ -248,6 +276,7 @@ export function Sidebar() {
                 item={item}
                 active={isActive(item.href)}
                 collapsed
+                pendingCount={pendingCount}
                 onClick={() => router.push(item.href)}
               />
             ))
@@ -262,6 +291,7 @@ export function Sidebar() {
                     item={item}
                     active={isActive(item.href)}
                     collapsed={false}
+                    pendingCount={pendingCount}
                     onClick={() => router.push(item.href)}
                   />
                 ))}
@@ -351,20 +381,27 @@ export function Sidebar() {
 // ── NavButton ─────────────────────────────────────────────────────────────────
 
 function NavButton({
-  item, active, collapsed, onClick,
+  item,
+  active,
+  collapsed,
+  onClick,
+  pendingCount,
 }: {
   item: NavItem
   active: boolean
   collapsed: boolean
   onClick: () => void
+  pendingCount: number
 }) {
+  const showPendingBadge = item.badge === "pending_count" && pendingCount > 0
+
   return (
     <motion.button
       whileTap={{ scale: 0.97 }}
       onClick={onClick}
       title={collapsed ? item.label : undefined}
       className={cn(
-        "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150",
+        "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 relative",
         active
           ? "bg-[#1A3C5E] text-white shadow-sm"
           : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
@@ -374,10 +411,18 @@ function NavButton({
       <span className={cn("shrink-0", active ? "text-white" : "text-gray-400 dark:text-gray-500 group-hover:text-gray-600")}>
         {item.icon}
       </span>
+
       {!collapsed && (
         <span className="truncate">{item.label}</span>
       )}
-      {active && !collapsed && (
+
+      {showPendingBadge && !collapsed && (
+        <span className="ml-auto inline-flex items-center justify-center min-w-5 h-4.5 px-1.5 rounded-full bg-[#C0392B] text-white text-[10px] font-bold leading-none">
+          {pendingCount > 99 ? "99+" : pendingCount}
+        </span>
+      )}
+
+      {active && !collapsed && !showPendingBadge && (
         <motion.div
           layoutId="sidebar-indicator"
           className="ml-auto w-1.5 h-1.5 rounded-full bg-[#E8A020]"
