@@ -35,7 +35,7 @@ export const deductInventorySchema = z.object({
     }).refine(item => item.inventory_id || item.inventory_item_id || item.menu_item_id, {
       message: 'inventory_id, inventory_item_id, or menu_item_id is required',
     })
-  ).min(1),
+  ).min(1).max(100, 'items array must not exceed 100 entries per request'),
 });
 
 export const wasteLogSchema = z.object({

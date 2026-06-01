@@ -82,7 +82,7 @@ export const updateItemStatusSchema = z.object({
 // ─── Bulk Price Update ────────────────────────────────────────────────────────
 
 export const bulkUpdateSchema = z.object({
-  item_ids: z.array(z.string().uuid()).min(1),
+  item_ids: z.array(z.string().uuid()).min(1).max(200, 'item_ids array must not exceed 200 entries per request'),
   adjustment_type: z.enum(['percent', 'fixed']),
   value: z.number(), // positive = increase, negative = decrease
 });
