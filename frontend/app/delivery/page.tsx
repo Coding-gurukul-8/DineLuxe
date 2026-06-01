@@ -2,12 +2,27 @@
 
 import Link from "next/link"
 import { useQuery, useMutation } from "@tanstack/react-query"
-import { Bike, CheckCircle2, Clock, IndianRupee, MapPin, Navigation, PackageCheck, Phone, Star } from "lucide-react"
-import { StatusBadge } from "@/components/shared/StatusBadge"
-import { apiClient } from "@/lib/api-client"
+import {
+  Bike,
+  CheckCircle2,
+  Clock,
+  IndianRupee,
+  MapPin,
+  Navigation,
+  PackageCheck,
+  Phone,
+  Star,
+} from "lucide-react"
 import { toast } from "sonner"
+import { StatusBadge } from "@/components/shared/StatusBadge"
+import OnlineToggle from "@/components/delivery/OnlineToggle"
+import { apiClient } from "@/lib/api-client"
+import { useAuth } from "@/hooks/useAuth"
 
 export default function DeliveryPartnerPage() {
+  const { user } = useAuth()
+  const partnerId = user?.id ?? ""
+
   const { data: activeDeliveries = [], refetch } = useQuery({
     queryKey: ["delivery", "active"],
     queryFn: () => apiClient.get<any[]>("/delivery/partner/active"),
@@ -29,7 +44,9 @@ export default function DeliveryPartnerPage() {
     onError: () => toast.error("Failed to update delivery"),
   })
 
-  const tasks = Array.isArray(activeDeliveries) ? activeDeliveries : [activeDeliveries].filter(Boolean)
+  const tasks = Array.isArray(activeDeliveries)
+    ? activeDeliveries
+    : [activeDeliveries].filter(Boolean)
 
   return (
     <main className="min-h-screen bg-gray-50">
@@ -40,9 +57,14 @@ export default function DeliveryPartnerPage() {
               <p className="text-sm text-white/70">Delivery Partner</p>
               <h1 className="mt-1 text-2xl font-bold">Live Delivery Console</h1>
             </div>
-            <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-white/12">
-              <Bike size={24} />
-            </span>
+            <div className="flex items-center gap-3">
+              {partnerId && (
+                <OnlineToggle partnerId={partnerId} initialStatus className="bg-white" />
+              )}
+              <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-white/12">
+                <Bike size={24} />
+              </span>
+            </div>
           </div>
         </div>
       </section>
@@ -50,8 +72,16 @@ export default function DeliveryPartnerPage() {
       <div className="mx-auto -mt-12 max-w-5xl space-y-5 px-4 pb-10">
         <div className="grid gap-3 sm:grid-cols-3">
           <Metric icon={PackageCheck} label="Active jobs" value={String(tasks.length)} />
-          <Metric icon={Clock} label="Avg delivery" value={earningsData?.avgDeliveryMinutes ? `${earningsData.avgDeliveryMinutes}m` : "—"} />
-          <Metric icon={IndianRupee} label="Today earned" value={earningsData?.todayEarnings ? `Rs ${earningsData.todayEarnings.toLocaleString("en-IN")}` : "Rs 0"} />
+          <Metric
+            icon={Clock}
+            label="Avg delivery"
+            value={earningsData?.avgDeliveryMinutes ? `${earningsData.avgDeliveryMinutes}m` : "—"}
+          />
+          <Metric
+            icon={IndianRupee}
+            label="Today earned"
+            value={earningsData?.todayEarnings ? `Rs ${earningsData.todayEarnings.toLocaleString("en-IN")}` : "Rs 0"}
+          />
         </div>
 
         <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
@@ -59,14 +89,17 @@ export default function DeliveryPartnerPage() {
             <div>
               <h2 className="text-lg font-bold text-gray-950">Assigned Deliveries</h2>
             </div>
-            <Link href="/delivery/earnings" className="inline-flex min-h-12 items-center rounded-lg border border-gray-200 px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">
+            <Link
+              href="/delivery/earnings"
+              className="inline-flex min-h-12 items-center rounded-lg border border-gray-200 px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
               Earnings
             </Link>
           </div>
 
           <div className="mt-5 grid gap-4">
             {tasks.length === 0 && (
-              <p className="text-center py-8 text-gray-400">No active deliveries</p>
+              <p className="py-8 text-center text-gray-400">No active deliveries</p>
             )}
             {tasks.map((task: any) => (
               <article key={task.id} className="rounded-lg border border-gray-200 p-4">
@@ -91,19 +124,28 @@ export default function DeliveryPartnerPage() {
                   <Info icon={Star} label="Priority" value={task.priority ?? "Standard"} />
                 </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                  <Link
+                    href={`/delivery/active?id=${task.id}`}
+                    className="inline-flex min-h-15 items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-bold text-gray-700 transition hover:bg-gray-50"
+                  >
+                    <PackageCheck size={18} />
+                    View Details
+                  </Link>
                   <button
                     onClick={() => toast.info("Opening navigation…")}
-                    className="inline-flex min-h-[60px] items-center justify-center gap-2 rounded-lg bg-[#1A3C5E] px-4 text-sm font-bold text-white transition hover:bg-[#15304d]"
+                    className="inline-flex min-h-15 items-center justify-center gap-2 rounded-lg bg-[#1A3C5E] px-4 text-sm font-bold text-white transition hover:bg-[#15304d]"
                   >
                     <Navigation size={18} />
                     Navigate
                   </button>
                   <button
-                    onClick={() => task.order?.customer?.phone
-                      ? window.open(`tel:${task.order.customer.phone}`)
-                      : toast.info("No phone number")}
-                    className="inline-flex min-h-[60px] items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-bold text-gray-700 transition hover:bg-gray-50"
+                    onClick={() =>
+                      task.order?.customer?.phone
+                        ? window.open(`tel:${task.order.customer.phone}`)
+                        : toast.info("No phone number")
+                    }
+                    className="inline-flex min-h-15 items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-bold text-gray-700 transition hover:bg-gray-50"
                   >
                     <Phone size={18} />
                     Call
@@ -111,7 +153,7 @@ export default function DeliveryPartnerPage() {
                   <button
                     onClick={() => statusMutation.mutate({ id: task.id, status: "delivered" })}
                     disabled={statusMutation.isPending}
-                    className="inline-flex min-h-[60px] items-center justify-center gap-2 rounded-lg bg-[#1E7E34] px-4 text-sm font-bold text-white transition hover:bg-[#17682a] disabled:opacity-50"
+                    className="inline-flex min-h-15 items-center justify-center gap-2 rounded-lg bg-[#1E7E34] px-4 text-sm font-bold text-white transition hover:bg-[#17682a] disabled:opacity-50"
                   >
                     <CheckCircle2 size={18} />
                     Mark Done
