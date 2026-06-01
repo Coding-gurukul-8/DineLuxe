@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
 import { parsePagination } from '../../utils/pagination';
-import { findLeastBusyWaiter } from '../../utils/waiter-assign';
+import { assignWaiterToTable, getWaiterWorkloads } from '../waiter-assignment/waiter-assignment.service';
 import type { CreateOrderInput } from './orders.schema';
 
 const ACTIVE_CUSTOMER_STATUSES = ['created', 'confirmed', 'preparing', 'ready'];
@@ -150,8 +150,17 @@ export async function createOrder(
     total += (unitPrice + addonTotal) * item.quantity;
   }
 
-  // 5. Auto-assign waiter
-  const assignedWaiterId = await findLeastBusyWaiter(branchId);
+  // 5. Auto-assign waiter using the workload-scoring module.
+  //    Fetches workloads (from 10s cache or fresh DB query) and picks the
+  //    lowest-score active waiter. Returns null if no waiters are available.
+  let assignedWaiterId: string | null = null;
+  try {
+    const workloads = await getWaiterWorkloads(branchId);
+    assignedWaiterId = workloads.length > 0 ? workloads[0]!.waiter_id : null;
+  } catch (assignErr) {
+    // Workload fetch failure is non-fatal — order proceeds without a waiter
+    console.error('[waiter-assign] Workload fetch failed, continuing without assignment:', assignErr);
+  }
 
   // 6. Insert order
   const now = new Date().toISOString();
@@ -198,7 +207,37 @@ export async function createOrder(
     .update({ status: 'occupied', updated_at: new Date().toISOString() })
     .eq('id', table_id);
 
-  // 9. Broadcast to kitchen and cashier (non-fatal)
+  // 9. If this order is for a table and no waiter was assigned (none active),
+  //    trigger the full assignment flow which also emits WebSocket events.
+  //    If a waiter was already assigned inline above, just notify them.
+  if (table_id) {
+    if (assignedWaiterId) {
+      // Waiter already set on the order — emit WebSocket notification
+      try {
+        const { io } = await import('../../server');
+        io.to(`waiter:${assignedWaiterId}`).emit('table_assigned', {
+          table_id,
+          branch_id: branchId,
+          order_id: order.id,
+          assigned_at: now,
+        });
+        io.to(`branch:${branchId}`).emit('table_status_changed', {
+          table_id,
+          branch_id: branchId,
+          assigned_waiter_id: assignedWaiterId,
+        });
+      } catch {
+        // WebSocket emission failure is non-fatal
+      }
+    } else {
+      // No waiter found via workloads — try the full assignment flow
+      assignWaiterToTable(table_id, branchId, restaurantId).catch((err) =>
+        console.error('[waiter-assign] Auto-assignment failed (non-fatal):', err),
+      );
+    }
+  }
+
+  // 10. Broadcast to kitchen and cashier (non-fatal)
   const realtimePayload = {
     event: 'order_created',
     order_id: order.id,
@@ -219,7 +258,7 @@ export async function createOrder(
     // Realtime is best-effort — never fail the HTTP response
   }
 
-  // 10. Inventory deduction (fire-and-forget)
+  // 11. Inventory deduction (fire-and-forget)
   deductInventory(branchId, items).catch((err) =>
     console.error('[inventory] deduction failed:', err)
   );

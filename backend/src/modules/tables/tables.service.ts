@@ -8,6 +8,7 @@ import {
   TableStatusType,
   VALID_TRANSITIONS,
 } from './tables.schema';
+import { assignWaiterToTable } from '../waiter-assignment/waiter-assignment.service';
 
 // ─── List tables ────────────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ export async function updateTableStatus(
   tableId: string,
   input: UpdateStatusInput,
   actorId: string,
+  restaurantId?: string,
 ) {
   const { data: table, error: fetchError } = await supabaseAdmin
     .from('tables')
@@ -126,6 +128,15 @@ export async function updateTableStatus(
     });
   } catch (broadcastErr: any) {
     console.warn('[tables] broadcast failed:', broadcastErr.message);
+  }
+
+  // Auto-assign waiter when table becomes occupied (e.g. queue system seats a party)
+  // This covers the case where a customer is seated before they place an order,
+  // so a waiter is pre-assigned and ready to greet them.
+  if (input.new_status === 'occupied' && restaurantId) {
+    assignWaiterToTable(tableId, table.branch_id, restaurantId).catch((err) =>
+      console.error('[waiter-assign] Auto-assignment on table occupied failed (non-fatal):', err),
+    );
   }
 
   // Invalidate live layout cache
