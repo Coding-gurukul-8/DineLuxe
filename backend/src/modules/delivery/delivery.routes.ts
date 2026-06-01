@@ -14,13 +14,18 @@ import {
   handleGetDeliveryStatus,
   handleGetActiveDeliveriesForBranch,
   handleCompleteDelivery,
+  handleUpdatePartnerStatus,
+  handleGetPartnerHistory,
+  handleGetPartnerStats,
 } from './delivery.controller';
 
 const router: import('express').Router = Router();
 
 router.use(authenticate);
 
-// POST /delivery/orders/:orderId/assign — internal/manager
+// ── Manager / Owner operations ─────────────────────────────────────────────────
+
+// POST /delivery/orders/:orderId/assign — assign a delivery partner to an order
 router.post(
   '/orders/:orderId/assign',
   injectTenant,
@@ -30,21 +35,78 @@ router.post(
       partner_id: z.string().uuid(),
     }),
   }),
-  handleAssignDelivery
+  handleAssignDelivery,
 );
 
-// GET /delivery/partner/active — delivery partner's active delivery
+// GET /delivery/branch/:branchId/active — all active deliveries for a branch
+router.get(
+  '/branch/:branchId/active',
+  injectTenant,
+  requireRole('manager', 'owner', 'admin'),
+  handleGetActiveDeliveriesForBranch,
+);
+
+// POST /delivery/:id/complete — manager/owner force-complete a delivery
+router.post(
+  '/:id/complete',
+  injectTenant,
+  requireRole('manager', 'owner'),
+  handleCompleteDelivery,
+);
+
+// GET /delivery/:id/status — manager/owner view full delivery with partner info
+router.get(
+  '/:id/status',
+  requireRole('manager', 'owner', 'admin'),
+  handleGetDeliveryStatus,
+);
+
+// ── Delivery partner operations ────────────────────────────────────────────────
+
+// GET /delivery/partner/active — partner's current active delivery
 router.get(
   '/partner/active',
   requireRole('delivery_partner'),
-  handleGetActiveDelivery
+  handleGetActiveDelivery,
 );
 
-// GET /delivery/partner/earnings — delivery partner earnings
+// GET /delivery/partner/earnings — partner earnings summary
 router.get(
   '/partner/earnings',
   requireRole('delivery_partner'),
-  handleGetEarnings
+  handleGetEarnings,
+);
+
+// GET /delivery/partner/history?page=&limit= — FIX 3: paginated delivery history
+router.get(
+  '/partner/history',
+  requireRole('delivery_partner'),
+  validate({
+    query: z.object({
+      page:  z.string().optional().transform((v) => (v ? parseInt(v, 10) : 1)),
+      limit: z.string().optional().transform((v) => (v ? Math.min(parseInt(v, 10), 100) : 20)),
+    }),
+  }),
+  handleGetPartnerHistory,
+);
+
+// GET /delivery/partner/stats — FIX 3: partner stats dashboard summary
+router.get(
+  '/partner/stats',
+  requireRole('delivery_partner'),
+  handleGetPartnerStats,
+);
+
+// PATCH /delivery/partner/status — FIX 2: partner online/offline toggle
+router.patch(
+  '/partner/status',
+  requireRole('delivery_partner'),
+  validate({
+    body: z.object({
+      is_online: z.boolean(),
+    }),
+  }),
+  handleUpdatePartnerStatus,
 );
 
 // POST /delivery/location — GPS update (throttled server-side)
@@ -58,13 +120,10 @@ router.post(
       delivery_id: z.string().uuid().optional(),
     }),
   }),
-  handleUpdateLocation
+  handleUpdateLocation,
 );
 
-// GET /delivery/:id — delivery partner views their delivery
-router.get('/:id', requireRole('delivery_partner', 'manager', 'owner'), handleGetDelivery);
-
-// PATCH /delivery/:id/status — delivery partner updates status
+// PATCH /delivery/:id/status — partner updates delivery status
 router.patch(
   '/:id/status',
   requireRole('delivery_partner'),
@@ -73,21 +132,10 @@ router.patch(
       status: z.enum(['accepted', 'rejected', 'picked_up', 'delivered', 'failed']),
     }),
   }),
-  handleUpdateDeliveryStatus
+  handleUpdateDeliveryStatus,
 );
 
-// GET /delivery/:id/status — manager/owner views full delivery status with partner info
-router.get('/:id/status', requireRole('manager', 'owner', 'admin'), handleGetDeliveryStatus);
-
-// GET /delivery/branch/:branchId/active — list all active deliveries for a branch
-router.get(
-  '/branch/:branchId/active',
-  injectTenant,
-  requireRole('manager', 'owner', 'admin'),
-  handleGetActiveDeliveriesForBranch
-);
-
-// POST /delivery/:id/complete — manager/owner force-completes a delivery
-router.post('/:id/complete', injectTenant, requireRole('manager', 'owner'), handleCompleteDelivery);
+// GET /delivery/:id — partner/manager views a specific delivery
+router.get('/:id', requireRole('delivery_partner', 'manager', 'owner'), handleGetDelivery);
 
 export default router;
