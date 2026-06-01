@@ -9,6 +9,9 @@ import { passwordResetSuccessEmail } from './templates/password-reset-success';
 import { refundInitiatedEmail }      from './templates/refund-initiated';
 import { weeklyReportEmail }         from './templates/weekly-report';
 import { reportReadyEmail }          from './templates/report-ready';
+import { restaurantApprovedEmail }   from './templates/restaurant-approved';
+import { restaurantRejectedEmail }   from './templates/restaurant-rejected';
+
 // ─── Template Registry ────────────────────────────────────────────────────────
 const templates: Record<string, (data: any) => { subject: string; html: string }> = {
   welcome: welcomeTemplate,
@@ -21,6 +24,8 @@ const templates: Record<string, (data: any) => { subject: string; html: string }
   'refund-initiated':        (d: any) => refundInitiatedEmail(d.customerName, d.orderId, d.amount, d.restaurantName, d.estimatedDays),
   'weekly-report':           (d: any) => weeklyReportEmail(d.ownerName, d.restaurantName, d.reportData, d.reportUrl),
   'report-ready':            (d: any) => reportReadyEmail(d.restaurantName, d.reportType, d.dateRange, d.downloadUrl, d.format),
+  'restaurant-approved':     (d: any) => restaurantApprovedEmail(d.ownerName, d.restaurantName, d.dashboardUrl),
+  'restaurant-rejected':     (d: any) => restaurantRejectedEmail(d.ownerName, d.restaurantName, d.reason),
 };
 
 // ─── Send Email ───────────────────────────────────────────────────────────────

@@ -3,6 +3,9 @@ import { config } from '../../config/env';
 import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
 import { paginate } from '../../utils/pagination';
+import { sendEmail } from '../../email/send';
+import { createInApp } from '../notifications/notifications.service';
+import { insertAuditLog } from '../../utils/audit-log';
 
 const DASHBOARD_CACHE_KEY = 'admin:dashboard';
 const DASHBOARD_CACHE_TTL = 300; // 5 minutes
@@ -310,6 +313,249 @@ export async function updateRestaurantStatus(id: string, status: string) {
   // Invalidate dashboard cache
   await redis.del(DASHBOARD_CACHE_KEY);
   return data;
+}
+
+// ─── Get pending restaurants for review (paginated) ───────────────────────────
+export async function getPendingRestaurants(page: number, limit: number) {
+  const { from, to } = paginate(page, limit);
+
+  const { data, error, count } = await supabaseAdmin
+    .from('restaurants')
+    .select(
+      `
+      id,
+      name,
+      cuisine_type,
+      gst_number,
+      status,
+      created_at,
+      updated_at,
+      owner:users!restaurants_owner_id_fkey(
+        id,
+        name,
+        email,
+        phone,
+        is_active,
+        created_at
+      )
+    `,
+      { count: 'exact' },
+    )
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true }) // oldest first — first come, first serve
+    .range(from, to);
+
+  if (error) throw error;
+  return { data, count };
+}
+
+// ─── Approve a pending restaurant ─────────────────────────────────────────────
+export async function approveRestaurant(restaurantId: string, adminId: string) {
+  const now = new Date().toISOString();
+
+  // 1. Fetch the restaurant and verify it's pending
+  const { data: restaurant, error: fetchError } = await supabaseAdmin
+    .from('restaurants')
+    .select(
+      `
+      id,
+      name,
+      status,
+      owner:users!restaurants_owner_id_fkey(id, name, email)
+    `,
+    )
+    .eq('id', restaurantId)
+    .single();
+
+  if (fetchError) throw fetchError;
+  if (!restaurant) {
+    const err = Object.assign(new Error('Restaurant not found'), { statusCode: 404 });
+    throw err;
+  }
+
+  if ((restaurant as any).status !== 'pending') {
+    const err = Object.assign(
+      new Error(`Restaurant is not pending — current status: ${(restaurant as any).status}`),
+      { statusCode: 400 },
+    );
+    throw err;
+  }
+
+  const owner = (restaurant as any).owner as {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
+
+  if (!owner) {
+    const err = Object.assign(new Error('Restaurant owner not found'), { statusCode: 404 });
+    throw err;
+  }
+
+  // 2. Update restaurant status to active
+  const { error: restaurantError } = await supabaseAdmin
+    .from('restaurants')
+    .update({
+      status: 'active',
+      approved_by: adminId,
+      approved_at: now,
+      updated_at: now,
+    })
+    .eq('id', restaurantId);
+
+  if (restaurantError) throw restaurantError;
+
+  // 3. Activate the owner user (they may have been pending-inactive)
+  await supabaseAdmin
+    .from('users')
+    .update({ is_active: true, updated_at: now })
+    .eq('id', owner.id);
+
+  // 4. Create in-app notification for the owner
+  await createInApp(
+    owner.id,
+    'system_alert',
+    'Restaurant Approved! 🎉',
+    'Your restaurant has been approved! You can now go live.',
+    restaurantId,
+    'restaurant',
+  ).catch((err) => console.error('[approveRestaurant] Notification failed:', err));
+
+  // 5. Send approval email
+  const dashboardUrl = process.env.OWNER_DASHBOARD_URL ?? 'https://app.dineluxe.app/owner';
+  await sendEmail({
+    to: owner.email,
+    templateName: 'restaurant-approved',
+    data: {
+      ownerName: owner.name,
+      restaurantName: (restaurant as any).name,
+      dashboardUrl,
+    },
+  });
+
+  // 6. Audit log
+  insertAuditLog({
+    actorId: adminId,
+    action: 'RESTAURANT_APPROVED',
+    targetType: 'restaurant',
+    targetId: restaurantId,
+    newValue: { status: 'active', approved_by: adminId, approved_at: now },
+  }).catch(() => {});
+
+  // 7. Emit WebSocket event to admin room
+  try {
+    const { io } = await import('../../server');
+    io.to('admin').emit('restaurant_approved', {
+      restaurant_id: restaurantId,
+      restaurant_name: (restaurant as any).name,
+      approved_by: adminId,
+      approved_at: now,
+    });
+  } catch {
+    // WebSocket emission failure is non-fatal
+  }
+
+  // Invalidate dashboard cache so pending count reflects new state
+  await redis.del(DASHBOARD_CACHE_KEY);
+
+  return {
+    success: true,
+    restaurant_id: restaurantId,
+    owner_notified: true,
+  };
+}
+
+// ─── Reject a pending restaurant ──────────────────────────────────────────────
+export async function rejectRestaurant(restaurantId: string, adminId: string, reason: string) {
+  const now = new Date().toISOString();
+
+  // 1. Fetch the restaurant and verify it's pending
+  const { data: restaurant, error: fetchError } = await supabaseAdmin
+    .from('restaurants')
+    .select(
+      `
+      id,
+      name,
+      status,
+      owner:users!restaurants_owner_id_fkey(id, name, email)
+    `,
+    )
+    .eq('id', restaurantId)
+    .single();
+
+  if (fetchError) throw fetchError;
+  if (!restaurant) {
+    const err = Object.assign(new Error('Restaurant not found'), { statusCode: 404 });
+    throw err;
+  }
+
+  if ((restaurant as any).status !== 'pending') {
+    const err = Object.assign(
+      new Error(`Restaurant is not pending — current status: ${(restaurant as any).status}`),
+      { statusCode: 400 },
+    );
+    throw err;
+  }
+
+  const owner = (restaurant as any).owner as {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
+
+  if (!owner) {
+    const err = Object.assign(new Error('Restaurant owner not found'), { statusCode: 404 });
+    throw err;
+  }
+
+  // 2. Update restaurant status to rejected
+  const { error: restaurantError } = await supabaseAdmin
+    .from('restaurants')
+    .update({
+      status: 'rejected',
+      rejected_by: adminId,
+      rejected_at: now,
+      rejection_reason: reason,
+      updated_at: now,
+    })
+    .eq('id', restaurantId);
+
+  if (restaurantError) throw restaurantError;
+
+  // 3. Create in-app notification for the owner with the reason
+  await createInApp(
+    owner.id,
+    'system_alert',
+    'Application Update',
+    `Your restaurant application was not approved: ${reason}`,
+    restaurantId,
+    'restaurant',
+  ).catch((err) => console.error('[rejectRestaurant] Notification failed:', err));
+
+  // 4. Send rejection email
+  await sendEmail({
+    to: owner.email,
+    templateName: 'restaurant-rejected',
+    data: {
+      ownerName: owner.name,
+      restaurantName: (restaurant as any).name,
+      reason,
+    },
+  });
+
+  // 5. Audit log
+  insertAuditLog({
+    actorId: adminId,
+    action: 'RESTAURANT_REJECTED',
+    targetType: 'restaurant',
+    targetId: restaurantId,
+    newValue: { status: 'rejected', rejected_by: adminId, rejected_at: now, reason },
+  }).catch(() => {});
+
+  // Invalidate dashboard cache
+  await redis.del(DASHBOARD_CACHE_KEY);
+
+  return { success: true };
 }
 
 // ─── Get all customers (paginated) ───────────────────────────────────────────

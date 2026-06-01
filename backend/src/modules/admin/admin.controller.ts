@@ -69,6 +69,50 @@ export async function updateRestaurantStatus(req: Request, res: Response, next: 
   } catch (err) { next(err); }
 }
 
+// GET /admin/restaurants/pending
+export async function getPendingRestaurants(req: Request, res: Response, next: NextFunction) {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
+    const result = await adminService.getPendingRestaurants(page, limit);
+    res.json(success(result));
+  } catch (err) { next(err); }
+}
+
+// POST /admin/restaurants/:id/approve
+export async function approveRestaurant(req: Request, res: Response, next: NextFunction) {
+  try {
+    const adminId = (req as any).user?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
+      return;
+    }
+    const data = await adminService.approveRestaurant(req.params.id, adminId);
+    res.json(success(data, 'Restaurant approved successfully.'));
+  } catch (err) { next(err); }
+}
+
+// POST /admin/restaurants/:id/reject
+export async function rejectRestaurant(req: Request, res: Response, next: NextFunction) {
+  try {
+    const adminId = (req as any).user?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
+      return;
+    }
+    const { reason } = req.body;
+    if (!reason || typeof reason !== 'string' || reason.trim().length < 10) {
+      res.status(400).json({
+        success: false,
+        error: { message: 'Rejection reason must be at least 10 characters.' },
+      });
+      return;
+    }
+    const data = await adminService.rejectRestaurant(req.params.id, adminId, reason.trim());
+    res.json(success(data, 'Restaurant application rejected.'));
+  } catch (err) { next(err); }
+}
+
 export async function getCustomers(req: Request, res: Response, next: NextFunction) {
   try {
     const page = Number(req.query.page) || 1;

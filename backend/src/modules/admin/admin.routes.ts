@@ -9,6 +9,9 @@ import {
   getDetailedHealth,
   getRestaurants,
   updateRestaurantStatus,
+  getPendingRestaurants,
+  approveRestaurant,
+  rejectRestaurant,
   getCustomers,
   updateCustomerStatus,
   getFeedback,
@@ -50,10 +53,22 @@ router.use(authenticate, requireRole('admin', 'super_admin'));
 
 router.get('/dashboard', getDashboard);
 router.get('/platform-stats', getPlatformStats);
+
+// ── Restaurant management ────────────────────────────────────────────────────
+// IMPORTANT: /restaurants/pending must be declared before /restaurants/:id/...
+// so Express doesn't interpret "pending" as a dynamic :id parameter.
+router.get('/restaurants/pending', getPendingRestaurants);
+router.post('/restaurants/:id/approve', approveRestaurant);
+router.post('/restaurants/:id/reject', rejectRestaurant);
+
 router.get('/restaurants', getRestaurants);
 router.patch('/restaurants/:id/status', updateRestaurantStatus);
+
+// ── Customer management ───────────────────────────────────────────────────────
 router.get('/customers', getCustomers);
 router.patch('/customers/:id/status', updateCustomerStatus);
+
+// ── Feedback ─────────────────────────────────────────────────────────────────
 router.get('/feedback', getFeedback);
 
 export default router;
