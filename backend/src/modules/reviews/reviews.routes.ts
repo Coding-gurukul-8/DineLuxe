@@ -8,6 +8,7 @@ import {
   getByBranch,
   getByOrder,
   deleteReview,
+  getSentimentSummary,
 } from './reviews.controller';
 import { createReviewSchema } from './reviews.schema';
 
@@ -24,6 +25,9 @@ router.get('/branch/:id', getByBranch);
 
 // GET /reviews/order/:orderId — check if already reviewed
 router.get('/order/:orderId', authenticate, getByOrder);
+
+// GET /reviews/sentiment-summary/:restaurantId — authenticated
+router.get('/sentiment-summary/:restaurantId', authenticate, getSentimentSummary);
 
 // DELETE /reviews/:id — admin only
 router.delete('/:id', authenticate, requireRole('admin'), deleteReview);

@@ -52,3 +52,14 @@ export async function deleteReview(req: Request, res: Response, next: NextFuncti
     next(err);
   }
 }
+
+export async function getSentimentSummary(req: Request, res: Response, next: NextFunction) {
+  try {
+    const periodDays = req.query.period_days ? Number(req.query.period_days) : 30;
+    const restaurantId = req.params.restaurantId;
+    const data = await reviewsService.getRestaurantSentimentSummary(restaurantId, periodDays);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+}

@@ -1,8 +1,17 @@
 import { supabaseAdmin } from '../../config/supabase';
 import { paginate } from '../../utils/pagination';
+import { redis } from '../../config/redis';
 
-const POSITIVE_WORDS = ['great', 'excellent', 'amazing', 'good', 'fantastic', 'delicious', 'love', 'perfect', 'wonderful', 'best'];
-const NEGATIVE_WORDS = ['bad', 'terrible', 'awful', 'horrible', 'disgusting', 'worst', 'poor', 'disappointing', 'slow', 'rude'];
+const POSITIVE_WORDS = [
+  'great', 'excellent', 'amazing', 'good', 'fantastic', 'delicious', 'love', 'perfect', 'wonderful', 'best',
+  'tasty', 'friendly', 'fast', 'prompt', 'clean', 'cozy', 'fresh', 'recommend', 'yummy', 'pleasant', 'awesome',
+  'satisfying', 'superb', 'impressive', 'stellar', 'outstanding'
+];
+
+const NEGATIVE_WORDS = [
+  'bad', 'terrible', 'awful', 'horrible', 'disgusting', 'worst', 'poor', 'disappointing', 'slow', 'rude',
+  'stale', 'cold', 'burnt', 'bland', 'undercooked', 'overcooked', 'dirty', 'smelly', 'late', 'noisy'
+];
 
 // ─── Create review ─────────────────────────────────────────────────────────────
 export async function create(
@@ -61,6 +70,7 @@ export async function create(
       text_review: payload.text_review ?? null,
       photos: payload.photos ?? [],
       sentiment_label: null,
+      sentiment_score: null,
     })
     .select()
     .single();
@@ -80,8 +90,29 @@ export async function create(
   // Recalculate restaurant avg rating
   await recalculateAvgRating(payload.restaurant_id);
 
-  // Async sentiment analysis — fire and forget
-  calculateSentiment(review.id, payload.text_review ?? '');
+  // Async sentiment analysis — fire and forget (writes back label+score and busts cache)
+  const _text = payload.text_review ?? '';
+  setImmediate(async () => {
+    try {
+      if (!_text) return;
+      const { label, score } = await analyzeSentiment(_text);
+      await supabaseAdmin.from('reviews').update({ sentiment_label: label, sentiment_score: score }).eq('id', review.id);
+
+      // Best-effort cache invalidation for sentiment caches related to this restaurant
+      try {
+        const raw = (redis as any).client as import('ioredis').Redis | undefined;
+        if (raw && typeof raw.keys === 'function') {
+          const pattern = `sentiment:${payload.restaurant_id}:*`;
+          const keys: string[] = await raw.keys(pattern);
+          if (keys?.length) await redis.del(...keys);
+        }
+      } catch (e) {
+        console.warn('[reviews] cache bust failed', e);
+      }
+    } catch (err) {
+      console.warn('[reviews] sentiment analysis failed', err);
+    }
+  });
 
   return review;
 }
@@ -191,27 +222,126 @@ async function recalculateAvgRating(restaurantId: string) {
     .eq('id', restaurantId);
 }
 
-// ─── Sentiment analysis (async, internal) ────────────────────────────────────
-async function calculateSentiment(reviewId: string, text: string): Promise<void> {
-  if (!text) return;
+// ─── Sentiment analysis (public) ───────────────────────────────────────────
+export async function analyzeSentiment(text: string): Promise<{ label: 'positive' | 'neutral' | 'negative'; score: number }> {
+  const lower = (text ?? '').toLowerCase();
 
-  const lower = text.toLowerCase();
   let positiveCount = 0;
   let negativeCount = 0;
+  for (const word of POSITIVE_WORDS) if (lower.includes(word)) positiveCount++;
+  for (const word of NEGATIVE_WORDS) if (lower.includes(word)) negativeCount++;
 
-  for (const word of POSITIVE_WORDS) {
-    if (lower.includes(word)) positiveCount++;
-  }
-  for (const word of NEGATIVE_WORDS) {
-    if (lower.includes(word)) negativeCount++;
-  }
-
+  const keywordScore = positiveCount + negativeCount ? (positiveCount - negativeCount) / (positiveCount + negativeCount) : 0; // -1..1
   let label: 'positive' | 'neutral' | 'negative' = 'neutral';
-  if (positiveCount > negativeCount) label = 'positive';
-  else if (negativeCount > positiveCount) label = 'negative';
+  if (keywordScore > 0) label = 'positive';
+  else if (keywordScore < 0) label = 'negative';
 
-  await supabaseAdmin
-    .from('reviews')
-    .update({ sentiment_label: label })
-    .eq('id', reviewId);
+  let finalScore = keywordScore;
+
+  // Option B: call HuggingFace classifier if key present and text long enough
+  const hfKey = process.env.HUGGINGFACE_API_KEY;
+  if (hfKey && text.length > 20) {
+    try {
+      const resp = await fetch('https://api-inference.huggingface.co/models/distilbert-base-uncased-finetuned-sst-2-english', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${hfKey}`,
+        },
+        body: JSON.stringify({ inputs: text }),
+      });
+
+      const json = await resp.json();
+      // Expecting an array like [{label: 'POSITIVE', score: 0.99}]
+      if (Array.isArray(json) && json[0] && typeof json[0].label === 'string' && typeof json[0].score === 'number') {
+        const hfLabel = json[0].label.toLowerCase().includes('pos') ? 'positive' : 'negative';
+        const hfScore = json[0].score;
+        finalScore = hfLabel === 'positive' ? hfScore : -hfScore;
+        label = hfLabel as 'positive' | 'negative';
+      }
+    } catch (e) {
+      // silent fallback to keyword scoring
+      console.warn('[reviews] HuggingFace sentiment call failed', e);
+    }
+  }
+
+  return { label, score: Number(finalScore) };
+}
+
+// ─── Restaurant sentiment summary (cached) ─────────────────────────────────
+export async function getRestaurantSentimentSummary(restaurantId: string, periodDays = 30) {
+  const key = `sentiment:${restaurantId}:${periodDays}`;
+  try {
+    const cached = await redis.get(key);
+    if (cached) return JSON.parse(cached);
+  } catch (e) {
+    // ignore cache errors
+  }
+
+  const now = new Date();
+  const currentStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
+  const previousStart = new Date(now.getTime() - periodDays * 2 * 24 * 60 * 60 * 1000);
+
+  const [currentRes, prevRes] = await Promise.all([
+    supabaseAdmin
+      .from('reviews')
+      .select('sentiment_label, text_review')
+      .eq('restaurant_id', restaurantId)
+      .gte('created_at', currentStart.toISOString())
+      .lte('created_at', now.toISOString()),
+    supabaseAdmin
+      .from('reviews')
+      .select('sentiment_label')
+      .eq('restaurant_id', restaurantId)
+      .gte('created_at', previousStart.toISOString())
+      .lt('created_at', currentStart.toISOString()),
+  ]);
+
+  if (currentRes.error) throw currentRes.error;
+  if (prevRes.error) throw prevRes.error;
+
+  const current = currentRes.data ?? [];
+  const previous = prevRes.data ?? [];
+
+  const total = current.length;
+  const pos = current.filter((r: any) => r.sentiment_label === 'positive').length;
+  const neg = current.filter((r: any) => r.sentiment_label === 'negative').length;
+  const neu = total - pos - neg;
+
+  const prevTotal = previous.length;
+  const prevPos = previous.filter((r: any) => r.sentiment_label === 'positive').length;
+
+  const toPct = (n: number, t: number) => (t ? Math.round((n / t) * 1000) / 10 : 0);
+
+  // Top keywords by frequency in current period
+  const posKeywords: Record<string, number> = {};
+  const negKeywords: Record<string, number> = {};
+  for (const r of current) {
+    const text = (r.text_review ?? '').toLowerCase();
+    for (const word of POSITIVE_WORDS) if (text.includes(word)) posKeywords[word] = (posKeywords[word] ?? 0) + 1;
+    for (const word of NEGATIVE_WORDS) if (text.includes(word)) negKeywords[word] = (negKeywords[word] ?? 0) + 1;
+  }
+
+  const topN = (map: Record<string, number>, n = 5) =>
+    Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ keyword: k, count: v }));
+
+  const result = {
+    restaurant_id: restaurantId,
+    period_days: periodDays,
+    total_reviews: total,
+    positive_pct: toPct(pos, total),
+    neutral_pct: toPct(neu, total),
+    negative_pct: toPct(neg, total),
+    top_positive_keywords: topN(posKeywords),
+    top_negative_keywords: topN(negKeywords),
+    trend_positive_pct: toPct(pos, total) - toPct(prevPos, prevTotal),
+  };
+
+  try {
+    await redis.setex(key, 3600, JSON.stringify(result));
+  } catch (e) {
+    // ignore cache write errors
+  }
+
+  return result;
 }
