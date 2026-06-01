@@ -126,6 +126,20 @@ export async function handleUpdatePartnerStatus(
   }
 }
 
+// ── P3-2 ADDITION: Partner online/offline toggle endpoint ───────────────────
+export async function handleToggleOnlineStatus(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const result = await updatePartnerOnlineStatus(req.user!.id, req.body.is_online);
+    res.json(success(result, `Partner is now ${result.is_online ? 'online' : 'offline'}`));
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ── FIX 3: Partner history + stats ───────────────────────────────────────────
 
 export async function handleGetPartnerHistory(req: Request, res: Response, next: NextFunction) {

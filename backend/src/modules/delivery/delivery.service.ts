@@ -406,15 +406,12 @@ export async function updatePartnerOnlineStatus(partnerId: string, isOnline: boo
 
   // Going offline while carrying an active delivery is not allowed
   if (!isOnline && partner.active_delivery_id !== null) {
-    throw Object.assign(
-      new Error('Cannot go offline while you have an active delivery in progress'),
-      { status: 409 },
-    );
+    throw Object.assign(new Error('Cannot go offline with an active delivery. Complete or hand off the delivery first.'), { status: 400 });
   }
 
   const { error: updateErr } = await supabaseAdmin
     .from('delivery_partners')
-    .update({ is_online: isOnline })
+    .update({ is_online: isOnline, updated_at: new Date().toISOString() })
     .eq('id', partnerId);
 
   if (updateErr) throw updateErr;
@@ -423,6 +420,16 @@ export async function updatePartnerOnlineStatus(partnerId: string, isOnline: boo
 
   // Notify branch manager room
   if (branchId) {
+    // P3-2 ADDITION: notify managers when the partner becomes available.
+    if (isOnline) {
+      io.to(`branch:${branchId}:manager`).emit('partner_available', {
+        partner_id: partnerId,
+        is_online: true,
+        branch_id: branchId,
+      });
+    }
+
+    // Keep the broader status broadcast used by the existing P2-6 UI.
     io.to(`branch:${branchId}:manager`).emit('partner_status_changed', {
       partner_id: partnerId,
       is_online: isOnline,
@@ -431,6 +438,84 @@ export async function updatePartnerOnlineStatus(partnerId: string, isOnline: boo
   }
 
   return { partner_id: partnerId, is_online: isOnline };
+}
+
+// ─── P3-2 ADDITION: Partner Stats ───────────────────────────────────────────
+function getStartOfWeek() {
+  const date = new Date();
+  const day = date.getDay();
+  const diff = (day + 6) % 7;
+  date.setDate(date.getDate() - diff);
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+function getStartOfMonth() {
+  const date = new Date();
+  date.setDate(1);
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+export async function getPartnerStats(partnerId: string) {
+  const [lifetime, thisWeek, thisMonth, rating] = await Promise.all([
+    supabaseAdmin
+      .from('delivery_assignments')
+      .select('id, status, distance_km')
+      .eq('partner_id', partnerId)
+      .eq('status', 'delivered'),
+    supabaseAdmin
+      .from('delivery_assignments')
+      .select('id, status')
+      .eq('partner_id', partnerId)
+      .eq('status', 'delivered')
+      .gte('completed_at', getStartOfWeek()),
+    supabaseAdmin
+      .from('delivery_assignments')
+      .select('id, status')
+      .eq('partner_id', partnerId)
+      .eq('status', 'delivered')
+      .gte('completed_at', getStartOfMonth()),
+    supabaseAdmin
+      .from('reviews')
+      .select('delivery_rating')
+      .eq('delivery_partner_id', partnerId)
+      .not('delivery_rating', 'is', null),
+  ]);
+
+  if (lifetime.error) throw lifetime.error;
+  if (thisWeek.error) throw thisWeek.error;
+  if (thisMonth.error) throw thisMonth.error;
+  if (rating.error) throw rating.error;
+
+  const lifetimeData = lifetime.data ?? [];
+  const weekData = thisWeek.data ?? [];
+  const monthData = thisMonth.data ?? [];
+  const ratingData = rating.data ?? [];
+
+  const totalLifetimeDeliveries = lifetimeData.length;
+  const lifetimeEarnings = lifetimeData.reduce(
+    (sum: number, d: any) => sum + (30 + (Number(d.distance_km) || 0) * 5),
+    0,
+  );
+  const totalDistanceKm = lifetimeData.reduce(
+    (sum: number, d: any) => sum + (Number(d.distance_km) || 0),
+    0,
+  );
+  const weeklyDeliveries = weekData.length;
+  const monthlyDeliveries = monthData.length;
+  const avgRating = ratingData.length > 0
+    ? (ratingData.reduce((sum: number, r: any) => sum + Number(r.delivery_rating), 0) / ratingData.length).toFixed(1)
+    : null;
+
+  return {
+    total_lifetime_deliveries: totalLifetimeDeliveries,
+    lifetime_earnings: Math.round(lifetimeEarnings * 100) / 100,
+    total_distance_km: Math.round(totalDistanceKm * 100) / 100,
+    weekly_deliveries: weeklyDeliveries,
+    monthly_deliveries: monthlyDeliveries,
+    avg_rating: avgRating,
+  };
 }
 
 // ─── Update Partner Location ──────────────────────────────────────────────────

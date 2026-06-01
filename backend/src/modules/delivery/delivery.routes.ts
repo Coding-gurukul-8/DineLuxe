@@ -17,6 +17,7 @@ import {
   handleUpdatePartnerStatus,
   handleGetPartnerHistory,
   handleGetPartnerStats,
+  handleToggleOnlineStatus,
 } from './delivery.controller';
 
 const router: import('express').Router = Router();
@@ -95,6 +96,18 @@ router.get(
   '/partner/stats',
   requireRole('delivery_partner'),
   handleGetPartnerStats,
+);
+
+// P3-2 ADDITION: partner availability toggle endpoint (new frontend button path)
+router.patch(
+  '/partner/online',
+  requireRole('delivery_partner'),
+  validate({
+    body: z.object({
+      is_online: z.boolean(),
+    }),
+  }),
+  handleToggleOnlineStatus,
 );
 
 // PATCH /delivery/partner/status — FIX 2: partner online/offline toggle
