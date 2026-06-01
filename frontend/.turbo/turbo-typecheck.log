@@ -3,3 +3,52 @@
 > dineluxe-frontend@0.1.0 typecheck /Users/priyanshugupta/Desktop/Code/Web_Developoment/1._HTML_CSS/Projects/DineLuxe/frontend
 > tsc --noEmit
 
+[96mapp/admin/refunds/page.tsx[0m:[93m458[0m:[93m44[0m - [91merror[0m[90m TS2322: [0mType '{ children: (false | Element)[]; title: string; description: string; }' is not assignable to type 'IntrinsicAttributes & PageWrapperProps'.
+  Property 'description' does not exist on type 'IntrinsicAttributes & PageWrapperProps'.
+
+[7m458[0m     <PageWrapper title="Refund Management" description="Review and process customer refund requests">
+[7m   [0m [91m                                           ~~~~~~~~~~~[0m
+
+[96mapp/customer/scan/page.tsx[0m:[93m180[0m:[93m44[0m - [91merror[0m[90m TS2307: [0mCannot find module 'html5-qrcode' or its corresponding type declarations.
+
+[7m180[0m       const { Html5Qrcode } = await import("html5-qrcode");
+[7m   [0m [91m                                           ~~~~~~~~~~~~~~[0m
+
+[96mjest.setup.ts[0m:[93m18[0m:[93m30[0m - [91merror[0m[90m TS2503: [0mCannot find namespace 'JSX'.
+
+[7m18[0m   const create = (Tag: keyof JSX.IntrinsicElements) => {
+[7m  [0m [91m                             ~~~[0m
+
+[96mjest.setup.ts[0m:[93m28[0m:[93m53[0m - [91merror[0m[90m TS2503: [0mCannot find namespace 'JSX'.
+
+[7m28[0m         get: (_target, key) => create((key as keyof JSX.IntrinsicElements) ?? "div"),
+[7m  [0m [91m                                                    ~~~[0m
+
+[96mjest.setup.ts[0m:[93m36[0m:[93m64[0m - [91merror[0m[90m TS2686: [0m'React' refers to a UMD global, but the current file is a module. Consider adding an import instead.
+
+[7m36[0m   DndContext: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+[7m  [0m [91m                                                               ~~~~~[0m
+
+[96mjest.setup.ts[0m:[93m36[0m:[93m84[0m - [91merror[0m[90m TS2686: [0m'React' refers to a UMD global, but the current file is a module. Consider adding an import instead.
+
+[7m36[0m   DndContext: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+[7m  [0m [91m                                                                                   ~~~~~[0m
+
+[96mjest.setup.ts[0m:[93m37[0m:[93m65[0m - [91merror[0m[90m TS2686: [0m'React' refers to a UMD global, but the current file is a module. Consider adding an import instead.
+
+[7m37[0m   DragOverlay: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+[7m  [0m [91m                                                                ~~~~~[0m
+
+[96mjest.setup.ts[0m:[93m37[0m:[93m85[0m - [91merror[0m[90m TS2686: [0m'React' refers to a UMD global, but the current file is a module. Consider adding an import instead.
+
+[7m37[0m   DragOverlay: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+[7m  [0m [91m                                                                                    ~~~~~[0m
+
+
+Found 8 errors in 3 files.
+
+Errors  Files
+     1  app/admin/refunds/page.tsx[90m:458[0m
+     1  app/customer/scan/page.tsx[90m:180[0m
+     6  jest.setup.ts[90m:18[0m
+[41m[30m ELIFECYCLE [39m[49m [31mCommand failed with exit code 2.[39m

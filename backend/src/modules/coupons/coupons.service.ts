@@ -160,7 +160,7 @@ export async function listCoupons(restaurantId: string, page: number, limit: num
 
   const { data, error, count } = await supabaseAdmin
     .from('coupons')
-    .select('id, code, discount_type, discount_value, min_order_amount, max_uses, used_count, expires_at, is_active, created_at', {
+    .select('id, restaurant_id, code, discount_type, discount_value, min_order_amount, max_uses, used_count, expires_at, is_active, created_at', {
       count: 'exact',
     })
     .eq('restaurant_id', restaurantId)
