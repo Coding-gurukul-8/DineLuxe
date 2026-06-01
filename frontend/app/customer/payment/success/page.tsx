@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, Clock, ChevronRight, Star } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
-import { formatCurrency, cn } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { PostOrderRating } from "@/components/customer/PostOrderRating";
 
 // ── Confetti ──────────────────────────────────────────────────────────────────
 function Confetti() {
@@ -100,6 +101,7 @@ function EstimatedCountdown({ minutes }: { minutes: number }) {
 export default function PaymentSuccessPage() {
   const router = useRouter();
   const [showConfetti, setShowConfetti] = useState(true);
+  const [showRatingSheet, setShowRatingSheet] = useState(false);
 
   // Fetch the most recent active order
   const { data: orders = [] } = useQuery({
@@ -108,10 +110,33 @@ export default function PaymentSuccessPage() {
   });
   const order = orders[0];
 
+  const orderId = order?.id as string | undefined;
+  const restaurantId = order?.restaurant_id as string | undefined;
+
+  const orderItems = useMemo(() => {
+    const items = (order?.order_items ?? []) as any[];
+    return items.map((item) => ({
+      menu_item_id:
+        item.menu_item_id ??
+        item.menu_item?.id ??
+        item.menu_item?.menu_item_id ??
+        item.id,
+      name: item.menu_item?.name ?? item.name ?? "Item",
+      photo_url: item.menu_item?.photo_url ?? item.photo_url ?? undefined,
+      quantity: Number(item.quantity ?? 1),
+    }));
+  }, [order]);
+
   useEffect(() => {
     const id = setTimeout(() => setShowConfetti(false), 3500);
     return () => clearTimeout(id);
   }, []);
+
+  useEffect(() => {
+    if (!orderId || !restaurantId) return;
+    const id = setTimeout(() => setShowRatingSheet(true), 1500);
+    return () => clearTimeout(id);
+  }, [orderId, restaurantId]);
 
   return (
     <div className="min-h-screen bg-[#FAF7F4] flex flex-col pb-10">
@@ -221,6 +246,23 @@ export default function PaymentSuccessPage() {
           <p className="text-xs text-gray-400">Enjoying DineLuxe? Leave a review after your meal</p>
         </div>
       </motion.div>
+
+      {/* Rating sheet */}
+      {showRatingSheet && orderId && restaurantId && orderItems.length > 0 && (
+        <PostOrderRating
+          orderId={orderId}
+          restaurantId={restaurantId}
+          orderItems={orderItems}
+          onSkip={() => {
+            setShowRatingSheet(false);
+            router.push("/customer/home");
+          }}
+          onSubmit={() => {
+            setShowRatingSheet(false);
+            router.push("/customer/home");
+          }}
+        />
+      )}
     </div>
   );
 }
