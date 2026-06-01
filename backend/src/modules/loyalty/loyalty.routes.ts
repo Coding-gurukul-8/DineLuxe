@@ -1,11 +1,14 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.middleware';
+import { injectTenant } from '../../middleware/tenant.middleware';
+import { requireRole } from '../../middleware/rbac.middleware';
+import { validate } from '../../middleware/validate.middleware';
 import {
   getBalance,
   earnPoints,
   redeemPoints,
   getHistory,
-  // ── New owner-facing handlers (add these to loyalty.controller.ts) ──
   getStats,
   updateSettings,
   getLeaderboard,
@@ -35,25 +38,52 @@ router.get('/history', getHistory);
 
 // ── Owner / admin endpoints (NEW) ──────────────────────────────────────────────
 
-// GET /loyalty/stats?restaurant_id={id}
-// Returns aggregate overview: total members, points issued, redeemed, active this month.
-// Role guard: owner or super_admin only.
-router.get('/stats', getStats);
+// P3-2 ADDITION: Stats overview (for owner dashboard)
+router.get(
+  '/stats',
+  injectTenant,
+  requireRole('owner', 'manager'),
+  getStats,
+);
 
-// PATCH /loyalty/settings
-// Body: { restaurant_id, rupees_per_point, rupees_per_redemption, min_redeem_points }
-// Role guard: owner or super_admin only.
-router.patch('/settings', updateSettings);
+// P3-2 ADDITION: Leaderboard (top members)
+router.get(
+  '/leaderboard',
+  injectTenant,
+  requireRole('owner', 'manager'),
+  getLeaderboard,
+);
 
-// GET /loyalty/leaderboard?restaurant_id={id}&limit={n}
-// Returns top N customers sorted by points_balance desc.
-// Role guard: owner or super_admin only.
-router.get('/leaderboard', getLeaderboard);
+// P3-2 ADDITION: Update loyalty program settings
+router.patch(
+  '/settings',
+  injectTenant,
+  requireRole('owner'),
+  validate({
+    body: z.object({
+      points_per_rupee: z.number().positive().optional(),
+      rupees_per_point: z.number().positive().optional(),
+      min_redeem_points: z.number().int().positive().optional(),
+    }).refine((data) => Object.values(data).some((value) => value !== undefined), {
+      message: 'At least one setting is required',
+    }),
+  }),
+  updateSettings,
+);
 
-// POST /loyalty/admin/adjust
-// Body: { restaurant_id, phone, points, reason }
-// Awards (or deducts) points for a customer looked up by phone.
-// Role guard: owner or super_admin only.
-router.post('/admin/adjust', adminAdjust);
+// P3-2 ADDITION: Admin manual points adjustment
+router.post(
+  '/admin/adjust',
+  injectTenant,
+  requireRole('owner', 'manager'),
+  validate({
+    body: z.object({
+      phone: z.string().min(10).max(15),
+      points: z.number().int().refine((n) => n !== 0, 'Points cannot be zero'),
+      reason: z.string().min(3).max(200),
+    }),
+  }),
+  adminAdjust,
+);
 
 export default router;

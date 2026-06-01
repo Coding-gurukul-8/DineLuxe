@@ -105,7 +105,7 @@ export async function getStats(req: Request, res: Response, next: NextFunction) 
   try {
     if (!requireOwner(req, res)) return;
 
-    const restaurant_id = req.query.restaurant_id as string;
+    const restaurant_id = (req.query.restaurant_id as string) || req.restaurantId || '';
     if (!restaurant_id) {
       return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id query param is required'));
     }
@@ -123,25 +123,20 @@ export async function updateSettings(req: Request, res: Response, next: NextFunc
   try {
     if (!requireOwner(req, res)) return;
 
-    const { restaurant_id, rupees_per_point, rupees_per_redemption, min_redeem_points } = req.body;
+    const restaurant_id = req.restaurantId || (req.body.restaurant_id as string) || '';
+    const { points_per_rupee, rupees_per_point, min_redeem_points } = req.body;
 
     if (!restaurant_id) {
-      return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id is required'));
+      return res.status(400).json(error('VALIDATION_ERROR', 'restaurant context is required'));
     }
-    if (typeof rupees_per_point !== 'number') {
-      return res.status(400).json(error('VALIDATION_ERROR', 'rupees_per_point must be a number'));
-    }
-    if (typeof rupees_per_redemption !== 'number') {
-      return res.status(400).json(error('VALIDATION_ERROR', 'rupees_per_redemption must be a number'));
-    }
-    if (typeof min_redeem_points !== 'number') {
-      return res.status(400).json(error('VALIDATION_ERROR', 'min_redeem_points must be a number'));
+    if ([points_per_rupee, rupees_per_point, min_redeem_points].every((v) => v === undefined)) {
+      return res.status(400).json(error('VALIDATION_ERROR', 'At least one loyalty setting must be provided'));
     }
 
     const data = await loyaltyService.updateLoyaltySettings(
       restaurant_id,
+      points_per_rupee,
       rupees_per_point,
-      rupees_per_redemption,
       min_redeem_points,
     );
     res.json(success(data));
@@ -157,7 +152,7 @@ export async function getLeaderboard(req: Request, res: Response, next: NextFunc
   try {
     if (!requireOwner(req, res)) return;
 
-    const restaurant_id = req.query.restaurant_id as string;
+    const restaurant_id = (req.query.restaurant_id as string) || req.restaurantId || '';
     if (!restaurant_id) {
       return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id query param is required'));
     }
@@ -176,10 +171,11 @@ export async function adminAdjust(req: Request, res: Response, next: NextFunctio
   try {
     if (!requireOwner(req, res)) return;
 
-    const { restaurant_id, phone, points, reason } = req.body;
+    const restaurant_id = req.restaurantId || (req.body.restaurant_id as string) || '';
+    const { phone, points, reason } = req.body;
 
     if (!restaurant_id) {
-      return res.status(400).json(error('VALIDATION_ERROR', 'restaurant_id is required'));
+      return res.status(400).json(error('VALIDATION_ERROR', 'restaurant context is required'));
     }
     if (!phone || typeof phone !== 'string') {
       return res.status(400).json(error('VALIDATION_ERROR', 'phone is required'));

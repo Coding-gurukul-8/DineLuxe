@@ -1,8 +1,33 @@
 import { supabaseAdmin } from '../../config/supabase';
+import { redis } from '../../config/redis';
 
 const POINTS_PER_RUPEE = Number(process.env.LOYALTY_POINTS_PER_RUPEE ?? 0.1); // e.g. 1 pt per ₹10
 const MIN_REDEEM_POINTS = Number(process.env.LOYALTY_MIN_REDEEM_POINTS ?? 50);
 const RUPEES_PER_POINT = Number(process.env.LOYALTY_RUPEES_PER_POINT ?? 0.1);
+
+function getTier(points: number): 'bronze' | 'silver' | 'gold' | 'platinum' {
+  if (points >= 5000) return 'platinum';
+  if (points >= 2000) return 'gold';
+  if (points >= 500) return 'silver';
+  return 'bronze';
+}
+
+function formatMaskedName(fullName?: string | null): string {
+  const cleaned = (fullName ?? '').trim();
+  if (!cleaned) return 'Member';
+
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  const firstName = parts[0] ?? 'Member';
+  const lastName = parts.length > 1 ? parts[parts.length - 1] : '';
+  return lastName ? `${firstName} ${lastName[0].toUpperCase()}.` : firstName;
+}
+
+function getStartOfMonth(): string {
+  const start = new Date();
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  return start.toISOString();
+}
 
 // ─── Internal helper: get or create loyalty account ───────────────────────────
 
@@ -376,65 +401,70 @@ export async function redeemPoints(
 // Counts distinct members, total points issued, redeemed, and active this month.
 
 export async function getLoyaltyStats(restaurantId: string): Promise<{
-  total_members: number;
+  total_enrolled: number;
+  active_this_month: number;
   total_points_issued: number;
   total_points_redeemed: number;
-  active_this_month: number;
+  outstanding_liability_rupees: number;
 }> {
   const { data: accounts, error: accErr } = await supabaseAdmin
     .from('loyalty_accounts')
-    .select('id, user_id, total_earned')
+    .select('id')
     .eq('restaurant_id', restaurantId);
 
   if (accErr) throw accErr;
 
-  const accountList = accounts ?? [];
-  const total_members = new Set(accountList.map((a) => a.user_id)).size;
-  const total_points_issued = accountList.reduce((s, a) => s + (a.total_earned ?? 0), 0);
+  const accountIds = (accounts ?? []).map((a) => a.id);
+  if (!accountIds.length) {
+    return {
+      total_enrolled: 0,
+      active_this_month: 0,
+      total_points_issued: 0,
+      total_points_redeemed: 0,
+      outstanding_liability_rupees: 0,
+    };
+  }
 
-  const accountIds = accountList.map((a) => a.id);
+  const startOfMonth = getStartOfMonth();
 
-  let total_points_redeemed = 0;
-  if (accountIds.length > 0) {
-    const { data: redemptions, error: redErr } = await supabaseAdmin
+  const [totalMembers, activeThisMonth, totalIssued, totalRedeemed] = await Promise.all([
+    supabaseAdmin
+      .from('loyalty_accounts')
+      .select('id', { count: 'exact', head: true })
+      .eq('restaurant_id', restaurantId),
+    supabaseAdmin
+      .from('loyalty_transactions')
+      .select('loyalty_account_id', { count: 'exact', head: true })
+      .in('loyalty_account_id', accountIds)
+      .gte('created_at', startOfMonth),
+    supabaseAdmin
       .from('loyalty_transactions')
       .select('points_change')
       .in('loyalty_account_id', accountIds)
-      .eq('reason', 'redeemed');
-
-    if (redErr) throw redErr;
-    total_points_redeemed = (redemptions ?? []).reduce(
-      (s, t) => s + Math.abs(t.points_change),
-      0,
-    );
-  }
-
-  let active_this_month = 0;
-  if (accountIds.length > 0) {
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    const { data: activeTxns, error: activeErr } = await supabaseAdmin
+      .gt('points_change', 0),
+    supabaseAdmin
       .from('loyalty_transactions')
-      .select('loyalty_account_id')
+      .select('points_change')
       .in('loyalty_account_id', accountIds)
-      .gte('created_at', startOfMonth.toISOString());
+      .lt('points_change', 0),
+  ]);
 
-    if (activeErr) throw activeErr;
+  if (totalMembers.error) throw totalMembers.error;
+  if (activeThisMonth.error) throw activeThisMonth.error;
+  if (totalIssued.error) throw totalIssued.error;
+  if (totalRedeemed.error) throw totalRedeemed.error;
 
-    const activeAccountIds = new Set(
-      (activeTxns ?? []).map((t) => t.loyalty_account_id),
-    );
-    const activeUserIds = new Set(
-      accountList
-        .filter((a) => activeAccountIds.has(a.id))
-        .map((a) => a.user_id),
-    );
-    active_this_month = activeUserIds.size;
-  }
+  const issuedPoints = (totalIssued.data ?? []).reduce((sum, row: any) => sum + Number(row.points_change || 0), 0);
+  const redeemedPoints = (totalRedeemed.data ?? []).reduce((sum, row: any) => sum + Math.abs(Number(row.points_change || 0)), 0);
+  const outstandingPoints = Math.max(0, issuedPoints - redeemedPoints);
 
-  return { total_members, total_points_issued, total_points_redeemed, active_this_month };
+  return {
+    total_enrolled: totalMembers.count ?? 0,
+    active_this_month: activeThisMonth.count ?? 0,
+    total_points_issued: issuedPoints,
+    total_points_redeemed: redeemedPoints,
+    outstanding_liability_rupees: Math.round(outstandingPoints * RUPEES_PER_POINT * 100) / 100,
+  };
 }
 
 // ─── updateLoyaltySettings ────────────────────────────────────────────────────
@@ -451,41 +481,41 @@ export async function getLoyaltyStats(restaurantId: string): Promise<{
 
 export async function updateLoyaltySettings(
   restaurantId: string,
-  rupees_per_point: number,
-  rupees_per_redemption: number,
-  min_redeem_points: number,
+  points_per_rupee?: number,
+  rupees_per_point?: number,
+  min_redeem_points?: number,
 ): Promise<{
   restaurant_id: string;
+  points_per_rupee: number;
   rupees_per_point: number;
-  rupees_per_redemption: number;
   min_redeem_points: number;
 }> {
-  if (rupees_per_point < 1 || rupees_per_point > 100) {
-    throw Object.assign(new Error('rupees_per_point must be between 1 and 100'), { statusCode: 422 });
-  }
-  if (rupees_per_redemption <= 0) {
-    throw Object.assign(new Error('rupees_per_redemption must be > 0'), { statusCode: 422 });
-  }
-  if (!Number.isInteger(min_redeem_points) || min_redeem_points < 1) {
-    throw Object.assign(new Error('min_redeem_points must be a positive integer'), { statusCode: 422 });
-  }
+  const key = `loyalty_settings:${restaurantId}`;
+  const existingRaw = await redis.get(key);
+  const existing = existingRaw ? JSON.parse(existingRaw) : {};
 
-  const payload = {
+  const merged = {
     restaurant_id: restaurantId,
-    rupees_per_point,
-    rupees_per_redemption,
-    min_redeem_points,
+    points_per_rupee: points_per_rupee ?? existing.points_per_rupee ?? POINTS_PER_RUPEE,
+    rupees_per_point: rupees_per_point ?? existing.rupees_per_point ?? RUPEES_PER_POINT,
+    min_redeem_points: min_redeem_points ?? existing.min_redeem_points ?? MIN_REDEEM_POINTS,
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabaseAdmin
-    .from('loyalty_settings')
-    .upsert(payload, { onConflict: 'restaurant_id' })
-    .select()
-    .single();
+  if (merged.points_per_rupee <= 0) {
+    throw Object.assign(new Error('points_per_rupee must be greater than 0'), { statusCode: 422 });
+  }
+  if (merged.rupees_per_point <= 0) {
+    throw Object.assign(new Error('rupees_per_point must be greater than 0'), { statusCode: 422 });
+  }
+  if (!Number.isInteger(merged.min_redeem_points) || merged.min_redeem_points < 1) {
+    throw Object.assign(new Error('min_redeem_points must be a positive integer'), { statusCode: 422 });
+  }
 
-  if (error) throw error;
-  return data;
+  // TODO: Create loyalty_settings table for persistent storage.
+  await redis.set(key, JSON.stringify(merged));
+
+  return merged;
 }
 
 // ─── getLoyaltyLeaderboard ────────────────────────────────────────────────────
@@ -497,10 +527,11 @@ export async function getLoyaltyLeaderboard(
   limit: number = 10,
 ): Promise<Array<{
   user_id: string;
-  first_name: string;
+  name: string;
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum';
   points_balance: number;
   total_earned: number;
-  last_visit: string | null;
+  last_activity: string | null;
 }>> {
   const safeLimit = Math.min(50, Math.max(1, Number(limit) || 10));
 
@@ -519,12 +550,12 @@ export async function getLoyaltyLeaderboard(
 
   const { data: users, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, first_name')
+    .select('id, name')
     .in('id', userIds);
 
   if (userErr) throw userErr;
 
-  const userMap = Object.fromEntries((users ?? []).map((u) => [u.id, u.first_name]));
+  const userMap = Object.fromEntries((users ?? []).map((u) => [u.id, formatMaskedName(u.name)]));
 
   const { data: txns, error: txnErr } = await supabaseAdmin
     .from('loyalty_transactions')
@@ -542,12 +573,17 @@ export async function getLoyaltyLeaderboard(
   }
 
   return accounts.map((acc) => ({
-    user_id:       acc.user_id,
-    first_name:    userMap[acc.user_id] ?? 'Member',
+    user_id: acc.user_id,
+    name: userMap[acc.user_id] ?? 'Member',
+    tier: getTier(acc.points_balance ?? 0),
     points_balance: acc.points_balance,
-    total_earned:  acc.total_earned,
-    last_visit:    lastVisitMap[acc.id] ?? null,
+    total_earned: acc.total_earned,
+    last_activity: lastVisitMap[acc.id] ?? null,
   }));
+}
+
+export async function getLeaderboard(restaurantId: string, limit: number = 10) {
+  return getLoyaltyLeaderboard(restaurantId, limit);
 }
 
 // ─── adminAdjustPoints ────────────────────────────────────────────────────────
@@ -562,9 +598,8 @@ export async function adminAdjustPoints(
   reason: string,
 ): Promise<{
   user_id: string;
-  first_name: string;
   new_balance: number;
-  points_change: number;
+  transaction_id: string | null;
 }> {
   if (!phone?.trim()) {
     throw Object.assign(new Error('phone is required'), { statusCode: 400 });
@@ -578,8 +613,9 @@ export async function adminAdjustPoints(
 
   const { data: user, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, first_name')
+    .select('id, name, role')
     .eq('phone', phone.trim())
+    .eq('role', 'customer')
     .maybeSingle();
 
   if (userErr) throw userErr;
@@ -606,10 +642,19 @@ export async function adminAdjustPoints(
     points_change: points,
     reason: 'admin_adjustment',
     reference_id: null,
-    notes: reason.trim(),
   });
 
   if (txErr) throw txErr;
+
+  const { data: transaction } = await supabaseAdmin
+    .from('loyalty_transactions')
+    .select('id')
+    .eq('loyalty_account_id', account.id)
+    .eq('points_change', points)
+    .eq('reason', 'admin_adjustment')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   const newBalance = account.points_balance + points;
   const newTotalEarned =
@@ -623,9 +668,8 @@ export async function adminAdjustPoints(
   if (updateErr) throw updateErr;
 
   return {
-    user_id:      user.id,
-    first_name:   user.first_name,
-    new_balance:  newBalance,
-    points_change: points,
+    user_id: user.id,
+    new_balance: newBalance,
+    transaction_id: transaction?.id ?? null,
   };
 }
