@@ -405,6 +405,22 @@ export async function markAllRead(userId: string) {
   if (error) throw error;
 }
 
+// ─── Delete a single notification ────────────────────────────────────────────
+
+/**
+ * Hard-deletes a single notification row, scoped to the requesting user so
+ * one user can never delete another user's notifications.
+ */
+export async function deleteNotification(id: string, userId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('notifications')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+}
+
 // ─── Device token management (legacy FCM stub — kept for compatibility) ───────
 
 export async function registerDevice(

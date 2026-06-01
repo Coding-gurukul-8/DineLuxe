@@ -46,6 +46,19 @@ export async function markAllRead(
   }
 }
 
+export async function deleteNotification(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    await notificationsService.deleteNotification(req.params.id, req.user!.id);
+    res.json(success({ message: 'Notification deleted' }));
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ─── Legacy FCM device token ──────────────────────────────────────────────────
 
 export async function registerDevice(

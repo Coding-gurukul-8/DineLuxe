@@ -2,19 +2,21 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Home, ShoppingCart, Calendar, User, QrCode, LogOut, Sun, Moon } from "lucide-react";
+import { Home, ShoppingCart, Calendar, User, QrCode, LogOut, Sun, Moon, Bell } from "lucide-react";
 import { useCart } from "@/hooks/useCart";
 import { useAuth } from "@/hooks/useAuth";
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 
 // ── Nav items (customer) ──────────────────────────────────────────────────────
 const NAV_ITEMS = [
-  { label: "Home",    href: "/customer/home",       icon: Home },
-  { label: "Booking", href: "/customer/booking",    icon: Calendar },
-  { label: "Scan",    href: "/customer/scan",        icon: QrCode, center: true },
-  { label: "Cart",    href: "/customer/order/cart",  icon: ShoppingCart },
-  { label: "Profile", href: "/customer/profile",    icon: User },
+  { label: "Home",    href: "/customer/home",              icon: Home },
+  { label: "Booking", href: "/customer/booking",           icon: Calendar },
+  { label: "Scan",    href: "/customer/scan",              icon: QrCode, center: true },
+  { label: "Alerts",  href: "/customer/notifications",     icon: Bell, notifications: true },
+  { label: "Profile", href: "/customer/profile",           icon: User },
 ];
 
 // ── Dark mode hook ────────────────────────────────────────────────────────────
@@ -46,7 +48,7 @@ function useDarkMode() {
   return { dark, toggle, mounted };
 }
 
-// ── Cart badge ────────────────────────────────────────────────────────────────
+// ── Cart badge ─────────────────────────────────────────────────────────────────
 function CartBadge({ count }: { count: number }) {
   return (
     <AnimatePresence>
@@ -78,12 +80,45 @@ function CartBadge({ count }: { count: number }) {
   );
 }
 
+// ── Notification badge ─────────────────────────────────────────────────────────
+function NotifBadge({ count }: { count: number }) {
+  return (
+    <AnimatePresence>
+      {count > 0 && (
+        <motion.div
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 500, damping: 22 }}
+          className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-[#C0392B] rounded-full flex items-center justify-center px-1"
+        >
+          <span className="text-white text-[10px] font-bold leading-none tabular-nums">
+            {count > 9 ? "9+" : count}
+          </span>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// ── Unread count hook ──────────────────────────────────────────────────────────
+function useUnreadCount() {
+  const { data } = useQuery<{ data: { count: number } }>({
+    queryKey: ["notifications", "unread-count"],
+    queryFn: () => apiClient.get("/notifications?unread=true&count=true"),
+    refetchInterval: 60_000, // poll every minute as fallback
+    staleTime: 30_000,
+  });
+  return data?.data?.count ?? 0;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export function BottomNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { signOut } = useAuth();
   const cartCount = useCart((s) => s.itemCount)();
+  const unreadCount = useUnreadCount();
   const { dark, toggle: toggleDark, mounted: darkMounted } = useDarkMode();
   const [showMenu, setShowMenu] = useState(false);
 
@@ -165,6 +200,7 @@ export function BottomNav() {
             const isActiveItem = i === activeIdx;
             const isCart = item.href.includes("cart");
             const isProfile = item.href.includes("profile");
+            const isNotifications = !!(item as any).notifications;
 
             if (item.center) {
               return (
@@ -181,7 +217,7 @@ export function BottomNav() {
               );
             }
 
-            // Profile button opens overlay menu instead of navigating directly
+            // Profile button opens overlay menu
             if (isProfile) {
               return (
                 <motion.button
@@ -241,6 +277,7 @@ export function BottomNav() {
                     strokeWidth={isActiveItem ? 2.2 : 1.8}
                   />
                   {isCart && <CartBadge count={cartCount} />}
+                  {isNotifications && <NotifBadge count={unreadCount} />}
                 </motion.div>
                 <span className={cn(
                   "text-[10px] font-semibold transition-colors leading-none",

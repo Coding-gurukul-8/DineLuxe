@@ -14,6 +14,7 @@ import {
   getNotifications,
   markRead,
   markAllRead,
+  deleteNotification,
   registerDevice,
   removeDevice,
   getVapidKey,
@@ -90,5 +91,8 @@ router.patch('/read-all', markAllRead);
 
 // PATCH /notifications/:id/read
 router.patch('/:id/read', markRead);
+
+// DELETE /notifications/:id
+router.delete('/:id', deleteNotification);
 
 export default router;
