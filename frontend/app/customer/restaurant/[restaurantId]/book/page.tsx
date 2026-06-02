@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -10,12 +10,16 @@ import { toast } from "sonner";
 import {
   ArrowLeft, Calendar, Clock, Users, CheckCircle2,
   ChevronRight, ChevronLeft, FileText, MapPin, Loader2,
+  // INTEGRATION ADDITION: Icons for new features
+  Heart, UtensilsCrossed, PartyPopper,
 } from "lucide-react";
 import Link from "next/link";
 import { apiClient } from "@/lib/api-client";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+// INTEGRATION ADDITION: SocialDining component (from P1 Prompt 15)
+import { SocialDining } from "@/components/customer/SocialDining";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Branch {
@@ -28,6 +32,14 @@ interface Restaurant {
 interface Booking {
   id: string; branch_id: string; booking_date: string;
   booking_time: string; people_count: number; status: string; notes?: string;
+}
+
+// INTEGRATION ADDITION: Table preference type returned by
+// GET /api/v1/customer-preferences/tables/:branchId
+interface TablePreference {
+  table_id: string;
+  table_label: string;   // e.g. "Table 7 (Window)"
+  preference_count: number;
 }
 
 interface Props {
@@ -43,7 +55,8 @@ function toISO(date: Date) {
 }
 
 // ── Step bar (same as global booking page) ────────────────────────────────────
-const STEPS = ["Date & Time", "Guests", "Confirm"] as const;
+// INTEGRATION ADDITION: Added step 3 "Dining Group" after the confirmation step
+const STEPS = ["Date & Time", "Guests", "Confirm", "Group"] as const;
 
 function StepBar({ current }: { current: number }) {
   return (
@@ -99,6 +112,13 @@ export default function RestaurantBookPage({ params }: Props) {
   const [peopleCount, setPeopleCount] = useState(2);
   const [notes, setNotes] = useState("");
 
+  // INTEGRATION ADDITION: Confirmed booking ID stored after successful creation
+  // so the social dining step can reference it.
+  const [confirmedBookingId, setConfirmedBookingId] = useState<string | null>(null);
+
+  // INTEGRATION ADDITION: Whether user dismissed the social dining step
+  const [skippedSocialDining, setSkippedSocialDining] = useState(false);
+
   // Date bounds
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -115,6 +135,30 @@ export default function RestaurantBookPage({ params }: Props) {
   const branch =
     restaurant?.branches?.find((b) => b.is_active) ?? restaurant?.branches?.[0];
 
+  // INTEGRATION ADDITION: Fetch the customer's preferred table for this branch.
+  // Uses GET /api/v1/customer-preferences/tables/:branchId — only runs once
+  // branch is known and returns silently (retry: false) to avoid blocking the page.
+  const { data: tablePreference, isLoading: loadingTablePref } = useQuery<TablePreference>({
+    queryKey: ["table-preference", branch?.id],
+    queryFn: () =>
+      apiClient.get<TablePreference>(
+        `/customer-preferences/tables/${branch!.id}`
+      ),
+    enabled: !!branch?.id,
+    retry: false,
+    // staleTime: 5 minutes — preferences don't change that often
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // INTEGRATION ADDITION: Pre-populate notes field with preferred table info
+  // when the preference loads and notes haven't been manually edited yet.
+  useEffect(() => {
+    if (tablePreference?.table_label && notes === "") {
+      setNotes(`Preferred table: ${tablePreference.table_label}`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tablePreference]);
+
   // ── Submit booking ─────────────────────────────────────────────────────────
   const { mutate: createBooking, isPending: isSubmitting } = useMutation({
     mutationFn: () => {
@@ -125,11 +169,16 @@ export default function RestaurantBookPage({ params }: Props) {
         booking_date: toISO(selectedDate),
         booking_time: `${selectedHour}:${selectedMinute}`,
         notes: notes.trim() || undefined,
+        // INTEGRATION ADDITION: include preferred table in payload if available
+        ...(tablePreference ? { preferred_table_id: tablePreference.table_id } : {}),
       });
     },
     onSuccess: (booking) => {
-      toast.success("Booking confirmed!");
-      router.push(`/customer/booking/${booking.id}`);
+      toast.success("Booking confirmed! 🎉");
+      // INTEGRATION ADDITION: Store booking ID and advance to social dining step
+      // instead of immediately navigating away.
+      setConfirmedBookingId(booking.id);
+      setStep(3); // step 3 = Social Dining
     },
     onError: (err: Error) => toast.error(err.message || "Booking failed"),
   });
@@ -140,10 +189,15 @@ export default function RestaurantBookPage({ params }: Props) {
     (step === 1 && peopleCount >= 1) ||
     step === 2;
 
-  const goNext = () => setStep((s) => Math.min(s + 1, 2));
+  const goNext = () => setStep((s) => Math.min(s + 1, 3));
   const goBack = () => {
     if (step === 0) router.back();
-    else setStep((s) => s - 1);
+    // INTEGRATION ADDITION: From social dining step, go to booking detail
+    else if (step === 3 && confirmedBookingId) {
+      router.push(`/customer/booking/${confirmedBookingId}`);
+    } else {
+      setStep((s) => s - 1);
+    }
   };
 
   const slideVariants = {
@@ -200,6 +254,23 @@ export default function RestaurantBookPage({ params }: Props) {
               </div>
               <CheckCircle2 size={14} className="text-brand-primary shrink-0 ml-auto" />
             </div>
+          )}
+
+          {/* INTEGRATION ADDITION: "Your usual table" chip shown on step 1 when preference exists */}
+          {step === 1 && tablePreference && !loadingTablePref && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 mb-4"
+            >
+              <Heart size={13} className="text-rose-500 fill-rose-500 shrink-0" />
+              <p className="text-xs font-semibold text-rose-600">
+                Your usual table ❤️
+              </p>
+              <span className="ml-auto text-[10px] text-rose-400 font-medium truncate max-w-[140px]">
+                {tablePreference.table_label}
+              </span>
+            </motion.div>
           )}
 
           <StepBar current={step} />
@@ -335,6 +406,13 @@ export default function RestaurantBookPage({ params }: Props) {
                     rows={3}
                     className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
                   />
+                  {/* INTEGRATION ADDITION: Show inline note about pre-selected table */}
+                  {tablePreference && (
+                    <p className="mt-1.5 text-[10px] text-rose-500 flex items-center gap-1">
+                      <Heart size={9} className="fill-rose-500" />
+                      Your usual table ({tablePreference.table_label}) has been included above.
+                    </p>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -388,6 +466,16 @@ export default function RestaurantBookPage({ params }: Props) {
                           },
                         ]
                       : []),
+                    // INTEGRATION ADDITION: Show preferred table row if available
+                    ...(tablePreference
+                      ? [
+                          {
+                            icon: <Heart size={16} className="text-rose-500 fill-rose-500" />,
+                            label: "Preferred Table",
+                            value: `${tablePreference.table_label} ❤️`,
+                          },
+                        ]
+                      : []),
                   ].map(({ icon, label, value }) => (
                     <div key={label} className="flex gap-3 p-3 bg-gray-50 rounded-xl">
                       <div className="shrink-0 mt-0.5">{icon}</div>
@@ -405,56 +493,133 @@ export default function RestaurantBookPage({ params }: Props) {
                 </p>
               </motion.div>
             )}
+
+            {/* INTEGRATION ADDITION ──────────────────────────────────────────
+                Step 3: Social Dining — shown after booking is confirmed.
+                Renders the SocialDining component with the confirmed booking ID.
+                User can create a group or skip to their booking detail page.
+            ─────────────────────────────────────────────────────────────────── */}
+            {step === 3 && confirmedBookingId && (
+              <motion.div
+                key="step-3"
+                variants={slideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: 0.2 }}
+              >
+                {/* Success banner */}
+                <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 mb-5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                    <CheckCircle2 size={18} className="text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-emerald-800">Booking Confirmed! 🎉</p>
+                    <p className="text-xs text-emerald-600">
+                      Ref: {confirmedBookingId.slice(0, 8).toUpperCase()}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Social dining CTA copy */}
+                <div className="flex items-center gap-2 mb-4">
+                  <PartyPopper size={16} className="text-[#E8A020]" />
+                  <h2 className="text-base font-bold text-gray-900">
+                    Want to pre-order with friends?
+                  </h2>
+                </div>
+                <p className="text-sm text-gray-500 mb-5 leading-relaxed">
+                  Create a group for your table → invite friends, pre-order together,
+                  and have food ready the moment you arrive.
+                </p>
+
+                {/* INTEGRATION ADDITION: SocialDining component */}
+                <SocialDining
+                  bookingId={confirmedBookingId}
+                  isOrganizer={true}
+                />
+
+                {/* Skip link */}
+                {!skippedSocialDining && (
+                  <button
+                    onClick={() => {
+                      setSkippedSocialDining(true);
+                      router.push(`/customer/booking/${confirmedBookingId}`);
+                    }}
+                    className="w-full mt-4 text-xs text-gray-400 hover:text-gray-600 transition-colors py-2 text-center"
+                  >
+                    Skip for now — go to my booking →
+                  </button>
+                )}
+              </motion.div>
+            )}
           </AnimatePresence>
 
-          {/* Navigation */}
-          <div className="flex gap-3 mt-6">
-            <Button
-              variant="outline"
-              onClick={goBack}
-              className="flex-1 rounded-xl h-12"
-              disabled={isSubmitting}
-            >
-              <ChevronLeft size={16} className="mr-1" /> Back
-            </Button>
+          {/* Navigation — hidden on step 3 (social dining handles its own CTAs) */}
+          {step < 3 && (
+            <div className="flex gap-3 mt-6">
+              <Button
+                variant="outline"
+                onClick={goBack}
+                className="flex-1 rounded-xl h-12"
+                disabled={isSubmitting}
+              >
+                <ChevronLeft size={16} className="mr-1" /> Back
+              </Button>
 
-            {step < 2 ? (
+              {step < 2 ? (
+                <Button
+                  onClick={goNext}
+                  disabled={!canNext}
+                  className="flex-1 h-12 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90"
+                >
+                  Continue <ChevronRight size={16} className="ml-1" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => createBooking()}
+                  disabled={isSubmitting || !branch}
+                  className="flex-1 h-12 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90"
+                >
+                  {isSubmitting ? (
+                    <><Loader2 size={16} className="mr-2 animate-spin" /> Booking…</>
+                  ) : (
+                    <><CheckCircle2 size={16} className="mr-2" /> Confirm Booking</>
+                  )}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* INTEGRATION ADDITION: On step 3, show a "View My Booking" full-width button */}
+          {step === 3 && confirmedBookingId && (
+            <div className="mt-6">
               <Button
-                onClick={goNext}
-                disabled={!canNext}
-                className="flex-1 h-12 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90"
+                onClick={() => router.push(`/customer/booking/${confirmedBookingId}`)}
+                className="w-full h-12 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90"
               >
-                Continue <ChevronRight size={16} className="ml-1" />
+                <UtensilsCrossed size={16} className="mr-2" />
+                View My Booking
               </Button>
-            ) : (
-              <Button
-                onClick={() => createBooking()}
-                disabled={isSubmitting || !branch}
-                className="flex-1 h-12 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90"
-              >
-                {isSubmitting ? (
-                  <><Loader2 size={16} className="mr-2 animate-spin" /> Booking…</>
-                ) : (
-                  <><CheckCircle2 size={16} className="mr-2" /> Confirm Booking</>
-                )}
-              </Button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
-        {/* Walk-in queue shortcut */}
-        <Link href={`/customer/restaurant/${restaurantId}/queue`}>
-          <div className="mt-4 bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-[0.99]">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
-              <Users size={18} className="text-amber-600" />
+        {/* Walk-in queue shortcut — hidden on step 3 since booking is already done */}
+        {step < 3 && (
+          <Link href={`/customer/restaurant/${restaurantId}/queue`}>
+            <div className="mt-4 bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm hover:shadow-md transition-all active:scale-[0.99]">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+                <Users size={18} className="text-amber-600" />
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold text-gray-900 text-sm">Prefer to walk in?</p>
+                <p className="text-xs text-gray-400">Join the live walk-in queue instead</p>
+              </div>
+              <ChevronRight size={16} className="text-gray-300 shrink-0" />
             </div>
-            <div className="flex-1">
-              <p className="font-semibold text-gray-900 text-sm">Prefer to walk in?</p>
-              <p className="text-xs text-gray-400">Join the live walk-in queue instead</p>
-            </div>
-            <ChevronRight size={16} className="text-gray-300 shrink-0" />
-          </div>
-        </Link>
+          </Link>
+        )}
       </div>
     </div>
   );

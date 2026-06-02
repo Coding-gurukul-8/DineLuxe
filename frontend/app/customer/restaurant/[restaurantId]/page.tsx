@@ -18,6 +18,8 @@ import {
   Utensils, Info, MessageSquare,
   CheckCircle2, XCircle, Send, ShoppingCart,
   Calendar, Users,
+  // INTEGRATION ADDITION: New icons for allergen warning and pricing badge
+  AlertTriangle, Flame, Tag,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -45,6 +47,23 @@ interface ReviewItem {
   user?: { name?: string | null; profile_pic_url?: string | null };
 }
 
+// INTEGRATION ADDITION: Dynamic pricing rule type from /api/v1/dynamic-pricing/branch/:branchId/active
+interface DynamicPricingRule {
+  id: string;
+  menu_item_id: string;
+  label: string;           // e.g. "Happy Hour"
+  discount_percent: number; // e.g. 20
+  starts_at: string;
+  ends_at: string;
+  is_active: boolean;
+}
+
+// INTEGRATION ADDITION: Dietary profile shape from localStorage / context
+interface LocalDietaryProfile {
+  preferences: string[];  // e.g. ["vegan", "halal"]
+  allergies: string[];    // e.g. ["nuts", "dairy"]
+}
+
 function normalizeItem(raw: MenuItemRaw) {
   return {
     id: raw.id, name: raw.name, description: raw.description, price: raw.price,
@@ -53,6 +72,88 @@ function normalizeItem(raw: MenuItemRaw) {
     prepTimeMinutes: raw.prep_time_minutes, isAvailable: raw.is_available,
     isSoldOut: raw.is_sold_out ?? false,
   };
+}
+
+// INTEGRATION ADDITION: Load dietary profile from localStorage (persisted by DietaryProfile component)
+function loadLocalDietaryProfile(): LocalDietaryProfile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem("dietary_profile");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalDietaryProfile;
+    if (Array.isArray(parsed.allergies)) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// INTEGRATION ADDITION: Human-readable allergen label map
+const ALLERGEN_LABELS: Record<string, string> = {
+  nuts: "Nuts",
+  dairy: "Dairy",
+  gluten: "Gluten",
+  eggs: "Eggs",
+  soy: "Soy",
+  shellfish: "Shellfish",
+  fish: "Fish",
+};
+
+// INTEGRATION ADDITION: AllergenWarningIcon — small inline warning shown on items
+// that overlap with the user's personal allergy list.
+function AllergenWarningIcon({ overlapping }: { overlapping: string[] }) {
+  if (overlapping.length === 0) return null;
+  const label = overlapping
+    .map((k) => ALLERGEN_LABELS[k] ?? k)
+    .join(", ");
+  return (
+    <div
+      className="group relative inline-flex items-center"
+      title={`Contains: ${label}`}
+      aria-label={`Allergen warning: Contains ${label}`}
+    >
+      {/* ⚠️ icon badge */}
+      <span className="inline-flex items-center gap-0.5 bg-red-50 border border-red-200 text-red-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full cursor-default select-none">
+        <AlertTriangle size={9} className="shrink-0" />
+        {overlapping.length === 1
+          ? (ALLERGEN_LABELS[overlapping[0]] ?? overlapping[0])
+          : `${overlapping.length} allergens`}
+      </span>
+      {/* Tooltip on hover */}
+      <span className="pointer-events-none absolute bottom-full left-0 mb-1.5 z-50 hidden group-hover:block
+        bg-gray-900 text-white text-[10px] font-medium rounded-lg px-2.5 py-1.5 whitespace-nowrap shadow-lg">
+        ⚠️ Contains: {label}
+      </span>
+    </div>
+  );
+}
+
+// INTEGRATION ADDITION: DynamicPricingBadge — amber "Happy Hour" badge shown
+// when a menu item has an active dynamic pricing rule right now.
+function DynamicPricingBadge({
+  rule,
+  originalPrice,
+}: {
+  rule: DynamicPricingRule;
+  originalPrice: number;
+}) {
+  const discounted = originalPrice * (1 - rule.discount_percent / 100);
+  return (
+    <div className="flex items-center gap-2 flex-wrap mt-1">
+      {/* Badge */}
+      <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-300 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+        <Flame size={9} className="fill-amber-500 text-amber-500" />
+        🔥 {rule.label} — {rule.discount_percent}% off
+      </span>
+      {/* Prices */}
+      <span className="text-gray-400 line-through text-xs">
+        {formatCurrency(originalPrice)}
+      </span>
+      <span className="text-amber-600 font-bold text-sm">
+        {formatCurrency(discounted)}
+      </span>
+    </div>
+  );
 }
 
 // ── Animated star rating ──────────────────────────────────────────────────────
@@ -198,6 +299,12 @@ export default function RestaurantPage({ params }: Props) {
   const [activeTab, setActiveTab] = useState<"menu" | "info" | "reviews">("menu");
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
+  // INTEGRATION ADDITION: Load customer dietary profile from localStorage on mount
+  const [dietaryProfile, setDietaryProfile] = useState<LocalDietaryProfile | null>(null);
+  useEffect(() => {
+    setDietaryProfile(loadLocalDietaryProfile());
+  }, []);
+
   // Parallax scroll
   const heroRef = useRef<HTMLDivElement>(null);
   const { scrollY } = useScroll();
@@ -225,19 +332,51 @@ export default function RestaurantPage({ params }: Props) {
     enabled: !!branchId && activeTab === "menu",
   });
 
+  // INTEGRATION ADDITION: Fetch active dynamic pricing rules for the branch.
+  // Runs alongside the menu query when the menu tab is active.
+  const { data: activePricingRules = [] } = useQuery<DynamicPricingRule[]>({
+    queryKey: ["dynamic-pricing", branchId, "active"],
+    queryFn: () =>
+      apiClient.get<DynamicPricingRule[]>(
+        `/dynamic-pricing/branch/${branchId}/active`
+      ),
+    enabled: !!branchId && activeTab === "menu",
+    // Refresh every 2 minutes so the badge disappears when happy hour ends
+    refetchInterval: 2 * 60 * 1000,
+    // Silently ignore 404s – the endpoint may not exist on all deployments
+    retry: false,
+  });
+
+  // INTEGRATION ADDITION: Build a lookup map { menuItemId → DynamicPricingRule }
+  // for O(1) access inside CategorySection.
+  const pricingByItemId = useCallback((): Map<string, DynamicPricingRule> => {
+    const map = new Map<string, DynamicPricingRule>();
+    for (const rule of activePricingRules) {
+      if (rule.is_active) map.set(rule.menu_item_id, rule);
+    }
+    return map;
+  }, [activePricingRules]);
+
   const categories = [...menuData].sort((a, b) => a.display_order - b.display_order);
   const selectedCat = activeCategoryId ?? categories[0]?.id ?? null;
 
+  // INTEGRATION ADDITION: CategorySection now receives pricingMap and
+  // dietaryProfile to render badges and allergen warnings per item.
   function CategorySection({
     cat,
     selectedCat,
     getItemQty,
     handleCartUpdate,
+    pricingMap,
+    userAllergies,
   }: {
     cat: MenuCategory;
     selectedCat: string | null;
     getItemQty: (id: string) => number;
     handleCartUpdate: (item: ReturnType<typeof normalizeItem>, newQty: number) => void;
+    // INTEGRATION ADDITION: props for new features
+    pricingMap: Map<string, DynamicPricingRule>;
+    userAllergies: string[];
   }) {
     const { ref, inView } = useInView({ triggerOnce: true, threshold: 0.05 });
     return (
@@ -254,16 +393,53 @@ export default function RestaurantPage({ params }: Props) {
         >
           {cat.items.map((rawItem) => {
             const item = normalizeItem(rawItem);
+
+            // INTEGRATION ADDITION: Check for active dynamic pricing rule
+            const pricingRule = pricingMap.get(item.id) ?? null;
+
+            // INTEGRATION ADDITION: Find allergen overlap between item and user profile
+            const overlappingAllergens = userAllergies.filter((a) =>
+              item.allergens.includes(a)
+            );
+
             return (
               <motion.div
                 key={item.id}
                 variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 260 } } }}
               >
-                <FoodCard
-                  item={item}
-                  quantity={getItemQty(item.id)}
-                  onAddToCart={(_id, newQty) => handleCartUpdate(item, newQty)}
-                />
+                {/* INTEGRATION ADDITION: Wrapper adds allergen border highlight and badges */}
+                <div className={cn(
+                  "relative rounded-2xl transition-all",
+                  overlappingAllergens.length > 0 && "ring-1 ring-red-200"
+                )}>
+                  {/* INTEGRATION ADDITION: Allergen warning strip at top of card */}
+                  {overlappingAllergens.length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-red-50 rounded-t-2xl px-3 py-1.5 border-b border-red-100">
+                      <AlertTriangle size={11} className="text-red-500 shrink-0" />
+                      <span className="text-[10px] font-semibold text-red-600">
+                        Contains allergens you've flagged:
+                      </span>
+                      <AllergenWarningIcon overlapping={overlappingAllergens} />
+                    </div>
+                  )}
+
+                  <FoodCard
+                    item={item}
+                    quantity={getItemQty(item.id)}
+                    onAddToCart={(_id, newQty) => handleCartUpdate(item, newQty)}
+                  />
+
+                  {/* INTEGRATION ADDITION: Dynamic pricing badge rendered below the
+                      FoodCard (inside the same card wrapper) when a rule is active */}
+                  {pricingRule && (
+                    <div className="px-4 pb-3 -mt-1">
+                      <DynamicPricingBadge
+                        rule={pricingRule}
+                        originalPrice={item.price}
+                      />
+                    </div>
+                  )}
+                </div>
               </motion.div>
             );
           })}
@@ -300,6 +476,12 @@ export default function RestaurantPage({ params }: Props) {
   if (!restaurant) return null;
 
   const branch = restaurant.branches?.[0];
+
+  // INTEGRATION ADDITION: Resolve user allergies from loaded profile (safe empty fallback)
+  const userAllergies = dietaryProfile?.allergies ?? [];
+
+  // INTEGRATION ADDITION: Materialise the pricing map once per render
+  const pricingMap = pricingByItemId();
 
   return (
     <div className="min-h-screen bg-[#FAF7F4] pb-32">
@@ -353,6 +535,13 @@ export default function RestaurantPage({ params }: Props) {
                 {liveStatus.is_open ? "Open" : "Closed"}
               </span>
             )}
+            {/* INTEGRATION ADDITION: Queue wait time badge from liveStatus */}
+            {liveStatus?.is_open && liveStatus.queue_length > 0 && (
+              <span className="flex items-center gap-1 bg-amber-500/80 text-white text-xs font-semibold px-2 py-0.5 rounded-full">
+                <Clock size={10} />
+                ~{liveStatus.queue_length * 5}m wait
+              </span>
+            )}
           </div>
         </motion.div>
       </div>
@@ -399,6 +588,26 @@ export default function RestaurantPage({ params }: Props) {
               <div className="py-16 text-center text-sm text-gray-400">Menu not available</div>
             ) : (
               <>
+                {/* INTEGRATION ADDITION: Show allergen context banner if profile has allergies */}
+                {userAllergies.length > 0 && (
+                  <div className="mx-4 mt-3 mb-1 flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                    <AlertTriangle size={13} className="text-red-500 shrink-0" />
+                    <p className="text-xs text-red-600 font-medium">
+                      Items containing your allergens are highlighted below.
+                    </p>
+                  </div>
+                )}
+
+                {/* INTEGRATION ADDITION: Show happy hour banner if any active pricing rules exist */}
+                {activePricingRules.length > 0 && (
+                  <div className="mx-4 mt-2 mb-1 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    <Flame size={13} className="text-amber-500 fill-amber-500 shrink-0" />
+                    <p className="text-xs text-amber-700 font-semibold">
+                      🔥 Happy Hour is ON — special prices on selected items!
+                    </p>
+                  </div>
+                )}
+
                 {/* Category pill nav */}
                 <div className="sticky top-12.25 z-20 bg-white border-b border-gray-50 px-4 py-2.5 flex gap-2 overflow-x-auto scrollbar-hide">
                   {categories.map((cat) => (
@@ -429,6 +638,9 @@ export default function RestaurantPage({ params }: Props) {
                       selectedCat={selectedCat}
                       getItemQty={getItemQty}
                       handleCartUpdate={handleCartUpdate}
+                      // INTEGRATION ADDITION: Pass new props
+                      pricingMap={pricingMap}
+                      userAllergies={userAllergies}
                     />
                   ))}
                 </div>
