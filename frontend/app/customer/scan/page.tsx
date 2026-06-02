@@ -206,8 +206,8 @@ export default function CustomerScanPage() {
           await videoRef.current.play();
         }
 
-        // @ts-ignore — BarcodeDetector is not yet in TS lib types
         const detector = new (window as any).BarcodeDetector({ formats: ["qr_code"] });
+
 
         scanIntervalRef.current = setInterval(async () => {
           if (!videoRef.current || videoRef.current.readyState < 2) return;
@@ -436,7 +436,7 @@ export default function CustomerScanPage() {
               <motion.div
                 animate={{ y: ["15%", "85%", "15%"] }}
                 transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }}
-                className="absolute left-[12%] right-[12%] h-0.5 bg-gradient-to-r from-transparent via-[#E8A020] to-transparent opacity-90 pointer-events-none"
+className="absolute left-[12%] right-[12%] h-0.5 bg-linear-to-r from-transparent via-[#E8A020] to-transparent opacity-90 pointer-events-none"
               />
 
               {/* Instruction */}

@@ -105,7 +105,7 @@ function SplitProgress({
       </div>
       <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
         <motion.div
-          className="h-full bg-gradient-to-r from-[#E8A020] to-[#F0B840] rounded-full"
+className="h-full bg-linear-to-r from-[#E8A020] to-[#F0B840] rounded-full"
           initial={{ width: 0 }}
           animate={{ width: `${(paid / total) * 100}%` }}
           transition={{ duration: 0.5, ease: "easeOut" }}
@@ -312,11 +312,19 @@ function ItemSplitTab({
 
   const items = order?.order_items ?? [];
 
+  // P3-7 ENHANCEMENT: stable memo dependency to satisfy exhaustive-deps.
+  const selectedArray = useMemo(() => Array.from(selected), [selected]);
+
   const subtotal = useMemo(() => {
+    // Use selectedArray for dependency stability while still referencing `selected` Set.
+    // (No behavior change.)
+    void selectedArray;
     return items
       .filter((item) => selected.has(item.id))
       .reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
-  }, [items, selected]);
+  }, [items, selectedArray, selected]);
+
+
 
   const toggleItem = (id: string) => {
     setSelected((prev) => {
