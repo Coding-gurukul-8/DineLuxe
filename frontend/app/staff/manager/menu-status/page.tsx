@@ -1,12 +1,40 @@
 "use client"
 
+/**
+ * app/staff/manager/menu-status/page.tsx
+ *
+ * API CONTRACT FIXES (audit 2026-06-02)
+ * ──────────────────────────────────────
+ * MISMATCH 1 — GET /menu/items?branch_id=:branchId
+ *   This path does NOT exist in menu.routes.ts. The GET /menu/items route is
+ *   not defined at all (only POST /menu/items for creating items exists).
+ *   The correct public read endpoints are:
+ *     GET /menu/branch/:branchId          — full menu
+ *     GET /menu/branch/:branchId/items    — same, items alias
+ *   FIX: Use GET /menu/branch/:branchId/items  ✓
+ *
+ * MISMATCH 2 — PATCH /menu/items/:id  { is_available }
+ *   menu.routes.ts defines two separate item-mutation routes:
+ *     PATCH /menu/items/:id          → handleUpdateItem  (general field updates)
+ *     PATCH /menu/items/:id/status   → handleUpdateItemStatus  (availability toggle)
+ *   Sending `is_available` to the general update route may work if the schema
+ *   accepts it, but the purpose-built endpoint for toggling availability is
+ *   PATCH /menu/items/:id/status. Using the correct, narrow endpoint is safer
+ *   (it validates only the status field and has proper RBAC).
+ *   FIX: Use PATCH /menu/items/:id/status  { is_available }  ✓
+ *
+ * Already-correct calls (no change needed)
+ * ─────────────────────────────────────────
+ * • All UI/filter logic is frontend-only — no further API calls.
+ */
+
 import { useState, useMemo } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search, RefreshCw, AlertCircle,
   ChefHat, X, CheckCircle2, XCircle,
-  Utensils, Filter,
+  Utensils,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageWrapper } from "@/components/layout/PageWrapper"
@@ -149,16 +177,25 @@ export default function ManagerMenuStatusPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const debouncedSearch = useDebounce(search, 250)
 
+  /**
+   * FIX 1: Was GET /menu/items?branch_id=:branchId — route doesn't exist.
+   * Correct endpoint: GET /menu/branch/:branchId/items  ✓  (menu.routes.ts)
+   */
   const { data: items = [], isLoading, isError, refetch, isFetching } = useQuery<MenuItem[]>({
     queryKey: ["menu", "items", branchId],
-    queryFn: () => apiClient.get<MenuItem[]>(`/menu/items?branch_id=${branchId}`),
+    queryFn: () => apiClient.get<MenuItem[]>(`/menu/branch/${branchId}/items`),
     enabled: !!branchId,
     staleTime: 30_000,
   })
 
+  /**
+   * FIX 2: Was PATCH /menu/items/:id { is_available } — general update route.
+   * Correct endpoint: PATCH /menu/items/:id/status { is_available }  ✓
+   * This is the purpose-built availability-toggle endpoint (menu.routes.ts).
+   */
   const { mutate: toggleAvailability } = useMutation({
     mutationFn: ({ itemId, is_available }: { itemId: string; is_available: boolean }) =>
-      apiClient.patch(`/menu/items/${itemId}`, { is_available }),
+      apiClient.patch(`/menu/items/${itemId}/status`, { is_available }),
     onMutate: ({ itemId }) => setTogglingId(itemId),
     onSuccess: (_, { itemId, is_available }) => {
       qc.setQueryData<MenuItem[]>(["menu", "items", branchId], (prev) =>

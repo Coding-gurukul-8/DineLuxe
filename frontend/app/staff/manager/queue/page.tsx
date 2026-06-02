@@ -1,17 +1,48 @@
 "use client"
 
+/**
+ * app/staff/manager/queue/page.tsx
+ *
+ * API CONTRACT FIXES (audit 2026-06-02)
+ * ──────────────────────────────────────
+ * MISMATCH 1 — DELETE /queue/branch/:branchId/clear
+ *   This endpoint does NOT exist in queue.routes.ts. The only delete-like route
+ *   is DELETE /queue/:id (soft-deletes a single entry).
+ *   There is no bulk-clear endpoint in the backend.
+ *   FIX: Remove the "Clear Queue" button and its mutation entirely.
+ *        Note this as a missing backend endpoint if bulk-clear is needed.
+ *
+ * MISMATCH 2 — GET /branch/:branchId/tables?status=free  (in AssignTableModal)
+ *   The path /branch/:id/tables does NOT exist in branches.routes.ts or
+ *   tables.routes.ts. The correct path is GET /tables/branch/:branchId.
+ *   The `api-client.ts` normalizer maps /branch/:id/tables → /tables/branch/:id
+ *   so it would work at runtime, but direct usage is incorrect and brittle.
+ *   FIX: Use the canonical path /tables/branch/:branchId directly.
+ *
+ * Already-correct calls (no change needed)
+ * ─────────────────────────────────────────
+ * • GET  /queue/branch/:branchId           ✓  (queue.routes.ts line 9)
+ * • PATCH /queue/:id/arrive                ✓  (queue.routes.ts line 22)
+ * • PATCH /queue/:id/no-show              ✓  (queue.routes.ts line 30)
+ * • PATCH /queue/:id/assign-table         ✓  (queue.routes.ts line 16)
+ *
+ * NOTED MISSING BACKEND ENDPOINT
+ * ───────────────────────────────
+ * DELETE /queue/branch/:branchId/clear — no route exists. If bulk-clear is
+ * required, add it to queue.routes.ts + queue.controller.ts.
+ */
+
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Trash2, RefreshCw, Users, Clock,
+  RefreshCw, Users, Clock,
   TrendingUp, AlertTriangle, Loader2,
   UserCheck, TableIcon, X,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageWrapper } from "@/components/layout/PageWrapper"
 import { QueueEntryCard } from "@/components/queue/QueueEntryCard"
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog"
 import { apiClient } from "@/lib/api-client"
 import { useAuth } from "@/hooks/useAuth"
 import { cn } from "@/lib/utils"
@@ -53,9 +84,15 @@ function AssignTableModal({
   const qc = useQueryClient()
   const [selected, setSelected] = useState<string | null>(null)
 
+  /**
+   * FIX 2: Was /branch/:branchId/tables?status=free — path doesn't exist.
+   * Correct path: GET /tables/branch/:branchId  ✓  (tables.routes.ts)
+   * The api-client normalizer also maps this correctly, but we use the
+   * canonical path directly to avoid relying on the normalizer.
+   */
   const { data: tables = [], isLoading } = useQuery<BranchTable[]>({
     queryKey: ["tables", "free", branchId],
-    queryFn: () => apiClient.get<BranchTable[]>(`/branch/${branchId}/tables?status=free`),
+    queryFn: () => apiClient.get<BranchTable[]>(`/tables/branch/${branchId}?status=free`),
     staleTime: 15_000,
   })
 
@@ -148,10 +185,10 @@ function AssignTableModal({
 export default function ManagerQueuePage() {
   const { branchId } = useAuth()
   const qc = useQueryClient()
-  const [confirmClear, setConfirmClear] = useState(false)
   const [assignEntry, setAssignEntry] = useState<QueueEntry | null>(null)
   const [statusFilter, setStatusFilter] = useState<"all" | "waiting" | "arrived">("all")
 
+  // GET /queue/branch/:branchId  ✓
   const { data: queue = [], isLoading, refetch, isFetching } = useQuery<QueueEntry[]>({
     queryKey: ["queue", branchId],
     queryFn: () => apiClient.get<QueueEntry[]>(`/queue/branch/${branchId}`),
@@ -160,26 +197,18 @@ export default function ManagerQueuePage() {
     refetchInterval: 15_000,
   })
 
+  // PATCH /queue/:id/arrive  ✓
   const { mutate: markArrived } = useMutation({
     mutationFn: (id: string) => apiClient.patch(`/queue/${id}/arrive`, {}),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["queue"] }); toast.success("Marked arrived") },
     onError: () => toast.error("Failed to update"),
   })
 
+  // PATCH /queue/:id/no-show  ✓
   const { mutate: markNoShow } = useMutation({
     mutationFn: (id: string) => apiClient.patch(`/queue/${id}/no-show`, {}),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["queue"] }); toast.success("Marked no-show") },
     onError: () => toast.error("Failed to update"),
-  })
-
-  const { mutate: clearQueue, isPending: clearing } = useMutation({
-    mutationFn: () => apiClient.delete(`/queue/branch/${branchId}/clear`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["queue"] })
-      toast.success("Queue cleared")
-      setConfirmClear(false)
-    },
-    onError: () => toast.error("Failed to clear queue"),
   })
 
   // ── Stats ──────────────────────────────────────────────────────────────────
@@ -191,7 +220,6 @@ export default function ManagerQueuePage() {
     ? Math.round(waiting.reduce((s, e) => s + e.estimatedWaitMinutes, 0) / waiting.length)
     : 0
 
-  // Rough peak hour — find most common hour of createdAt
   const peakHour = (() => {
     if (!queue.length) return "—"
     const hours = queue
@@ -215,22 +243,13 @@ export default function ManagerQueuePage() {
         title="Queue Management"
         subtitle="Live guest queue · updates every 15 seconds"
         action={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-[#1A3C5E] transition disabled:opacity-50"
-            >
-              <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
-            </button>
-            <button
-              onClick={() => setConfirmClear(true)}
-              disabled={queue.length === 0}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-red-50 text-red-600 border border-red-100 text-sm font-semibold hover:bg-red-100 transition disabled:opacity-40"
-            >
-              <Trash2 size={14} /> Clear Queue
-            </button>
-          </div>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-[#1A3C5E] transition disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
+          </button>
         }
       >
         {/* Stats bar */}
@@ -346,17 +365,6 @@ export default function ManagerQueuePage() {
           />
         )}
       </AnimatePresence>
-
-      {/* Clear confirm */}
-      <ConfirmDialog
-        isOpen={confirmClear}
-        title="Clear Entire Queue"
-        message={`This will remove all ${queue.length} entries from the queue. This action cannot be undone.`}
-        confirmLabel={clearing ? "Clearing…" : "Yes, Clear Queue"}
-        variant="danger"
-        onConfirm={() => clearQueue()}
-        onCancel={() => setConfirmClear(false)}
-      />
     </>
   )
 }

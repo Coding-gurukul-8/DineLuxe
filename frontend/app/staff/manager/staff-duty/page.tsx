@@ -1,37 +1,64 @@
 "use client"
 
+/**
+ * app/staff/manager/staff-duty/page.tsx
+ *
+ * API CONTRACT FIXES (audit 2026-06-02)
+ * ──────────────────────────────────────
+ * MISMATCH 1 — GET /staff/branch/:branchId?on_duty=true
+ *   The backend GET /staff/branch/:branchId (staff.routes.ts) does NOT accept or
+ *   filter by an `on_duty` query param. The service selects all staff for the
+ *   branch regardless. The `on_duty` / `duty_start` fields also do NOT exist in
+ *   the users table or the service response.
+ *   FIX: Remove the `?on_duty=true` query param. Filter client-side by `is_active`
+ *   as a proxy for "currently active staff" (the closest available signal).
+ *   `duty_start` display is removed because the field doesn't exist.
+ *
+ * MISMATCH 2 — PATCH /staff/:id/duty  { on_duty: false }
+ *   This endpoint does NOT exist in staff.routes.ts. The only status-toggle
+ *   endpoint is PATCH /staff/:id/toggle-access (which flips is_active).
+ *   FIX: Replace apiClient.patch(`/staff/${staffId}/duty`, ...) with
+ *        apiClient.patch(`/staff/${staffId}/toggle-access`, {})
+ *   Note: toggle-access flips the current state server-side (no body needed),
+ *   so the "mark off duty" action will deactivate the staff member's account.
+ *   The button label and confirmation copy are updated to reflect this.
+ */
+
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  RefreshCw, Clock, UserMinus, AlertCircle,
+  RefreshCw, UserMinus, AlertCircle,
   Users, ChefHat, UtensilsCrossed, CreditCard,
   ConciergeBell, Loader2, UserCheck,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageWrapper } from "@/components/layout/PageWrapper"
-import { RoleBadge } from "@/components/shared/RoleBadge"
 import { apiClient } from "@/lib/api-client"
 import { useAuth } from "@/hooks/useAuth"
-import { formatDate, cn } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type StaffRole = "waiter" | "chef" | "cashier" | "host" | "manager" | "delivery"
+type StaffRole = "waiter" | "chef" | "cashier" | "host" | "manager"
 
+/**
+ * FIX 1: Removed `on_duty` and `duty_start` — these fields do not exist in the
+ * backend response. Using `is_active` (which does exist) as the activity signal.
+ */
 interface StaffMember {
   id: string
-  first_name: string
-  last_name: string
+  /** Combined name from DB `name` column */
+  name: string
   role: StaffRole
-  on_duty: boolean
-  duty_start?: string
+  is_active: boolean
   email: string
+  employee_id?: string
 }
 
 // ── Role group config ──────────────────────────────────────────────────────────
 
 const ROLE_GROUPS: {
-  role: StaffRole | "manager"
+  role: StaffRole
   label: string
   icon: React.ReactNode
   accent: string
@@ -43,26 +70,21 @@ const ROLE_GROUPS: {
   { role: "cashier",  label: "Cashiers",  icon: <CreditCard size={16} />,      accent: "text-violet-600 bg-violet-50 border-violet-100" },
 ]
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function elapsedSince(iso?: string): string {
-  if (!iso) return "—"
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000)
-  if (mins < 60) return `${mins}m`
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`
-}
-
 // ── Staff Row ──────────────────────────────────────────────────────────────────
 
 function StaffRow({
   member,
-  onMarkOff,
-  isMarking,
+  onDeactivate,
+  isUpdating,
 }: {
   member: StaffMember
-  onMarkOff: () => void
-  isMarking: boolean
+  onDeactivate: () => void
+  isUpdating: boolean
 }) {
+  // Derive initials from combined name
+  const parts = member.name.trim().split(/\s+/)
+  const initials = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")
+
   return (
     <motion.div
       layout
@@ -74,35 +96,30 @@ function StaffRow({
     >
       {/* Avatar */}
       <div className="w-10 h-10 rounded-full bg-[#1A3C5E]/10 flex items-center justify-center text-[#1A3C5E] font-bold text-sm shrink-0">
-        {member.first_name[0]}{member.last_name[0]}
+        {initials.toUpperCase()}
       </div>
 
-      {/* Name + role */}
+      {/* Name + email */}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-gray-900 truncate">
-          {member.first_name} {member.last_name}
+          {member.name}
         </p>
         <p className="text-xs text-gray-400 mt-0.5 truncate">{member.email}</p>
       </div>
 
-      {/* Duty time */}
-      <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-400 shrink-0">
-        <Clock size={11} />
-        {elapsedSince(member.duty_start)} on duty
-      </div>
-
-      {/* Mark off duty */}
+      {/* Deactivate — calls PATCH /staff/:id/toggle-access */}
       <button
-        onClick={onMarkOff}
-        disabled={isMarking}
+        onClick={onDeactivate}
+        disabled={isUpdating}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 text-red-600 border border-red-100 text-xs font-semibold hover:bg-red-100 transition disabled:opacity-50 shrink-0"
+        title="Deactivate this staff member's account"
       >
-        {isMarking ? (
+        {isUpdating ? (
           <Loader2 size={12} className="animate-spin" />
         ) : (
           <UserMinus size={12} />
         )}
-        Off Duty
+        Deactivate
       </button>
     </motion.div>
   )
@@ -114,41 +131,55 @@ export default function ManagerStaffDutyPage() {
   const { branchId } = useAuth()
   const qc = useQueryClient()
 
-  const { data: staff = [], isLoading, isError, refetch, isFetching } = useQuery<StaffMember[]>({
-    queryKey: ["staff", "duty", branchId],
+  /**
+   * FIX 1: Removed `?on_duty=true` — not a recognised backend query param.
+   * We fetch all branch staff and filter to is_active === true client-side.
+   * Correct endpoint: GET /staff/branch/:branchId  ✓
+   */
+  const { data: allStaff = [], isLoading, isError, refetch, isFetching } = useQuery<StaffMember[]>({
+    queryKey: ["staff", "branch", branchId],
     queryFn: () =>
-      apiClient.get<StaffMember[]>(`/staff/branch/${branchId}?on_duty=true`),
+      apiClient.get<StaffMember[]>(`/staff/branch/${branchId}`),
     enabled: !!branchId,
     staleTime: 30_000,
     refetchInterval: 60_000,
   })
 
-  const { mutate: markOff, variables: markingId } = useMutation({
+  // Only show active staff on this "on-duty" view
+  const staff = allStaff.filter((s) => s.is_active)
+
+  /**
+   * FIX 2: PATCH /staff/:id/duty does NOT exist.
+   * Correct endpoint: PATCH /staff/:id/toggle-access  ✓
+   * The backend toggles is_active server-side; no body is required.
+   */
+  const { mutate: deactivate, variables: deactivatingId } = useMutation({
     mutationFn: (staffId: string) =>
-      apiClient.patch(`/staff/${staffId}/duty`, { on_duty: false }),
+      apiClient.patch(`/staff/${staffId}/toggle-access`, {}),
     onSuccess: (_, staffId) => {
-      qc.invalidateQueries({ queryKey: ["staff", "duty", branchId] })
-      const member = staff.find((s) => s.id === staffId)
-      toast.success(`${member?.first_name ?? "Staff"} marked off duty`)
+      qc.invalidateQueries({ queryKey: ["staff", "branch", branchId] })
+      const member = allStaff.find((s) => s.id === staffId)
+      const firstName = member?.name.split(" ")[0] ?? "Staff"
+      toast.success(`${firstName} deactivated`)
     },
-    onError: () => toast.error("Failed to update duty status"),
+    onError: () => toast.error("Failed to update staff status"),
   })
 
-  // Group by role
+  // Group active staff by role
   const grouped = ROLE_GROUPS.map(({ role, label, icon, accent }) => ({
     role,
     label,
     icon,
     accent,
-    members: staff.filter((s) => s.role === (role as StaffRole)),
+    members: staff.filter((s) => s.role === role),
   })).filter((g) => g.members.length > 0)
 
-  const totalOnDuty = staff.length
+  const totalActive = staff.length
 
   return (
     <PageWrapper
-      title="Staff on Duty"
-      subtitle={`${totalOnDuty} staff member${totalOnDuty !== 1 ? "s" : ""} currently on shift`}
+      title="Active Staff"
+      subtitle={`${totalActive} staff member${totalActive !== 1 ? "s" : ""} currently active`}
       action={
         <button
           onClick={() => refetch()}
@@ -199,7 +230,7 @@ export default function ManagerStaffDutyPage() {
           <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
             <Users size={28} className="text-gray-300" />
           </div>
-          <p className="text-sm font-medium">No staff currently on duty</p>
+          <p className="text-sm font-medium">No active staff members</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -213,7 +244,7 @@ export default function ManagerStaffDutyPage() {
               {/* Group header */}
               <div className={cn(
                 "flex items-center gap-2.5 px-4 py-3 border-b border-gray-50",
-                accent.split(" ")[1], // bg class
+                accent.split(" ")[1],
               )}>
                 <div className={cn("shrink-0", accent.split(" ")[0])}>{icon}</div>
                 <h3 className={cn("text-sm font-bold", accent.split(" ")[0])}>
@@ -234,8 +265,8 @@ export default function ManagerStaffDutyPage() {
                     <StaffRow
                       key={member.id}
                       member={member}
-                      onMarkOff={() => markOff(member.id)}
-                      isMarking={markingId === member.id}
+                      onDeactivate={() => deactivate(member.id)}
+                      isUpdating={deactivatingId === member.id}
                     />
                   ))}
                 </AnimatePresence>

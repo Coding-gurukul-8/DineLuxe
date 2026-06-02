@@ -1,9 +1,39 @@
 "use client"
 
+/**
+ * app/staff/manager/orders/page.tsx
+ *
+ * API CONTRACT FIXES (audit 2026-06-02)
+ * ──────────────────────────────────────
+ * MISMATCH 1 — GET /orders/branch/:branchId?status=active
+ *   The backend orders.routes.ts defines the active-orders endpoint as:
+ *     GET /orders/branch/:branchId/active    (a path segment, not a query param)
+ *   Sending ?status=active to /orders/branch/:branchId hits a non-existent
+ *   route, returning a 404.
+ *   FIX: Change to GET /orders/branch/:branchId/active  ✓
+ *
+ * MISMATCH 2 — PATCH /orders/:id/status  { status }
+ *   There is no PATCH /orders/:id/status route in orders.routes.ts.
+ *   The only mutation routes for orders are:
+ *     PATCH /orders/:id/cancel
+ *     POST  /orders/:orderId/call-waiter
+ *     POST  /orders/:orderId/apply-coupon
+ *   A generic status-update route does not exist.
+ *   FIX: Use PATCH /orders/:id/cancel for "cancelled" status transitions.
+ *        For all other status changes (pending → preparing → ready → served)
+ *        those are driven by the kitchen module:
+ *          PATCH /kitchen/orders/:id/status  (kitchen.routes.ts)
+ *        Update the mutation to route correctly based on target status.
+ *
+ * Already-correct calls (no change needed)
+ * ─────────────────────────────────────────
+ * • The RefreshCw / filter UI makes no API calls — no changes needed there.
+ */
+
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { motion, AnimatePresence } from "framer-motion"
-import { RefreshCw, Filter, AlertCircle, ClipboardList } from "lucide-react"
+import { RefreshCw, AlertCircle, ClipboardList } from "lucide-react"
 import { toast } from "sonner"
 import { PageWrapper } from "@/components/layout/PageWrapper"
 import { OrderTicket } from "@/components/orders/OrderTicket"
@@ -47,18 +77,41 @@ export default function ManagerOrdersPage() {
   const qc = useQueryClient()
   const [filter, setFilter] = useState<"all" | OrderStatus>("all")
 
+  /**
+   * FIX 1: Was /orders/branch/:branchId?status=active — that query param is not
+   * supported. The correct path segment is /active.
+   * Correct endpoint: GET /orders/branch/:branchId/active  ✓
+   */
   const { data: orders = [], isLoading, isError, refetch, isFetching } = useQuery<BranchOrder[]>({
     queryKey: ["manager", "orders", branchId],
     queryFn: () =>
-      apiClient.get<BranchOrder[]>(`/orders/branch/${branchId}?status=active`),
+      apiClient.get<BranchOrder[]>(`/orders/branch/${branchId}/active`),
     enabled: !!branchId,
     staleTime: 20_000,
     refetchInterval: 30_000,
   })
 
+  /**
+   * FIX 2: Was PATCH /orders/:id/status — this route does NOT exist.
+   *
+   * Routing logic:
+   * • "cancelled" → PATCH /orders/:id/cancel        (orders.routes.ts)
+   * • all kitchen statuses (pending→preparing→ready→served)
+   *              → PATCH /kitchen/orders/:id/status  (kitchen.routes.ts)
+   *
+   * The api-client normalizer maps /orders/:id/kitchen-status →
+   * /kitchen/orders/:id/status, so we use that alias here to stay consistent
+   * with the existing normalizer pattern.
+   */
   const { mutate: updateStatus } = useMutation({
-    mutationFn: ({ orderId, status }: { orderId: string; status: string }) =>
-      apiClient.patch(`/orders/${orderId}/status`, { status }),
+    mutationFn: ({ orderId, status }: { orderId: string; status: string }) => {
+      if (status === "cancelled") {
+        // PATCH /orders/:id/cancel  ✓
+        return apiClient.patch(`/orders/${orderId}/cancel`, { reason: "Cancelled by manager" })
+      }
+      // PATCH /kitchen/orders/:id/status  ✓  (via normalizer alias)
+      return apiClient.patch(`/orders/${orderId}/kitchen-status`, { status })
+    },
     onSuccess: (_, { status }) => {
       qc.invalidateQueries({ queryKey: ["manager", "orders", branchId] })
       toast.success(`Order marked as ${status}`)
@@ -70,7 +123,6 @@ export default function ManagerOrdersPage() {
     ? orders
     : orders.filter((o) => o.status === filter)
 
-  // Count per status for badges
   const counts = orders.reduce<Record<string, number>>((acc, o) => {
     acc[o.status] = (acc[o.status] ?? 0) + 1
     return acc

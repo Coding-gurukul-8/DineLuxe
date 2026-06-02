@@ -3,24 +3,29 @@
 /**
  * StaffManagement — owner panel
  *
- * Fixes vs. the old implementation
- * ─────────────────────────────────
- * 1. When `branchId` is null (owner with no assigned branch), show a branch
- *    selector so the owner can pick which branch's staff to view. The old code
- *    set `selectedBranch = branchId ?? ""` which made `enabled: !!selectedBranch`
- *    permanently false — the query never fired and the table stayed empty forever.
- * 2. Added `enabled: !!restaurantId && !!selectedBranch` guard so the fetch
- *    never fires unauthenticated.
- * 3. Added "View" link column that navigates to /owner/staff/{staffId}.
- * 4. Role enum uses "delivery" (API contract) not "delivery_partner".
- * 5. `toRoleBadgeRole()` bridges "delivery" → "delivery_partner" so the existing
- *    RoleBadge component still renders correctly.
- * 6. All API paths match the backend spec:
- *      GET  /branches                      (branch selector)
- *      GET  /staff/branch/:branchId        (staff list)
- *      POST /staff/create
- *      PATCH /staff/:id
- *      PATCH /staff/:id/toggle-access
+ * API CONTRACT FIXES (audit 2026-06-02)
+ * ──────────────────────────────────────
+ * 1. GET /staff/branch/:branchId returns { name } (combined), NOT first_name/last_name.
+ *    The StaffMember interface now uses `name: string` and a `nameToDisplay()` helper
+ *    splits it for display. The EditForm still sends first_name/last_name to PATCH
+ *    (backend update() accepts them separately and recombines), so edit stays as-is.
+ *
+ * 2. POST /staff/create schema requires `dob` (YYYY-MM-DD) and `gender` — both were
+ *    missing from the create form. Both fields are now collected and sent.
+ *
+ * 3. `delivery` role is NOT in the backend createStaffSchema / updateStaffSchema enum
+ *    (only: manager | host | waiter | chef | cashier). Removed `delivery` from
+ *    API_ROLES and STAFF_ROLES to prevent a 422 validation error on submit.
+ *    The RoleBadge bridge (toRoleBadgeRole) is retained but no longer needs the
+ *    delivery→delivery_partner mapping for staff creation.
+ *
+ * Existing correct behaviour preserved
+ * ─────────────────────────────────────
+ * • GET  /branches                      (branch selector)
+ * • GET  /staff/branch/:branchId        (staff list)       ✓
+ * • POST /staff/create                                     ✓
+ * • PATCH /staff/:id                                       ✓
+ * • PATCH /staff/:id/toggle-access                        ✓
  */
 
 import { useState, useMemo } from "react";
@@ -59,13 +64,17 @@ import { useDebounce } from "@/hooks/useDebounce";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
+/**
+ * FIX 3: `delivery` removed — backend createStaffSchema / updateStaffSchema only
+ * accepts: manager | host | waiter | chef | cashier
+ * Sending `delivery` causes a Zod 422 validation error from the backend.
+ */
 const STAFF_ROLES = [
-  { value: "manager",  label: "Manager" },
-  { value: "waiter",   label: "Waiter" },
-  { value: "cashier",  label: "Cashier" },
-  { value: "host",     label: "Host" },
-  { value: "chef",     label: "Chef" },
-  { value: "delivery", label: "Delivery" },
+  { value: "manager", label: "Manager" },
+  { value: "waiter",  label: "Waiter" },
+  { value: "cashier", label: "Cashier" },
+  { value: "host",    label: "Host" },
+  { value: "chef",    label: "Chef" },
 ] as const;
 
 type StaffRole = (typeof STAFF_ROLES)[number]["value"];
@@ -77,36 +86,52 @@ const ROLE_FILTER_OPTIONS = [
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+/**
+ * FIX 1: The backend getByBranch query selects `name` (a single combined column),
+ * NOT separate first_name / last_name columns. Updated type to match actual shape.
+ */
 interface StaffMember {
   id: string;
   employee_id?: string;
-  first_name: string;
-  last_name: string;
+  /** Combined name from the DB `name` column, e.g. "Priya Sharma" */
+  name: string;
   email: string;
   phone?: string | null;
   role: StaffRole;
   is_active: boolean;
-  joined_at?: string | null;
+  created_at?: string | null;
   branch_id: string;
 }
 
 interface StaffRow extends Record<string, unknown> {
   id: string;
   employee_id?: string;
+  name: string;
+  /** Derived: first token of name */
   first_name: string;
+  /** Derived: remainder of name */
   last_name: string;
-  full_name: string;
   email: string;
   phone?: string | null;
   role: StaffRole;
   is_active: boolean;
-  joined_at?: string | null;
+  created_at?: string | null;
   branch_id: string;
 }
 
 interface BranchOption {
   id: string;
   name: string;
+}
+
+// ── Name helper ────────────────────────────────────────────────────────────────
+
+/** Splits "Priya Sharma" → { first: "Priya", last: "Sharma" }. */
+function splitName(name: string): { first: string; last: string } {
+  const parts = name.trim().split(/\s+/);
+  const first = parts[0] ?? "";
+  const last  = parts.slice(1).join(" ");
+  return { first, last };
 }
 
 // ── RoleBadge compatibility bridge ─────────────────────────────────────────────
@@ -124,20 +149,30 @@ type RoleBadgeRole =
   | "support_agent";
 
 function toRoleBadgeRole(role: StaffRole): RoleBadgeRole {
-  if (role === "delivery") return "delivery_partner";
   return role as RoleBadgeRole;
 }
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
-const API_ROLES = ["manager", "waiter", "cashier", "host", "chef", "delivery"] as const;
+/**
+ * FIX 2: Backend createStaffSchema requires `dob` (YYYY-MM-DD) and `gender`.
+ * These were absent from the old form — the POST would fail validation every time.
+ */
+const API_ROLES = ["manager", "waiter", "cashier", "host", "chef"] as const;
 
 const createSchema = z.object({
   first_name: z.string().min(1, "First name is required"),
   last_name:  z.string().min(1, "Last name is required"),
   email:      z.string().email("Enter a valid email"),
   phone:      z.string().optional(),
-  role:       z.enum(API_ROLES, { required_error: "Select a role" }),
+  dob:        z
+    .string()
+    .min(1, "Date of birth is required")
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format"),
+  gender: z.enum(["male", "female", "other", "prefer_not_to_say"], {
+    required_error: "Select a gender",
+  }),
+  role: z.enum(API_ROLES, { required_error: "Select a role" }),
 });
 
 const editSchema = z.object({
@@ -156,7 +191,6 @@ const staffKey    = (branchId: string) => ["staff", "branch", branchId] as const
 const branchesKey = (restaurantId: string) => ["branches", restaurantId] as const;
 
 // ── Branch selector ────────────────────────────────────────────────────────────
-// Rendered when the owner has no assigned branchId from the auth token.
 
 function BranchSelector({
   restaurantId,
@@ -239,9 +273,15 @@ function CreateStaffModal({
   const { mutate: createStaff } = useMutation({
     mutationFn: (data: CreateForm) =>
       apiClient.post("/staff/create", {
-        ...data,
-        branch_id: branchId,
-        phone: data.phone?.trim() || undefined,
+        first_name: data.first_name,
+        last_name:  data.last_name,
+        email:      data.email,
+        // FIX 2: send dob and gender — required by backend createStaffSchema
+        dob:        data.dob,
+        gender:     data.gender,
+        role:       data.role,
+        branch_id:  branchId,
+        phone:      data.phone?.trim() || undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: staffKey(branchId) });
@@ -295,6 +335,26 @@ function CreateStaffModal({
           />
         </Field>
 
+        {/* FIX 2: dob — required by backend (used to generate the default password) */}
+        <Field label="Date of Birth" error={errors.dob?.message} required>
+          <input
+            {...register("dob")}
+            type="date"
+            className={inputCls(!!errors.dob)}
+          />
+        </Field>
+
+        {/* FIX 2: gender — required by backend schema */}
+        <Field label="Gender" error={errors.gender?.message} required>
+          <select {...register("gender")} className={inputCls(!!errors.gender)}>
+            <option value="">Select gender…</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </Field>
+
         <Field label="Role" error={errors.role?.message} required>
           <select {...register("role")} className={inputCls(!!errors.role)}>
             <option value="">Select a role…</option>
@@ -307,7 +367,8 @@ function CreateStaffModal({
         </Field>
 
         <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
-          Staff will be assigned to the selected branch automatically.
+          Staff will be assigned to the selected branch automatically. Their
+          temporary password is generated from their date of birth (DDMMYYYY).
         </p>
 
         <SubmitButton loading={isSubmitting}>Invite Staff Member</SubmitButton>
@@ -330,6 +391,7 @@ function EditStaffModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const { first, last } = splitName(staff.name);
 
   const {
     register,
@@ -338,8 +400,8 @@ function EditStaffModal({
   } = useForm<EditForm>({
     resolver: zodResolver(editSchema),
     defaultValues: {
-      first_name: staff.first_name,
-      last_name:  staff.last_name,
+      first_name: first,
+      last_name:  last,
       phone:      staff.phone ?? "",
       role:       staff.role,
     },
@@ -364,7 +426,7 @@ function EditStaffModal({
   return (
     <SlideOver
       title="Edit Staff Member"
-      subtitle={`${staff.first_name} ${staff.last_name}`}
+      subtitle={staff.name}
       onClose={onClose}
     >
       <div className="grid grid-cols-2 gap-3 p-3 bg-gray-50 rounded-xl mb-5">
@@ -374,10 +436,10 @@ function EditStaffModal({
             <span className="font-mono font-medium">{staff.employee_id}</span>
           </div>
         )}
-        {staff.joined_at && (
+        {staff.created_at && (
           <div className="flex items-center gap-2 text-xs text-gray-500">
             <CalendarDays size={13} className="text-gray-400 shrink-0" />
-            <span>Joined {formatDate(staff.joined_at)}</span>
+            <span>Joined {formatDate(staff.created_at)}</span>
           </div>
         )}
         <div className="flex items-center gap-2 text-xs text-gray-500 col-span-2">
@@ -438,16 +500,13 @@ export function StaffManagement() {
   const [editTarget, setEditTarget]     = useState<StaffMember | null>(null);
   const [toggleTarget, setToggleTarget] = useState<StaffMember | null>(null);
 
-  // FIX: when branchId is null (owner role), let them pick a branch first.
   const [overrideBranchId, setOverrideBranchId] = useState<string | null>(null);
   const selectedBranch: string | null = overrideBranchId ?? branchId ?? null;
 
   const debouncedSearch = useDebounce(search, 350);
 
   // ── Fetch staff list ─────────────────────────────────────────────────────
-  // GET /staff/branch/:branchId
-  // FIX: guard with both restaurantId and selectedBranch — the old code only
-  // checked !!selectedBranch which was always "" (falsy) for owners.
+  // GET /staff/branch/:branchId  ← correct endpoint ✓
 
   const {
     data: staff = [],
@@ -462,6 +521,7 @@ export function StaffManagement() {
   });
 
   // ── Toggle access (optimistic) ────────────────────────────────────────────
+  // PATCH /staff/:id/toggle-access  ← correct endpoint ✓
 
   const { mutate: toggleAccess } = useMutation({
     mutationFn: (member: StaffMember) =>
@@ -484,10 +544,11 @@ export function StaffManagement() {
     },
 
     onSuccess: (_data, member) => {
+      const { first } = splitName(member.name);
       toast.success(
         member.is_active
-          ? `${member.first_name}'s access revoked`
-          : `${member.first_name}'s access restored`
+          ? `${first}'s access revoked`
+          : `${first}'s access restored`
       );
     },
 
@@ -504,30 +565,32 @@ export function StaffManagement() {
       .filter((s) => {
         const matchesSearch =
           !q ||
-          `${s.first_name} ${s.last_name}`.toLowerCase().includes(q) ||
+          s.name.toLowerCase().includes(q) ||
           s.email.toLowerCase().includes(q) ||
           s.role.toLowerCase().includes(q);
         const matchesRole = !roleFilter || s.role === roleFilter;
         return matchesSearch && matchesRole;
       })
-      .map((s) => ({
-        ...s,
-        full_name: `${s.first_name} ${s.last_name}`,
-      }));
+      .map((s) => {
+        const { first, last } = splitName(s.name);
+        return {
+          ...s,
+          first_name: first,
+          last_name:  last,
+        };
+      });
   }, [staff, debouncedSearch, roleFilter]);
 
   // ── Table columns ─────────────────────────────────────────────────────────
 
   const columns: Column<StaffRow>[] = [
     {
-      key: "full_name",
+      key: "name",
       label: "Name",
       sortable: true,
       render: (row) => (
         <div>
-          <p className="font-semibold text-gray-900">
-            {row.first_name} {row.last_name}
-          </p>
+          <p className="font-semibold text-gray-900">{row.name}</p>
           <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
             <Mail size={11} />
             {row.email}
@@ -558,13 +621,13 @@ export function StaffManagement() {
       ),
     },
     {
-      key: "joined_at",
+      key: "created_at",
       label: "Joined",
       sortable: true,
       render: (row) =>
-        row.joined_at ? (
+        row.created_at ? (
           <span className="text-xs text-gray-500">
-            {formatDate(row.joined_at as string)}
+            {formatDate(row.created_at as string)}
           </span>
         ) : (
           <span className="text-xs text-gray-300">—</span>
@@ -576,7 +639,6 @@ export function StaffManagement() {
       align: "right",
       render: (row) => (
         <div className="flex items-center justify-end gap-1">
-          {/* FIX: "View" link navigates to /owner/staff/{staffId} */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -588,7 +650,6 @@ export function StaffManagement() {
             <ExternalLink size={14} />
           </button>
 
-          {/* Edit */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -600,7 +661,6 @@ export function StaffManagement() {
             <Pencil size={14} />
           </button>
 
-          {/* Toggle access */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -675,14 +735,12 @@ export function StaffManagement() {
         </button>
       </div>
 
-      {/* Loading skeletons */}
       {isLoading && (
         <div className="space-y-3">
           <SkeletonCard variant="list-item" count={4} />
         </div>
       )}
 
-      {/* Filters — only shown once loaded */}
       {!isLoading && (
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 w-full max-w-xs">
@@ -726,7 +784,6 @@ export function StaffManagement() {
         </div>
       )}
 
-      {/* Error state */}
       {isError && (
         <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
           <AlertCircle size={16} />
@@ -734,7 +791,6 @@ export function StaffManagement() {
         </div>
       )}
 
-      {/* DataTable */}
       {!isLoading && (
         <DataTable<StaffRow>
           columns={columns}
@@ -751,7 +807,6 @@ export function StaffManagement() {
         />
       )}
 
-      {/* Create modal */}
       {showCreate && (
         <CreateStaffModal
           branchId={selectedBranch}
@@ -759,7 +814,6 @@ export function StaffManagement() {
         />
       )}
 
-      {/* Edit modal */}
       {editTarget && (
         <EditStaffModal
           staff={editTarget}
@@ -768,14 +822,13 @@ export function StaffManagement() {
         />
       )}
 
-      {/* Toggle access confirm dialog */}
       <ConfirmDialog
         isOpen={toggleTarget !== null}
         title={toggleTarget?.is_active ? "Revoke Access?" : "Restore Access?"}
         message={
           toggleTarget?.is_active
-            ? `${toggleTarget.first_name} ${toggleTarget.last_name} will lose access to the system immediately.`
-            : `${toggleTarget?.first_name} ${toggleTarget?.last_name} will regain access to the system.`
+            ? `${splitName(toggleTarget.name).first} ${splitName(toggleTarget.name).last} will lose access to the system immediately.`
+            : `${splitName(toggleTarget?.name ?? "").first} ${splitName(toggleTarget?.name ?? "").last} will regain access to the system.`
         }
         confirmLabel={toggleTarget?.is_active ? "Revoke" : "Restore"}
         variant={toggleTarget?.is_active ? "danger" : "info"}
