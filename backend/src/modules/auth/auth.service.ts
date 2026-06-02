@@ -184,9 +184,13 @@ export async function signup(input: SignupInput): Promise<{
       templateName: 'otp-verify',
       data: { name: firstName, otp, expiryMinutes: Math.floor(config.OTP_EXPIRY_SECONDS / 60) },
     });
-    console.log(`[DEV] OTP for ${email}: ${otp}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[DEV] OTP for ${email}: ${otp}`);
+    }
   } catch (otpErr) {
-    console.warn('[auth] failed to send verification OTP:', otpErr);
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('[auth] failed to send verification OTP:', otpErr);
+    }
   }
 
   const tokenPayload = { sub: authUser.id, email, role: 'customer' };
@@ -426,8 +430,11 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<{ mess
       templateName: 'otp-verify',
       data: { name: (profile as any).name ?? 'User', otp, expiryMinutes: Math.floor(config.OTP_EXPIRY_SECONDS / 60) },
     });
-    console.log(`[DEV] Password reset OTP for ${input.email}: ${otp}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[DEV] Password reset OTP for ${input.email}: ${otp}`);
+    }
   }
+
 
   return { message: 'If that email exists, a reset OTP has been sent.' };
 }
@@ -465,7 +472,10 @@ export async function sendVerificationOtp(input: RequestOtpInput): Promise<{ mes
     },
   });
 
-  console.log(`[DEV] Verification OTP for ${email}: ${otp}`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[DEV] Verification OTP for ${email}: ${otp}`);
+  }
+
 
   return { message: 'Verification OTP sent.' };
 }

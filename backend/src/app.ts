@@ -46,8 +46,28 @@ import './jobs/report-export';
 const app: express.Application = express();
 
 // ── Middleware
-app.use(helmet());
-app.use(cors());
+// Security headers
+app.use(
+  helmet({
+    xPoweredBy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", 'https://checkout.razorpay.com'],
+        connectSrc: ["'self'", process.env.SUPABASE_URL ?? '', 'wss:'].filter(Boolean),
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
+    },
+  })
+);
+
+const corsOrigins = (process.env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+app.use(
+  cors({
+    origin: corsOrigins.length ? corsOrigins : true,
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
