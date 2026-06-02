@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useInView } from "react-intersection-observer";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Settings, ChevronRight, Star, ShoppingBag, Calendar,
-  Gift, LogOut, Edit3, Camera, Bell, Shield, HelpCircle, Loader2,
+  Gift, LogOut, Edit3, Camera, Bell, Shield, HelpCircle,
+  BookOpen, ClipboardList,
 } from "lucide-react";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -25,7 +25,6 @@ function useCountUp(target: number, duration = 1200, trigger = true) {
     const id = requestAnimationFrame(function tick() {
       const elapsed = Date.now() - start;
       const progress = Math.min(elapsed / duration, 1);
-      // ease-out cubic
       const eased = 1 - Math.pow(1 - progress, 3);
       setValue(Math.round(eased * target));
       if (progress < 1) requestAnimationFrame(tick);
@@ -96,7 +95,8 @@ export default function ProfilePage() {
 
   const { data: loyaltyData } = useQuery({
     queryKey: ["customer", "loyalty"],
-    queryFn: () => apiClient.get<{ points: number; nextRewardThreshold: number; progressPercent: number }>("/loyalty/me"),
+    queryFn: () =>
+      apiClient.get<{ points: number; nextRewardThreshold: number; progressPercent: number }>("/loyalty/me"),
   });
 
   const { data: orderHistory = [], isLoading: ordersLoading } = useQuery({
@@ -121,7 +121,6 @@ export default function ProfilePage() {
         animate={{ opacity: 1, y: 0 }}
         className="flex flex-col items-center pt-4 pb-6"
       >
-        {/* Avatar with hover ring */}
         <motion.div
           whileHover={{ scale: 1.04 }}
           className="relative mb-4 cursor-pointer group"
@@ -133,7 +132,6 @@ export default function ProfilePage() {
               {initials}
             </div>
           )}
-          {/* Ring animation on hover */}
           <motion.div
             initial={{ opacity: 0, scale: 0.85 }}
             whileHover={{ opacity: 1, scale: 1 }}
@@ -152,9 +150,9 @@ export default function ProfilePage() {
 
       {/* ── Stats row ────────────────────────────────────────────────── */}
       <div ref={statsRef} className="flex gap-3 mb-6">
-        <StatCard label="Orders" value={profileData?.orders_count ?? 0} icon={ShoppingBag} color="bg-[#1A3C5E]" trigger={statsInView} />
-        <StatCard label="Bookings" value={profileData?.bookings_count ?? 0} icon={Calendar} color="bg-[#E8A020]" trigger={statsInView} />
-        <StatCard label="Points" value={loyaltyData?.points ?? 0} icon={Gift} color="bg-[#C0392B]" trigger={statsInView} />
+        <StatCard label="Orders"   value={profileData?.orders_count   ?? 0} icon={ShoppingBag} color="bg-[#1A3C5E]" trigger={statsInView} />
+        <StatCard label="Bookings" value={profileData?.bookings_count ?? 0} icon={Calendar}    color="bg-[#E8A020]" trigger={statsInView} />
+        <StatCard label="Points"   value={loyaltyData?.points         ?? 0} icon={Gift}         color="bg-[#C0392B]" trigger={statsInView} />
       </div>
 
       {/* ── Loyalty bar ──────────────────────────────────────────────── */}
@@ -190,14 +188,17 @@ export default function ProfilePage() {
       <div ref={ordersRef} className="mb-6">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold text-gray-900">Recent Orders</h3>
-          <motion.button whileTap={{ scale: 0.95 }} onClick={() => router.push("/customer/order")}
-            className="text-xs text-[#E8A020] font-semibold flex items-center gap-1">
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => router.push("/customer/profile/orders")}
+            className="text-xs text-[#E8A020] font-semibold flex items-center gap-1"
+          >
             See all <ChevronRight size={13} />
           </motion.button>
         </div>
 
         {ordersLoading ? (
-          <div className="space-y-2">{[1,2,3].map((n) => <div key={n} className="h-16 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
+          <div className="space-y-2">{[1, 2, 3].map((n) => <div key={n} className="h-16 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
         ) : orderHistory.length === 0 ? (
           <div className="text-center py-8 text-sm text-gray-400">No orders yet</div>
         ) : (
@@ -235,11 +236,15 @@ export default function ProfilePage() {
       </div>
 
       {/* ── Menu links ────────────────────────────────────────────────── */}
+      {/* ✅ AUDIT FIX — added /customer/profile/bookings and /customer/profile/orders */}
       <div className="space-y-2 mb-6">
-        <MenuLink label="Edit Profile" icon={Edit3} onClick={() => router.push("/customer/profile/edit")} />
-        <MenuLink label="Notifications" icon={Bell} onClick={() => router.push("/customer/profile/notifications")} />
-        <MenuLink label="Privacy & Security" icon={Shield} onClick={() => router.push("/customer/profile/privacy")} />
-        <MenuLink label="Help & Support" icon={HelpCircle} onClick={() => router.push("/customer/support")} />
+        <MenuLink label="Edit Profile"       icon={Edit3}         onClick={() => router.push("/customer/profile/edit")} />
+        <MenuLink label="My Orders"          icon={ClipboardList} onClick={() => router.push("/customer/profile/orders")} />
+        <MenuLink label="My Bookings"        icon={BookOpen}      onClick={() => router.push("/customer/profile/bookings")} />
+        <MenuLink label="Loyalty & Rewards"  icon={Gift}          onClick={() => router.push("/customer/profile/loyalty")} />
+        <MenuLink label="Notifications"      icon={Bell}          onClick={() => router.push("/customer/notifications")} />
+        <MenuLink label="Privacy & Security" icon={Shield}        onClick={() => router.push("/customer/profile/privacy")} />
+        <MenuLink label="Help & Support"     icon={HelpCircle}    onClick={() => router.push("/customer/support")} />
       </div>
 
       <MenuLink label="Sign Out" icon={LogOut} onClick={handleLogout} danger />
