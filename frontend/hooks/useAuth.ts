@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ROLES } from "@/lib/constants";
-import type { Role } from "@/lib/constants";
+import type { UserRole } from "@/types/api";
+
+
 import type { AuthUser } from "@/types/auth";
 import type { AuthProfile } from "@/types/auth";
 import { clearAuthTokens, getAccessToken, setUserRole } from "@/lib/auth-storage";
 import { logout as authLogout, mapProfileToAuthUser } from "@/lib/auth-client";
 
 export function useAuth() {
-  const [role, setRole] = useState<Role | null>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);

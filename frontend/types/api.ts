@@ -9,24 +9,50 @@
 // ─── Enums (mirror prisma enums) ─────────────────────────────────────────────
 
 export type UserRole =
-  | "super_admin"
   | "owner"
   | "manager"
-  | "host"
   | "waiter"
   | "chef"
   | "cashier"
-  | "customer"
+  | "host"
   | "delivery_partner"
+  | "customer"
+  | "super_admin"
+  | "admin"
   | "support";
 
-export type TableStatus = "free" | "reserved" | "occupied" | "cleaning" | "maintenance";
-export type OrderStatus = "created" | "confirmed" | "preparing" | "ready" | "served" | "paid" | "closed" | "cancelled";
+export type TableStatus =
+  | "available"
+  | "reserved"
+  | "occupied"
+  | "cleaning"
+  | "maintenance";
+export type OrderStatus =
+  | "created"
+  | "confirmed"
+  | "preparing"
+  | "ready"
+  | "served"
+  | "paid"
+  | "closed"
+  | "cancelled";
 export type OrderType = "dine_in" | "delivery" | "takeaway";
-export type BookingStatus = "pending" | "confirmed" | "arrived" | "seated" | "no_show" | "cancelled";
+export type BookingStatus =
+  | "pending"
+  | "confirmed"
+  | "arrived"
+  | "seated"
+  | "completed"
+  | "no_show"
+  | "cancelled";
 export type QueueStatus = "waiting" | "arrived" | "seated" | "no_show" | "cancelled";
-export type PaymentMethod = "cash" | "card" | "upi" | "split" | "wallet";
-export type PaymentStatus = "pending" | "completed" | "failed" | "refunded";
+export type PaymentMethod = "cash" | "card" | "upi" | "online";
+export type PaymentStatus =
+  | "pending"
+  | "completed"
+  | "failed"
+  | "refunded"
+  | "refund_requested";
 export type MenuItemStatus = "available" | "sold_out" | "hidden";
 export type TableShape = "round" | "square" | "rectangle" | "booth";
 export type NotificationType =
@@ -40,6 +66,7 @@ export type SentimentLabel = "positive" | "neutral" | "negative";
 export type DeliveryStatus =
   | "assigned"
   | "accepted"
+  | "rejected"
   | "picked_up"
   | "out_for_delivery"
   | "delivered"
@@ -68,8 +95,10 @@ export interface Branch {
   lat: number | null;
   lon: number | null;
   manager_id: string | null;
-  operating_hours: Record<string, { open: string; close: string; closed: boolean }> | null;
+  manager?: Pick<User, "id" | "first_name" | "last_name">;
   is_active: boolean;
+  operating_hours: Record<string, { open: string; close: string; closed: boolean }> | null;
+  seating_capacity: number;
   created_at: string;
   updated_at: string;
   // Joined
@@ -118,6 +147,7 @@ export interface MenuCategory {
 export interface MenuItem {
   id: string;
   category_id: string;
+  category_name?: string;
   branch_id: string;
   restaurant_id: string;
   name: string;
@@ -126,15 +156,15 @@ export interface MenuItem {
   discounted_price: number | null;
   photo_url: string | null;
   dietary_tags: string[];
-  allergens: string[];
+  allergens: string[] | null;
   prep_time_minutes: number | null;
-  status: MenuItemStatus;
+  is_available: boolean;
   display_order: number;
   is_featured: boolean;
   addons: Array<{ name: string; extra_price: number }> | null;
   created_at: string;
   updated_at: string;
-  // Joined
+  // Joined (legacy)
   category?: Pick<MenuCategory, "id" | "name">;
 }
 
@@ -163,8 +193,13 @@ export interface Order {
   id: string;
   table_id: string | null;
   customer_id: string | null;
-  waiter_id: string | null;
   branch_id: string;
+  waiter_id: string | null;
+  waiter_name?: string;
+  table_label?: string;
+  coupon_id: string | null;
+  discount_amount: number;
+  final_amount: number;
   order_type: OrderType;
   status: OrderStatus;
   special_instructions: string | null;
@@ -173,9 +208,11 @@ export interface Order {
   paid_at: string | null;
   closed_at: string | null;
   updated_at: string;
-  // Joined
+  // Joined detail views
+  items: OrderItem[];
+  /** Back-compat: some controllers use `order_items` */
   order_items?: OrderItem[];
-  table?: Pick<Table, "id" | "label"> | null;
+  table?: Pick<Table, "id" | "label" | "status"> | null;
   payment?: Payment | null;
   /** Computed total — sum of (unit_price × quantity) across all items */
   total?: number;
@@ -244,6 +281,8 @@ export interface Staff {
   is_active: boolean;
   force_password_change: boolean;
   profile_pic_url: string | null;
+  created_by_restaurant: boolean;
+  notification_preferences: Record<string, unknown> | null;
   last_login: string | null;
   created_at: string;
 }
@@ -337,6 +376,18 @@ export interface RestaurantLiveStatus {
   wait_minutes: number;
 }
 
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  error?: { code: string; message: string };
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
 /** Returned by POST /payments/initiate */
 export interface PaymentInitResponse {
   payment_id: string;
@@ -354,7 +405,13 @@ export interface User {
   first_name: string;
   last_name: string;
   role: UserRole;
+  branch_id: string | null;
+  employee_id: string | null;
   profile_pic_url: string | null;
+  force_password_change: boolean;
+  created_by_restaurant: boolean;
+  notification_preferences: Record<string, unknown> | null;
+  last_login: string | null;
 }
 
 // ─── Dynamic Pricing ──────────────────────────────────────────────────────────
