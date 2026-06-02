@@ -37,15 +37,46 @@ export function formatDateTime(date: string | Date): string {
   return `${formatDate(date)}, ${formatTime(date)}`;
 }
  
-export function timeAgo(date: string | Date): string {
-  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-  if (seconds < 60)  return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60)  return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24)    return `${hours}h ago`;
-  return formatDate(date);
+function toIST(d: Date): Date {
+  // Keep the instant, only adjust formatting by shifting the date
+  // to Asia/Kolkata offset.
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  return new Date(utc + istOffsetMs);
 }
+
+export function getStartOfWeek(date: Date = new Date(), weekStartsOn: number = 1): Date {
+  // weekStartsOn: 0 = Sunday, 1 = Monday
+  const ist = toIST(date);
+  const day = ist.getDay();
+  const diff = (day - weekStartsOn + 7) % 7;
+  const start = new Date(ist);
+  start.setDate(ist.getDate() - diff);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+export function getStartOfMonth(date: Date = new Date()): Date {
+  const ist = toIST(date);
+  const start = new Date(ist);
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+export function timeAgo(date: string | Date): string {
+  const target = new Date(date);
+  const now = new Date();
+  const seconds = Math.floor((now.getTime() - target.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  // Absolute formatting in IST
+  return formatDate(toIST(target));
+}
+
  
 export function elapsedMinutes(date: string | Date): number {
   return Math.floor((Date.now() - new Date(date).getTime()) / 60000);
