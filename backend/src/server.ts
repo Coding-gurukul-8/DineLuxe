@@ -1,6 +1,8 @@
 import './types/express-augmentation';
 
+import { createAdapter } from '@socket.io/redis-adapter'; // REDIS-ADAPTER ADDITION
 import { createServer } from 'http';
+import Redis from 'ioredis'; // REDIS-ADAPTER ADDITION
 import { Server as SocketIOServer, type Socket } from 'socket.io';
 import { config } from './config/env';
 import { redis } from './config/redis';
@@ -29,10 +31,72 @@ export const io = new SocketIOServer(httpServer, {
   transports: ['polling', 'websocket'],
 });
 
+// REDIS-ADAPTER ADDITION
+// Redis adapter for horizontal scaling.
+// Skip if Redis is not configured (dev mode with single instance).
+let socketRedisPubClient: Redis | null = null;
+let socketRedisSubClient: Redis | null = null;
+const socketRedisAdapterReady = (async (): Promise<void> => {
+  if (process.env.REDIS_URL) {
+    try {
+      const pubClient = new Redis(config.REDIS_URL, {
+        connectTimeout: 5000,
+        lazyConnect: true,
+        retryStrategy: () => null,
+      });
+      const subClient = pubClient.duplicate();
+      socketRedisPubClient = pubClient;
+      socketRedisSubClient = subClient;
+
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log('[socket.io] Redis adapter connected - multi-instance scaling enabled');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[socket.io] Redis adapter failed, running without it:', message);
+      // Continue without adapter - single instance works fine.
+      socketRedisPubClient?.disconnect();
+      socketRedisSubClient?.disconnect();
+      socketRedisPubClient = null;
+      socketRedisSubClient = null;
+    }
+  } else {
+    console.log('[socket.io] No REDIS_URL - running single-instance mode');
+  }
+})();
+
 // ─── Socket.io connection handler ───────────────────────────────────────────
 
-io.on('connection', (socket: Socket) => {
+io.on('connection', async (socket: Socket) => {
   console.log(`🔌 Socket connected: ${socket.id}`);
+
+  // REDIS-ADAPTER ADDITION
+  // Enforce 1 active socket per user (disconnect old on new connect).
+  const socketUser = (socket as Socket & { user?: { id?: string } }).user;
+  if (socketUser?.id) {
+    try {
+      const existingSocketId = await redis.get(`socket:${socketUser.id}`);
+      if (existingSocketId && existingSocketId !== socket.id) {
+        const existingSocket = io.sockets.sockets.get(existingSocketId);
+        if (existingSocket) {
+          existingSocket.emit('session_replaced', { message: 'Your session was replaced by a new login' });
+          existingSocket.disconnect(true);
+        }
+      }
+      await redis.set(`socket:${socketUser.id}`, socket.id, 'EX', 86400);
+
+      // REDIS-ADAPTER ADDITION
+      // Clean up on disconnect.
+      socket.on('disconnect', async () => {
+        const stored = await redis.get(`socket:${socketUser.id}`);
+        if (stored === socket.id) {
+          await redis.del(`socket:${socketUser.id}`);
+        }
+      });
+    } catch (err) {
+      console.error('[socket.io] Socket connection limit guard failed:', err);
+    }
+  }
 
   // Allow clients to subscribe to a named room (e.g. "branch:uuid:host")
   socket.on('join_room', (room: string) => {
@@ -51,9 +115,21 @@ io.on('connection', (socket: Socket) => {
 
 // ─── Start listening ─────────────────────────────────────────────────────────
 
-httpServer.listen(PORT, () => {
+function logServerStarted(): void {
   console.log(`🚀 Restaurant OS API running on port ${PORT} [${config.NODE_ENV}]`);
   console.log(`   Socket.io listening on ws://localhost:${PORT}`);
+}
+
+// REDIS-ADAPTER ADDITION
+async function startServer(): Promise<void> {
+  await socketRedisAdapterReady;
+
+  httpServer.listen(PORT, logServerStarted);
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });
 
 startReportExportWorker();
@@ -73,6 +149,11 @@ async function shutdown(signal: string): Promise<void> {
     }
 
     try {
+      // REDIS-ADAPTER ADDITION
+      await Promise.all([
+        socketRedisPubClient?.quit().catch(() => undefined),
+        socketRedisSubClient?.quit().catch(() => undefined),
+      ]);
       await redis.quit();
       console.log('✅ Redis connection closed.');
     } catch (redisErr) {
