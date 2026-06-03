@@ -24,7 +24,7 @@ import {
   handleProcessRefund,
 } from './payments.controller';
 
-const router: import('express').Router = Router();
+const router = Router();
 
 // ─── Public Webhook (no auth — gateway calls this) ────────────────────────────
 // NOTE: Must use express.raw() middleware on this route for signature verification
@@ -33,10 +33,12 @@ router.post('/webhook', validate({ body: webhookSchema }), handleGatewayWebhookC
 
 // ─── Protected Payment Routes ─────────────────────────────────────────────────
 
-// GET /payments/receipt/:orderId - customers may not have tenant claims, so
-// the service enforces order ownership/branch access instead of injectTenant.
+// GET /payments/:orderId/receipt (digital PDF URL)
+// If the PDF isn't ready, handler returns 202 + generating status.
+//
+// Note: This avoids collision with existing /receipt/:orderId JSON endpoint.
 router.get(
-  '/receipt/:orderId',
+  '/:orderId/receipt',
   authenticate,
   requireRole('customer', 'cashier', 'manager', 'owner', 'waiter'),
   handleGetReceipt

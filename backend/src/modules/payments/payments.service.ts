@@ -293,8 +293,28 @@ export async function verifyPayment(input: VerifyInput, branchId: string) {
   if (status === 'success') {
     const ctxRaw = await redis.get(`payment_ctx:${payment_id}`);
     const ctx = ctxRaw ? JSON.parse(ctxRaw) : { branchId, restaurantId: '' };
+
     await onPaymentComplete(payment.order_id, ctx.branchId, ctx.restaurantId);
+
+    // Queue receipt generation (non-blocking)
+    // (Repo currently doesn't have Bull workers wired, so we run the job
+    // fire-and-forget style.)
+    void import('../../jobs/receipt-pdf').then(async (mod) => {
+      try {
+        await mod.runReceiptPdfJob({
+          payment_id: payment_id,
+          order_id: payment.order_id,
+          branch_id: ctx.branchId,
+          restaurant_id: ctx.restaurantId,
+          customer_email: (payment as any)?.customer_email ?? null,
+          customer_phone: (payment as any)?.customer_phone ?? null,
+        });
+      } catch (err) {
+        console.error('[receipt-pdf] Failed to generate receipt:', err);
+      }
+    });
   }
+
 
   return { ...updated, status: toApiPaymentStatus(updated.status) };
 }
