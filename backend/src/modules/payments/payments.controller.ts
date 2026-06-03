@@ -1,23 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // payments.controller.ts  —  AUDITED & FIXED
-//
-// Issues found & fixed:
-//   1. handleGatewayWebhookController called res.json(result) with no wrapper.
-//      The gateway webhook response MUST go through the success() helper so the
-//      caller always receives a consistent { success: true, data: ... } shape.
-//      (The webhook endpoint itself may return a bare 200 to the gateway — but
-//      our internal JSON body should still be wrapped.)
-//
-//   2. HTTP status codes:
-//        handleInitiatePayment  → 201  ✓  (creates a new payment record)
-//        handleRefundRequest    → 201  ✓  (creates a new refund record)
-//        all others             → 200  ✓
-//
-//   3. All catch blocks delegate to next(err) — no inline raw res.json errors.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Request, Response, NextFunction } from 'express';
+
 import { success } from '../../utils/response';
+import type { Request, Response, NextFunction } from 'express';
+
 import {
   initiatePayment,
   verifyPayment,
@@ -33,10 +21,12 @@ import {
 // ── POST /payments/initiate ───────────────────────────────────────────────────
 
 export async function handleInitiatePayment(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
+
   try {
     const result = await initiatePayment(
       req.body,
@@ -53,10 +43,11 @@ export async function handleInitiatePayment(
 // ── POST /payments/verify ─────────────────────────────────────────────────────
 
 export async function handleVerifyPayment(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
   try {
     const result = await verifyPayment(req.body, req.branchId!);
     res.json(success(result, 'Payment verified'));
@@ -68,10 +59,11 @@ export async function handleVerifyPayment(
 // ── POST /payments/upi/qr ─────────────────────────────────────────────────────
 
 export async function handleGenerateUPIQR(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
   try {
     const result = await generateUPIQR(req.body, req.branchId!);
     res.json(success(result));
@@ -83,10 +75,11 @@ export async function handleGenerateUPIQR(
 // ── GET /payments/upi/status/:ref ────────────────────────────────────────────
 
 export async function handlePollUPIStatus(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
   try {
     const result = await pollUPIStatus(req.params.ref, req.branchId!);
     res.json(success(result));
@@ -98,10 +91,11 @@ export async function handlePollUPIStatus(
 // ── POST /payments/split ──────────────────────────────────────────────────────
 
 export async function handleSplitBill(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
   try {
     const result = await splitBill(req.body, req.branchId!, req.restaurantId!);
     res.json(success(result, 'Split created'));
@@ -113,10 +107,11 @@ export async function handleSplitBill(
 // ── GET /payments/receipt/:orderId ────────────────────────────────────────────
 
 export async function handleGetReceipt(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
   try {
     const result = await getReceipt(
       req.params.orderId,
@@ -141,10 +136,11 @@ export async function handleGetReceipt(
 // Then apply express.json() to all other routes.
 
 export async function handleGatewayWebhookController(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
   try {
     const result = await handleGatewayWebhook(req.body);
     // FIX: was res.json(result) — naked object, no envelope.
@@ -158,10 +154,11 @@ export async function handleGatewayWebhookController(
 // ── POST /payments/orders/:orderId/refund ─────────────────────────────────────
 
 export async function handleRefundRequest(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
   try {
     const { orderId } = req.params;
     const { reason, items } = req.body;
@@ -178,10 +175,11 @@ export async function handleRefundRequest(
 // ── PATCH /payments/:paymentId/refund ─────────────────────────────────────────
 
 export async function handleProcessRefund(
-  req: Request,
-  res: Response,
-  next: NextFunction,
+  req: any,
+  res: any,
+  next: any,
 ) {
+
   try {
     const { paymentId } = req.params;
     const { action, notes } = req.body;
@@ -194,3 +192,4 @@ export async function handleProcessRefund(
     next(err);
   }
 }
+

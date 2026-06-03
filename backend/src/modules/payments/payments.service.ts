@@ -223,7 +223,15 @@ export async function initiatePayment(
     couponId = validation.coupon_id;
   }
 
-  const finalAmount = roundMoney(Math.max(0, amount - discountAmount));
+  // GST / Service charge calculation
+  const { calculateBill } = await import('../../utils/gst');
+  // NOTE: For now, service charge is always applied.
+  // If your restaurant settings exist for service_charge, wire it here.
+  const bill = calculateBill(amount, {
+    order_type: order.order_type as any,
+    apply_service_charge: true,
+    discount_amount: discountAmount,
+  });
 
   const gatewayOrderId: string | null = null; // TODO: replace with real gateway order ID
 
@@ -232,8 +240,11 @@ export async function initiatePayment(
     .from('payments')
     .insert({
       order_id,
-      amount: finalAmount,
-      discount_amount: discountAmount || null,
+      amount: bill.grand_total,
+      tax_amount: bill.gst_total,
+      service_charge: bill.service_charge,
+      discount_amount: bill.discount_amount || null,
+      breakdown: bill.breakdown_lines,
       method: payment_method,
       status: 'pending',
       gateway_order_id: gatewayOrderId,
