@@ -80,6 +80,28 @@ export async function update(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+// GET /restaurants/:id/settings  (owner only)
+export async function getSettings(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const settings = await restaurantsService.getSettings(req.params.id, authReq.restaurantId);
+    res.json(success(settings));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PATCH /restaurants/:id/settings  (owner only)
+export async function updateSettings(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const updated = await restaurantsService.updateSettings(req.params.id, req.body, authReq.restaurantId);
+    res.json(success(updated, 'Restaurant settings updated'));
+  } catch (err) {
+    next(err);
+  }
+}
+
 // PATCH /restaurants/:id/status  (admin only)
 export async function updateStatus(req: Request, res: Response, next: NextFunction) {
   try {

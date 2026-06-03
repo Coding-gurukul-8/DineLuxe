@@ -1,4 +1,5 @@
-// <reference path="./types/express.d.ts" />
+import './types/express-augmentation';
+
 import { createServer } from 'http';
 import { Server as SocketIOServer, type Socket } from 'socket.io';
 import { config } from './config/env';

@@ -247,26 +247,42 @@ export async function getBranchHourly(branchId: string) {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
-  // Fetch today's orders for the branch, including payment amounts
-  const { data: orders, error } = await supabaseAdmin
-    .from('orders')
-    .select('id, created_at, total_amount, status')
-    .eq('branch_id', branchId)
-    .gte('created_at', startOfToday)
-    .in('status', ORDER_STATUSES);
+  const [{ data: orders, error: ordersError }, { data: payments, error: paymentsError }] = await Promise.all([
+    supabaseAdmin
+      .from('orders')
+      .select('id, created_at, status')
+      .eq('branch_id', branchId)
+      .gte('created_at', startOfToday)
+      .in('status', ORDER_STATUSES),
 
-  if (error) throw error;
+    supabaseAdmin
+      .from('payments')
+      .select('amount, order_id, orders!inner(created_at, branch_id, status)')
+      .eq('status', 'completed')
+      .eq('orders.branch_id', branchId)
+      .gte('orders.created_at', startOfToday),
+  ]);
+
+  if (ordersError) throw ordersError;
+  if (paymentsError) throw paymentsError;
+
+  const paymentRevenueByHour: Record<number, number> = {};
+  for (const payment of payments ?? []) {
+    const orderCreatedAt = (payment.orders as any)?.created_at;
+    if (!orderCreatedAt) continue;
+    const hour = new Date(orderCreatedAt).getHours();
+    paymentRevenueByHour[hour] = (paymentRevenueByHour[hour] ?? 0) + Number(payment.amount ?? 0);
+  }
 
   // Bucket into hours 0–23
   const hourBuckets: Record<number, { orders: number; revenue: number }> = {};
   for (let h = 0; h < 24; h++) {
-    hourBuckets[h] = { orders: 0, revenue: 0 };
+    hourBuckets[h] = { orders: 0, revenue: paymentRevenueByHour[h] ?? 0 };
   }
 
   for (const order of orders ?? []) {
     const hour = new Date(order.created_at).getHours();
-    hourBuckets[hour].orders  += 1;
-    hourBuckets[hour].revenue += order.total_amount ?? 0;
+    hourBuckets[hour].orders += 1;
   }
 
   // Only return hours up to current hour (no future empty bars)
@@ -279,6 +295,114 @@ export async function getBranchHourly(branchId: string) {
 
   return { hours };
 }
+
+// ─── Branch performance (owner + admin) ───────────────────────────────────────
+// GET /analytics/branch-performance?restaurant_id=:restaurantId
+export async function getBranchPerformance(
+  restaurantId: string,
+  authUser?: { role: string; restaurant_id?: string },
+) {
+  if (authUser?.role === 'owner' && authUser.restaurant_id !== restaurantId) {
+    throw Object.assign(new Error('Restaurant access mismatch'), { statusCode: 403 });
+  }
+
+  const startOfToday = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    new Date().getDate(),
+  ).toISOString();
+
+  const { data: branches, error: branchesErr } = await supabaseAdmin
+    .from('branches')
+    .select('id, name')
+    .eq('restaurant_id', restaurantId);
+
+  if (branchesErr) throw branchesErr;
+  if (!branches?.length) return [];
+
+  const branchIds = branches.map((branch: any) => branch.id);
+
+  const { data: orders, error: ordersErr } = await supabaseAdmin
+    .from('orders')
+    .select('id, branch_id, status, created_at')
+    .in('branch_id', branchIds)
+    .gte('created_at', startOfToday)
+    .in('status', ['paid', 'closed']);
+
+  if (ordersErr) throw ordersErr;
+
+  const orderIds = (orders ?? []).map((order: any) => order.id);
+  let payments: any[] = [];
+
+  if (orderIds.length > 0) {
+    const { data, error: paymentsErr } = await supabaseAdmin
+      .from('payments')
+      .select('amount, order_id, orders!inner(branch_id)')
+      .eq('status', 'completed')
+      .in('order_id', orderIds);
+
+    if (paymentsErr) throw paymentsErr;
+    payments = data ?? [];
+  }
+
+  const branchRevenue: Record<string, number> = {};
+  for (const payment of payments) {
+    const branchId = (payment.orders as any)?.branch_id;
+    if (!branchId) continue;
+    branchRevenue[branchId] = (branchRevenue[branchId] ?? 0) + Number(payment.amount ?? 0);
+  }
+
+  const { data: tables, error: tablesErr } = await supabaseAdmin
+    .from('tables')
+    .select('branch_id, status')
+    .in('branch_id', branchIds);
+
+  if (tablesErr) throw tablesErr;
+
+  const metricMap: Record<string, { id: string; name: string; revenue: number; orders: number; occupied: number; total_tables: number }> = {};
+  for (const branch of branches) {
+    metricMap[branch.id] = {
+      id: branch.id,
+      name: branch.name,
+      revenue: 0,
+      orders: 0,
+      occupied: 0,
+      total_tables: 0,
+    };
+  }
+
+  for (const order of orders ?? []) {
+    const metrics = metricMap[order.branch_id];
+    if (!metrics) continue;
+    metrics.orders += 1;
+  }
+
+  for (const branchId of Object.keys(branchRevenue)) {
+    const metrics = metricMap[branchId];
+    if (!metrics) continue;
+    metrics.revenue = branchRevenue[branchId];
+  }
+
+  for (const table of tables ?? []) {
+    const metrics = metricMap[table.branch_id];
+    if (!metrics) continue;
+    metrics.total_tables += 1;
+    if (table.status === 'occupied') metrics.occupied += 1;
+  }
+
+  return Object.values(metricMap).map((branch) => {
+    const occupancyRate = branch.total_tables > 0 ? Math.round((branch.occupied / branch.total_tables) * 100) / 100 : 0;
+    return {
+      id: branch.id,
+      name: branch.name,
+      revenue: Math.round(branch.revenue * 100) / 100,
+      orders: branch.orders,
+      occupancy_rate: occupancyRate,
+      occupancy: occupancyRate,
+    };
+  });
+}
+
 // ─── Restaurant Analytics (period-based) ─────────────────────────────────────
 // GET /analytics/restaurant/:restaurantId/analytics?period=7d|30d|90d
 // Returns: { revenue_by_day, orders_by_day, avg_order_value, top_items }

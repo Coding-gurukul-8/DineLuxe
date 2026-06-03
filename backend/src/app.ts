@@ -83,7 +83,7 @@ import couponRoutes           from './modules/coupons/coupons.routes';
 
 // ── Part 2 Additions ─────────────────────────────────────────────────────────
 import waiterAssignmentRoutes from './modules/waiter-assignment/waiter-assignment.routes';
-import ownerCrmRoutes         from './modules/owner-crm/order-crm.route';
+import ownerCrmRoutes         from './modules/owner-crm/owner-crm.routes';
 
 // ── Background Jobs ───────────────────────────────────────────────────────────
 import './jobs/booking-reminder';
@@ -142,12 +142,11 @@ app.use(`${API}/auth`,                   authRoutes);
 app.use(`${API}/users`,                  userRoutes);
 
 // ── Restaurant & Branding ────────────────────────────────────────────────────
-app.use(`${API}/restaurants`,            restaurantRoutes);
-app.use(`${API}/branches`,               branchRoutes);
+app.use(`${API}/restaurants`,            restaurantRoutes);app.use(`${API}/restaurants/:id/branding`, brandingRoutes);app.use(`${API}/branches`,               branchRoutes);
 app.use(`${API}/branding`,               brandingRoutes);
 
 // ── Menu ─────────────────────────────────────────────────────────────────────
-app.use(`${API}/menus`,                  menuRoutes);
+app.use(`${API}/menu`,                   menuRoutes);
 
 // ── Tables & Floor ───────────────────────────────────────────────────────────
 app.use(`${API}/tables`,                 tableRoutes);
@@ -212,7 +211,6 @@ app.use(`${API}/coupons`,                couponRoutes);
 
 // ── Part 2 — Phase 3 additions ───────────────────────────────────────────────
 app.use(`${API}/waiter-assignment`,      waiterAssignmentRoutes);
-app.use(`${API}/owner/customers`,        ownerCrmRoutes);   // owner-crm mounts at /owner/customers
 
 // ════════════════════════════════════════════════════════════════════════════
 // HEALTH CHECK
@@ -341,7 +339,7 @@ import geoRoutes from './modules/geo/geo.routes';
 import dynamicPricingRoutes from './modules/dynamic-pricing/dynamic-pricing.routes';
 import chatbotRoutes from './modules/chatbot/chatbot.routes';
 import socialDiningRoutes from './modules/social-dining/social-dining.routes';
-import ownerCrmRoutes from './modules/owner-crm/order-crm.route';
+import ownerCrmRoutes from './modules/owner-crm/owner-crm.routes';
 
 // ── Background Jobs
 import './jobs/delivery-acceptance-timeout';
@@ -455,7 +453,7 @@ app.use(`${API}/geo`, geoRoutes);
 app.use(`${API}/dynamic-pricing`, dynamicPricingRoutes);
 app.use(`${API}/chatbot`, chatbotRoutes);
 app.use(`${API}/social-dining`, socialDiningRoutes);
-app.use(`${API}/owner-crm`, ownerCrmRoutes);
+app.use(`${API}`, ownerCrmRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {

@@ -34,6 +34,13 @@ export async function publishLayout(req: Request, res: Response, next: NextFunct
   }
 }
 
+export async function getLayoutStatus(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await floorService.getLayoutStatus(req.params.branchId);
+    res.json(success(data));
+  } catch (err) { next(err); }
+}
+
 export async function getLiveLayout(req: Request, res: Response, next: NextFunction) {
   try {
     const data = await floorService.getLiveLayout(req.params.branchId);

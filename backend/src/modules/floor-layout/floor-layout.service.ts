@@ -190,6 +190,20 @@ export async function getLayout(branchId: string) {
 // BUG FIX: old version read layout_data.floors (old format).
 // Now reads layout_data.tables (new format) and joins live table status from DB.
 
+export async function getLayoutStatus(branchId: string) {
+  const { data: active, error } = await supabaseAdmin
+    .from('floor_layouts')
+    .select('id')
+    .eq('branch_id', branchId)
+    .eq('status', 'active')
+    .order('layout_version', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return { has_active_layout: Boolean(active) };
+}
+
 export async function getLiveLayout(branchId: string) {
   const CACHE_KEY = `live_layout:${branchId}`;
   const cached = await redis.get(CACHE_KEY);

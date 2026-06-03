@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
+import { injectTenant } from '../../middleware/tenant.middleware';
 import * as ctrl from './floor-layout.controller';
 
 const router: import('express').Router = Router();
@@ -13,6 +14,9 @@ router.post('/branch/:branchId', authenticate, requireRole('manager', 'owner'), 
 
 // POST /floor-layout/branch/:branchId/publish — make draft live
 router.post('/branch/:branchId/publish', authenticate, requireRole('manager', 'owner'), ctrl.publishLayout);
+
+// GET /floor-layout/branch/:branchId/status — owner/manager — check whether a live layout exists
+router.get('/branch/:branchId/status', authenticate, injectTenant, requireRole('owner', 'manager'), ctrl.getLayoutStatus);
 
 // GET /floor-layout/branch/:branchId/live — all staff — live layout + table statuses
 router.get('/branch/:branchId/live', authenticate, ctrl.getLiveLayout);

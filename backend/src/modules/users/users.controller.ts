@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import * as authService from '../auth/auth.service';
 import * as usersService from './users.service';
 import { success, error } from '../../utils/response';
 
@@ -81,6 +82,81 @@ export async function getUserById(req: Request, res: Response, next: NextFunctio
 
     const user = await usersService.getUserById(req.params.id, restaurantId);
     res.json(success(user, 'User fetched'));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /users/:id/notification-preferences
+export async function getNotificationPreferences(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (authReq.user.id !== req.params.id) {
+      return res.status(403).json(error('FORBIDDEN', 'Cannot view another user account.'));
+    }
+
+    const prefs = await usersService.getNotificationPreferences(req.params.id);
+    res.json(success(prefs));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PATCH /users/:id/notification-preferences
+export async function updateNotificationPreferences(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (authReq.user.id !== req.params.id) {
+      return res.status(403).json(error('FORBIDDEN', 'Cannot update another user account.'));
+    }
+
+    const updated = await usersService.updateNotificationPreferences(req.params.id, req.body);
+    res.json(success(updated, 'Notification preferences saved'));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /users/:id/sessions
+export async function getUserSessions(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (authReq.user.id !== req.params.id) {
+      return res.status(403).json(error('FORBIDDEN', 'Cannot view another user account.'));
+    }
+
+    const sessions = await usersService.getActiveSessions(req.params.id);
+    res.json(success(sessions));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// DELETE /users/:id/sessions
+export async function revokeUserSessions(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (authReq.user.id !== req.params.id) {
+      return res.status(403).json(error('FORBIDDEN', 'Cannot revoke another user account.'));
+    }
+
+    const result = await usersService.revokeUserSessions(req.params.id);
+    res.json(success(result, 'User sessions revoked'));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PATCH /users/:id/password
+export async function changePassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (authReq.user.id !== req.params.id) {
+      return res.status(403).json(error('FORBIDDEN', 'Cannot change password for another user.'));
+    }
+
+    const result = await authService.changePassword(req.params.id, req.body);
+    res.json(success(result, 'Password updated successfully'));
   } catch (err) {
     next(err);
   }

@@ -39,7 +39,9 @@ async function autoReassignDelivery(
     }
 
     const branchId = order.branch_id as string;
-    const branch = order.branches as { lat: number | null; lon: number | null } | null;
+    const branch = Array.isArray(order.branches)
+      ? (order.branches[0] as { lat: number | null; lon: number | null } | undefined)
+      : (order.branches as { lat: number | null; lon: number | null } | null | undefined);
     const restaurantLat = branch?.lat ?? null;
     const restaurantLon = branch?.lon ?? null;
 
@@ -440,84 +442,6 @@ export async function updatePartnerOnlineStatus(partnerId: string, isOnline: boo
   return { partner_id: partnerId, is_online: isOnline };
 }
 
-// ─── P3-2 ADDITION: Partner Stats ───────────────────────────────────────────
-function getStartOfWeek() {
-  const date = new Date();
-  const day = date.getDay();
-  const diff = (day + 6) % 7;
-  date.setDate(date.getDate() - diff);
-  date.setHours(0, 0, 0, 0);
-  return date.toISOString();
-}
-
-function getStartOfMonth() {
-  const date = new Date();
-  date.setDate(1);
-  date.setHours(0, 0, 0, 0);
-  return date.toISOString();
-}
-
-export async function getPartnerStats(partnerId: string) {
-  const [lifetime, thisWeek, thisMonth, rating] = await Promise.all([
-    supabaseAdmin
-      .from('delivery_assignments')
-      .select('id, status, distance_km')
-      .eq('partner_id', partnerId)
-      .eq('status', 'delivered'),
-    supabaseAdmin
-      .from('delivery_assignments')
-      .select('id, status')
-      .eq('partner_id', partnerId)
-      .eq('status', 'delivered')
-      .gte('completed_at', getStartOfWeek()),
-    supabaseAdmin
-      .from('delivery_assignments')
-      .select('id, status')
-      .eq('partner_id', partnerId)
-      .eq('status', 'delivered')
-      .gte('completed_at', getStartOfMonth()),
-    supabaseAdmin
-      .from('reviews')
-      .select('delivery_rating')
-      .eq('delivery_partner_id', partnerId)
-      .not('delivery_rating', 'is', null),
-  ]);
-
-  if (lifetime.error) throw lifetime.error;
-  if (thisWeek.error) throw thisWeek.error;
-  if (thisMonth.error) throw thisMonth.error;
-  if (rating.error) throw rating.error;
-
-  const lifetimeData = lifetime.data ?? [];
-  const weekData = thisWeek.data ?? [];
-  const monthData = thisMonth.data ?? [];
-  const ratingData = rating.data ?? [];
-
-  const totalLifetimeDeliveries = lifetimeData.length;
-  const lifetimeEarnings = lifetimeData.reduce(
-    (sum: number, d: any) => sum + (30 + (Number(d.distance_km) || 0) * 5),
-    0,
-  );
-  const totalDistanceKm = lifetimeData.reduce(
-    (sum: number, d: any) => sum + (Number(d.distance_km) || 0),
-    0,
-  );
-  const weeklyDeliveries = weekData.length;
-  const monthlyDeliveries = monthData.length;
-  const avgRating = ratingData.length > 0
-    ? (ratingData.reduce((sum: number, r: any) => sum + Number(r.delivery_rating), 0) / ratingData.length).toFixed(1)
-    : null;
-
-  return {
-    total_lifetime_deliveries: totalLifetimeDeliveries,
-    lifetime_earnings: Math.round(lifetimeEarnings * 100) / 100,
-    total_distance_km: Math.round(totalDistanceKm * 100) / 100,
-    weekly_deliveries: weeklyDeliveries,
-    monthly_deliveries: monthlyDeliveries,
-    avg_rating: avgRating,
-  };
-}
-
 // ─── Update Partner Location ──────────────────────────────────────────────────
 
 export async function updatePartnerLocation(
@@ -904,7 +828,9 @@ export async function runAcceptanceTimeoutForDelivery(
     delivery_id: deliveryId,
   });
 
-  const order = (delivery.orders as { id: string; branch_id: string } | null);
+  const order = Array.isArray(delivery.orders)
+    ? (delivery.orders[0] as { id: string; branch_id: string } | undefined)
+    : (delivery.orders as { id: string; branch_id: string } | null | undefined);
   if (order?.id) {
     await autoReassignDelivery(deliveryId, partnerId, order.id);
   }

@@ -47,12 +47,18 @@ export type RegisterInput = z.infer<typeof registerSchema>;
 // ─── Update Schema ───────────────────────────────────────────────────────────
 export const updateRestaurantSchema = z.object({
   name: z.string().min(2).max(100).optional(),
-  cuisine_types: z.array(z.string()).optional(),
+  cuisine_type: z.string().max(100).optional(),
   description: z.string().max(500).optional(),
   gst_number: z.string().optional(),
-  contact_email: z.string().email().optional(),
-  contact_phone: z.string().regex(/^[6-9]\d{9}$/).optional(),
-  website: z.string().url().optional(),
+  contact_email: z.string().email().optional().or(z.literal('')),
+  contact_phone: z.string().max(20).optional().or(z.literal('')),
+  website: z.string().url().optional().or(z.literal('')),
+});
+
+export const updateRestaurantSettingsSchema = z.object({
+  cancel_within_hours: z.number().int().min(0).max(72),
+  walkin_grace_period_minutes: z.number().int().min(0).max(120),
+  noshow_autocancel_minutes: z.number().int().min(0).max(120),
 });
 
 export const updateStatusSchema = z.object({
@@ -62,4 +68,5 @@ export const updateStatusSchema = z.object({
 });
 
 export type UpdateRestaurantInput = z.infer<typeof updateRestaurantSchema>;
+export type UpdateRestaurantSettingsInput = z.infer<typeof updateRestaurantSettingsSchema>;
 export type UpdateStatusInput = z.infer<typeof updateStatusSchema>;

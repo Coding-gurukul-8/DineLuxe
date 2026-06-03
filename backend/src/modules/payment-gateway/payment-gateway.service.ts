@@ -15,8 +15,6 @@
 
 import crypto from 'crypto';
 import QRCode from 'qrcode';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const Razorpay = require('razorpay');
 
 import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
@@ -31,6 +29,12 @@ function getRazorpayClient() {
       { statusCode: 503 },
     );
   }
+
+  // Load Razorpay lazily so API startup still works even when the package is
+  // absent in environments that do not use the payment gateway.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const Razorpay = require('razorpay');
+
   return new Razorpay({
     key_id: config.RAZORPAY_KEY_ID,
     key_secret: config.RAZORPAY_KEY_SECRET,

@@ -1,9 +1,50 @@
 import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '../../config/supabase';
-import { RegisterInput, UpdateRestaurantInput, UpdateStatusInput } from './restaurants.schema';
+import { redis } from '../../config/redis';
+import {
+  RegisterInput,
+  UpdateRestaurantInput,
+  UpdateRestaurantSettingsInput,
+  UpdateStatusInput,
+} from './restaurants.schema';
 import { sendEmail } from '../../email/send';
 import { insertAuditLog } from '../../utils/audit-log';
 import { config } from '../../config/env';
+
+const RESTAURANT_SETTINGS_KEY = (restaurantId: string) => `restaurant_settings:${restaurantId}`;
+
+export type RestaurantSettings = {
+  contact_phone?: string | null;
+  contact_email?: string | null;
+  description?: string | null;
+  website?: string | null;
+  cancel_within_hours?: number;
+  walkin_grace_period_minutes?: number;
+  noshow_autocancel_minutes?: number;
+};
+
+const DEFAULT_RESTAURANT_SETTINGS: Required<Pick<RestaurantSettings, 'cancel_within_hours' | 'walkin_grace_period_minutes' | 'noshow_autocancel_minutes'>> = {
+  cancel_within_hours: 2,
+  walkin_grace_period_minutes: 10,
+  noshow_autocancel_minutes: 15,
+};
+
+async function loadRestaurantSettings(restaurantId: string): Promise<RestaurantSettings> {
+  const payload = await redis.get(RESTAURANT_SETTINGS_KEY(restaurantId));
+  if (!payload) return {};
+  try {
+    return JSON.parse(payload) as RestaurantSettings;
+  } catch {
+    return {};
+  }
+}
+
+async function saveRestaurantSettings(restaurantId: string, updates: RestaurantSettings) {
+  const existing = await loadRestaurantSettings(restaurantId);
+  const data = { ...existing, ...updates };
+  await redis.set(RESTAURANT_SETTINGS_KEY(restaurantId), JSON.stringify(data));
+  return data;
+}
 
 // ─── Register Restaurant (multi-step, transactional) ────────────────────────
 // FIX: restaurants table only has: name, cuisine_type (singular), gst_number, status
@@ -228,8 +269,11 @@ export async function getById(restaurantId: string) {
       .eq('restaurant_id', restaurantId),
   ]);
 
+  const settings = await loadRestaurantSettings(restaurantId);
+
   return {
     ...restaurant,
+    ...settings,
     restaurant_branding: brandingRes.data ?? null,
     branches: branchesRes.data ?? [],
   };
@@ -274,8 +318,18 @@ export async function update(restaurantId: string, input: UpdateRestaurantInput)
   // Only update columns that actually exist in schema
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.name) updateData.name = input.name;
-  if (input.cuisine_types) updateData.cuisine_type = input.cuisine_types.join(', ');
+  if (input.cuisine_type) updateData.cuisine_type = input.cuisine_type;
   if (input.gst_number) updateData.gst_number = input.gst_number;
+
+  const settingsUpdates: RestaurantSettings = {};
+  if ('contact_phone' in input) settingsUpdates.contact_phone = input.contact_phone || null;
+  if ('contact_email' in input) settingsUpdates.contact_email = input.contact_email || null;
+  if ('description' in input) settingsUpdates.description = input.description || null;
+  if ('website' in input) settingsUpdates.website = input.website || null;
+
+  if (Object.keys(settingsUpdates).length > 0) {
+    await saveRestaurantSettings(restaurantId, settingsUpdates);
+  }
 
   const { data, error } = await supabaseAdmin
     .from('restaurants')
@@ -286,6 +340,44 @@ export async function update(restaurantId: string, input: UpdateRestaurantInput)
 
   if (error) throw new Error(`Update failed: ${error.message}`);
   return data;
+}
+
+export async function getSettings(restaurantId: string, tokenRestaurantId?: string) {
+  if (tokenRestaurantId && tokenRestaurantId !== restaurantId) {
+    throw Object.assign(new Error('Restaurant access mismatch'), { statusCode: 403 });
+  }
+
+  const settings = await loadRestaurantSettings(restaurantId);
+  return {
+    cancel_within_hours: settings.cancel_within_hours ?? DEFAULT_RESTAURANT_SETTINGS.cancel_within_hours,
+    walkin_grace_period_minutes:
+      settings.walkin_grace_period_minutes ?? DEFAULT_RESTAURANT_SETTINGS.walkin_grace_period_minutes,
+    noshow_autocancel_minutes:
+      settings.noshow_autocancel_minutes ?? DEFAULT_RESTAURANT_SETTINGS.noshow_autocancel_minutes,
+  };
+}
+
+export async function updateSettings(
+  restaurantId: string,
+  input: UpdateRestaurantSettingsInput,
+  tokenRestaurantId?: string,
+) {
+  if (tokenRestaurantId && tokenRestaurantId !== restaurantId) {
+    throw Object.assign(new Error('Restaurant access mismatch'), { statusCode: 403 });
+  }
+
+  const updated = await saveRestaurantSettings(restaurantId, {
+    cancel_within_hours: input.cancel_within_hours,
+    walkin_grace_period_minutes: input.walkin_grace_period_minutes,
+    noshow_autocancel_minutes: input.noshow_autocancel_minutes,
+  });
+  return {
+    cancel_within_hours: updated.cancel_within_hours ?? DEFAULT_RESTAURANT_SETTINGS.cancel_within_hours,
+    walkin_grace_period_minutes:
+      updated.walkin_grace_period_minutes ?? DEFAULT_RESTAURANT_SETTINGS.walkin_grace_period_minutes,
+    noshow_autocancel_minutes:
+      updated.noshow_autocancel_minutes ?? DEFAULT_RESTAURANT_SETTINGS.noshow_autocancel_minutes,
+  };
 }
 
 // ─── Update Status (admin only) ───────────────────────────────────────────────

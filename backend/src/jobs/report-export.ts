@@ -181,9 +181,10 @@ async function generateCSV(data: any[], reportType: string): Promise<Buffer> {
 }
 
 async function generateXLSX(data: any[], reportType: string): Promise<Buffer> {
-  // exceljs is listed as a required install: npm install exceljs @types/exceljs
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const ExcelJS = require('exceljs') as typeof import('exceljs');
+  // exceljs is imported lazily so report export does not break startup if the
+  // package is not installed in this environment.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-unsafe-assignment
+  const ExcelJS = require('exceljs') as any;
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Restaurant OS';
@@ -210,7 +211,7 @@ async function generateXLSX(data: any[], reportType: string): Promise<Buffer> {
   }
 
   // Auto-fit rows
-  sheet.eachRow({ includeEmpty: false }, (row) => {
+  sheet.eachRow({ includeEmpty: false }, (row: any) => {
     row.height = 18;
   });
 

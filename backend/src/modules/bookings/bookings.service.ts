@@ -150,7 +150,7 @@ export async function getBookingById(bookingId: string, userId: string, role: st
 
 // ─── Get my bookings ──────────────────────────────────────────────────────────
 
-export async function getMyBookings(userId: string, query: Record<string, string>) {
+export async function getMyBookings(userId: string, query: Record<string, string | undefined>) {
   const { page, limit, offset } = parsePagination(query);
 
   const { data, error, count } = await supabaseAdmin
@@ -166,7 +166,7 @@ export async function getMyBookings(userId: string, query: Record<string, string
 
 // ─── Get branch bookings (today) ──────────────────────────────────────────────
 
-export async function getBranchBookings(branchId: string, query: Record<string, string>) {
+export async function getBranchBookings(branchId: string, query: Record<string, string | undefined>) {
   const { page, limit, offset } = parsePagination(query);
   const today = new Date();
   const startOfDay = new Date(today.setHours(0, 0, 0, 0)).toISOString();

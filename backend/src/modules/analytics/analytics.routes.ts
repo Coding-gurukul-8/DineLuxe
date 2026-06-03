@@ -9,6 +9,7 @@ import {
   getStaffingRecommendation,
   getRestaurantOverview,
   getBranchHourly,
+  getBranchPerformance,
   getRestaurantAnalytics,
   getPlatformOverview,
 } from './analytics.controller';
@@ -73,7 +74,13 @@ router.get(
   requireRole('owner', 'admin', 'super_admin'),
   getBranchHourly,
 );
-
+// ── Branch performance (owner + admin) ─────────────────────────────────────────────
+// GET /analytics/branch-performance?restaurant_id=:restaurantId
+router.get(
+  '/branch-performance',
+  requireRole('owner', 'admin', 'super_admin'),
+  getBranchPerformance,
+);
 // ── Restaurant period analytics (owner + admin) ───────────────────────────────
 // GET /analytics/restaurant/:restaurantId/analytics?period=7d|30d|90d
 // Returns: { revenue_by_day, orders_by_day, avg_order_value, top_items }

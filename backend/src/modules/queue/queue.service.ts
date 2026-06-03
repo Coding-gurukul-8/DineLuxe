@@ -137,7 +137,7 @@ export async function joinQueue(input: JoinQueueInput) {
 
 // ─── Get full queue for branch ────────────────────────────────────────────────
 
-export async function getBranchQueue(branchId: string, query: Record<string, string>) {
+export async function getBranchQueue(branchId: string, query: Record<string, string | undefined>) {
   const { page, limit, offset } = parsePagination(query);
 
   const { data, error, count } = await supabaseAdmin

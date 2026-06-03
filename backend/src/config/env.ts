@@ -60,6 +60,12 @@ const envSchema = z.object({
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_CONTACT_EMAIL: z.string().email('VAPID_CONTACT_EMAIL must be a valid email').optional(),
+
+  // Razorpay / UPI payment gateway configuration
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+  MERCHANT_UPI_ID: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -3,7 +3,7 @@ import { authenticate } from '../../middleware/auth.middleware';
 import { injectTenant } from '../../middleware/tenant.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
 import { validate } from '../../middleware/validate.middleware';
-import { updateProfileSchema } from './users.schema';
+import { updateProfileSchema, notificationPreferencesSchema, changePasswordSnakeSchema } from './users.schema';
 import * as ctrl from './users.controller';
 
 const router: import('express').Router = Router();
@@ -22,5 +22,12 @@ router.delete('/me', authenticate, ctrl.deleteMe);
 // getUserById controller doesn't need a fragile JWT fallback.
 router.get('/', authenticate, injectTenant, requireRole('manager', 'owner', 'admin'), ctrl.listUsers);
 router.get('/:id', authenticate, injectTenant, requireRole('manager', 'owner', 'admin'), ctrl.getUserById);
+
+// User settings endpoints (self only)
+router.get('/:id/notification-preferences', authenticate, ctrl.getNotificationPreferences);
+router.patch('/:id/notification-preferences', authenticate, validate(notificationPreferencesSchema), ctrl.updateNotificationPreferences);
+router.get('/:id/sessions', authenticate, ctrl.getUserSessions);
+router.delete('/:id/sessions', authenticate, ctrl.revokeUserSessions);
+router.patch('/:id/password', authenticate, validate(changePasswordSnakeSchema), ctrl.changePassword);
 
 export default router;

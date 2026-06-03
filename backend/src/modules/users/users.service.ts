@@ -1,10 +1,12 @@
 import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
-import { UpdateProfileInput } from './users.schema';
+import { UpdateProfileInput, NotificationPreferencesInput } from './users.schema';
 
 function refreshTokenKey(userId: string): string {
   return `refresh_token:${userId}`;
 }
+
+const NOTIFICATION_PREFERENCES_KEY = (userId: string) => `user_notification_preferences:${userId}`;
 
 function splitName(name?: string | null): { first_name: string; last_name: string } {
   const parts = (name ?? '').trim().split(' ').filter(Boolean);
@@ -148,6 +150,70 @@ export async function listUsers(restaurantId: string, role?: string) {
 
   if (error) throw new Error(`Failed to fetch users: ${error.message}`);
   return (data ?? []).map(mapUserRow);
+}
+
+// ─── Notification Preferences ───────────────────────────────────────────────────
+const defaultNotificationPreferences = {
+  email_new_orders: true,
+  push_staff_actions: true,
+  daily_sales_summary: true,
+  low_inventory_alerts: true,
+  new_review_alerts: true,
+};
+
+export async function getNotificationPreferences(userId: string) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('notification_preferences')
+      .eq('id', userId)
+      .single();
+
+    if (error) throw error;
+    return data?.notification_preferences ?? defaultNotificationPreferences;
+  } catch (err: any) {
+    if ((err?.message ?? '').includes('notification_preferences')) {
+      const stored = await redis.get(NOTIFICATION_PREFERENCES_KEY(userId));
+      if (!stored) return defaultNotificationPreferences;
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return defaultNotificationPreferences;
+      }
+    }
+    throw new Error(`Failed to fetch notification preferences: ${err.message ?? err}`);
+  }
+}
+
+export async function updateNotificationPreferences(userId: string, updates: NotificationPreferencesInput) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .update({ notification_preferences: updates, updated_at: new Date().toISOString() })
+      .eq('id', userId)
+      .select('notification_preferences')
+      .single();
+
+    if (error) throw error;
+    return data?.notification_preferences ?? defaultNotificationPreferences;
+  } catch (err: any) {
+    if ((err?.message ?? '').includes('notification_preferences')) {
+      await redis.set(NOTIFICATION_PREFERENCES_KEY(userId), JSON.stringify(updates));
+      return updates;
+    }
+    throw new Error(`Failed to update notification preferences: ${err.message ?? err}`);
+  }
+}
+
+// ─── Session management ─────────────────────────────────────────────────────────
+export async function getActiveSessions(userId: string) {
+  const count = await redis.exists(refreshTokenKey(userId));
+  return { count: count === 1 ? 1 : 0 };
+}
+
+export async function revokeUserSessions(userId: string) {
+  await redis.del(refreshTokenKey(userId));
+  return { revoked: true };
 }
 
 // ─── Check Email Availability ────────────────────────────────────────────────

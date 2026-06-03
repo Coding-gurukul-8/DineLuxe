@@ -3,7 +3,12 @@ import { authenticate } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
 import { injectTenant } from '../../middleware/tenant.middleware';
 import { validate } from '../../middleware/validate.middleware';
-import { registerSchema, updateRestaurantSchema, updateStatusSchema } from './restaurants.schema';
+import {
+  registerSchema,
+  updateRestaurantSchema,
+  updateRestaurantSettingsSchema,
+  updateStatusSchema,
+} from './restaurants.schema';
 import * as ctrl from './restaurants.controller';
 
 const router: import('express').Router = Router();
@@ -22,6 +27,23 @@ router.patch(
   requireRole('owner'),
   validate(updateRestaurantSchema),
   ctrl.update
+);
+
+router.get(
+  '/:id/settings',
+  authenticate,
+  injectTenant,
+  requireRole('owner'),
+  ctrl.getSettings
+);
+
+router.patch(
+  '/:id/settings',
+  authenticate,
+  injectTenant,
+  requireRole('owner'),
+  validate(updateRestaurantSettingsSchema),
+  ctrl.updateSettings
 );
 
 // ── Admin only ───────────────────────────────────────────────────────────────

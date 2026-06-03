@@ -1,8 +1,14 @@
+import type { PaginationMeta } from './pagination';
+
 export interface SuccessResponse<T = unknown> {
   success: true;
   data: T;
   message?: string;
   meta?: unknown;
+}
+
+export interface PaginatedSuccessResponse<T = unknown> extends SuccessResponse<T> {
+  pagination: PaginationMeta;
 }
 
 export interface ErrorResponse {
@@ -28,6 +34,17 @@ export function success<T>(
     data,
     ...(message !== undefined && { message }),
     ...(resolvedMeta !== undefined && { meta: resolvedMeta }),
+  };
+}
+
+export function paginatedSuccess<T>(
+  data: T,
+  pagination: PaginationMeta,
+): PaginatedSuccessResponse<T> {
+  return {
+    success: true,
+    data,
+    pagination,
   };
 }
 
