@@ -4,6 +4,8 @@ import { generateEmployeeId } from '../../utils/employee-id';
 import { generateDefaultPassword } from '../../utils/password';
 import { insertAuditLog } from '../../utils/audit-log';
 import { sendEmail } from '../../email/send';
+import { sendStaffCredentialsSMS } from '../../utils/sms';
+
 import { CreateStaffInput, UpdateStaffInput } from './staff.schema';
 
 // ─── Get All Staff for a Branch ───────────────────────────────────────────────
@@ -91,15 +93,38 @@ export async function create(
     if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
 
     // Send credentials email (fire and forget — never await in request handler)
+    // Resolve restaurant/branch name for SMS content (non-fatal)
+    let restaurantName = '';
+    try {
+      const { data: restaurant } = await supabaseAdmin
+        .from('restaurants')
+        .select('name')
+        .eq('id', restaurantId)
+        .single();
+      restaurantName = restaurant?.name ?? '';
+    } catch (e) {
+      restaurantName = '';
+    }
+
+    const loginUrl = `${process.env.FRONTEND_URL}/first-login`;
+
     sendEmail({
       to: input.email,
       templateName: 'welcome',
       data: {
         name: input.first_name,
-        restaurantName: '',
-        loginUrl: `${process.env.FRONTEND_URL}/first-login`,
+        restaurantName,
+        loginUrl,
       },
     }).catch(console.error);
+
+    // SMS credentials (non-fatal)
+    if (input.phone) {
+      sendStaffCredentialsSMS(input.phone, restaurantName, defaultPassword, loginUrl).catch((err) =>
+        console.error('[sms] Staff credentials SMS failed:', err),
+      );
+    }
+
 
     await insertAuditLog({
       actorId,

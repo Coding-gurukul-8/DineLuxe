@@ -5,6 +5,8 @@ import { redis } from '../../config/redis';
 import { config } from '../../config/env';
 import { generateOTP, storeOTP, verifyOTP, deleteOTP } from '../../utils/otp';
 import { sendEmail } from '../../email/send';
+import { sendOTPSMS } from '../../utils/sms';
+
 import type {
   SignupInput,
   LoginInput,
@@ -184,6 +186,14 @@ export async function signup(input: SignupInput): Promise<{
       templateName: 'otp-verify',
       data: { name: firstName, otp, expiryMinutes: Math.floor(config.OTP_EXPIRY_SECONDS / 60) },
     });
+
+    // SMS OTP (non-fatal)
+    if (input.phone) {
+      sendOTPSMS(input.phone, otp).catch((err) =>
+        console.error('[sms] OTP send failed:', err),
+      );
+    }
+
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[DEV] OTP for ${email}: ${otp}`);
     }

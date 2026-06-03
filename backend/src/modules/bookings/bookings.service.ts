@@ -2,6 +2,8 @@ import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
 import { CreateBookingInput, CancelBookingInput } from './bookings.schema';
 import { parsePagination } from '../../utils/pagination';
+import { sendBookingConfirmationSMS } from '../../utils/sms';
+
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -125,6 +127,39 @@ export async function createBooking(input: CreateBookingInput, userId: string) {
     body: `Your table is reserved for ${arrivalTime.toLocaleString()}`,
     data: { booking_id: booking.id },
   }).then(() => {});
+
+  // SMS booking confirmation (non-fatal)
+  try {
+    const [{ data: customer }, { data: tbl }, { data: br }] = await Promise.all([
+      supabaseAdmin.from('users').select('phone').eq('id', userId).single(),
+      supabaseAdmin.from('tables').select('label, branch_id').eq('id', tableId).single(),
+      supabaseAdmin.from('branches').select('name, restaurant_id').eq('id', input.branch_id).single(),
+    ]);
+
+    const phone = (customer?.phone ?? '') as string;
+    if (phone) {
+      const restaurantId = br?.restaurant_id;
+      let restaurantName = '';
+      if (restaurantId) {
+        const { data: restaurant } = await supabaseAdmin
+          .from('restaurants')
+          .select('name')
+          .eq('id', restaurantId)
+          .single();
+        restaurantName = restaurant?.name ?? '';
+      }
+
+      const tableLabel = tbl?.label ?? '';
+      const date_str = arrivalTime.toLocaleDateString();
+      const time_str = arrivalTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      sendBookingConfirmationSMS(phone, restaurantName, date_str, time_str, tableLabel).catch((err) =>
+        console.error('[sms] Booking SMS failed:', err),
+      );
+    }
+  } catch (e) {
+    // Non-fatal
+  }
 
   return booking;
 }

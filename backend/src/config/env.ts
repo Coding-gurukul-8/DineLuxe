@@ -61,12 +61,25 @@ const envSchema = z.object({
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_CONTACT_EMAIL: z.string().email('VAPID_CONTACT_EMAIL must be a valid email').optional(),
 
+  // ─── SMS (MSG91 for India / Twilio fallback) ─────────────────────────────
+  MSG91_AUTH_KEY: z.string().optional(),
+  MSG91_DEFAULT_TEMPLATE_ID: z.string().optional(),
+  MSG91_OTP_TEMPLATE_ID: z.string().optional(),
+  MSG91_BOOKING_TEMPLATE_ID: z.string().optional(),
+  MSG91_STAFF_TEMPLATE_ID: z.string().optional(),
+  MSG91_DELIVERY_TEMPLATE_ID: z.string().optional(),
+
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
+
   // Razorpay / UPI payment gateway configuration
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
   MERCHANT_UPI_ID: z.string().optional(),
 });
+
 
 const parsed = envSchema.safeParse(process.env);
 
@@ -79,3 +92,4 @@ if (!parsed.success) {
 
 export const config = parsed.data;
 export type Config = typeof config;
+
