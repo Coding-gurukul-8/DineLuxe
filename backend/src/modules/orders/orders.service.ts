@@ -601,6 +601,150 @@ export async function getActiveBranchOrders(branchId: string) {
   return result;
 }
 
+// ─── QUICK REORDER ADDITION: getLastThreeOrders ───────────────────────────────
+// Returns the customer's last 3 completed/paid orders with restaurant info
+// and a short items preview for the Quick Reorder section on the home page.
+export async function getLastThreeOrders(userId: string) {
+  // Fetch the last 3 qualifying orders for this customer
+  const { data: orders, error } = await supabaseAdmin
+    .from('orders')
+    .select(`
+      id,
+      created_at,
+      branch_id,
+      branches!inner (
+        restaurant_id,
+        restaurants!inner (
+          id,
+          name,
+          restaurant_branding ( logo_url )
+        )
+      ),
+      order_items (
+        quantity,
+        menu_items ( name )
+      ),
+      payments ( amount, status )
+    `)
+    .eq('customer_id', userId)
+    .in('status', ['paid', 'closed', 'served'])
+    .order('created_at', { ascending: false })
+    .limit(3);
+
+  if (error) throw error;
+  if (!orders || orders.length === 0) return [];
+
+  return (orders as any[]).map((o) => {
+    const restaurant = o.branches?.restaurants;
+    const branding   = (restaurant?.restaurant_branding ?? [])[0] ?? null;
+    const payment    = (o.payments ?? []).find((p: any) => p.status === 'completed') ?? null;
+
+    const itemsPreview = (o.order_items ?? [])
+      .slice(0, 4)
+      .map((oi: any) => ({ name: oi.menu_items?.name ?? 'Item', quantity: oi.quantity }));
+
+    return {
+      id:              o.id,
+      created_at:      o.created_at,
+      branch_id:       o.branch_id,
+      restaurant_id:   restaurant?.id ?? o.branches?.restaurant_id,
+      restaurant_name: restaurant?.name ?? 'Restaurant',
+      logo_url:        branding?.logo_url ?? null,
+      items_preview:   itemsPreview,
+      total:           payment?.amount ?? null,
+    };
+  });
+}
+
+// ─── QUICK REORDER ADDITION: reorder ─────────────────────────────────────────
+// Looks up an existing order that belongs to this customer, checks current
+// menu-item availability, and returns the cart payload for the frontend to
+// pre-populate the restaurant menu page. Nothing is written to the DB here —
+// the customer reviews the cart and places the order themselves.
+export async function reorder(originalOrderId: string, userId: string) {
+  // 1. Verify ownership and fetch branch/restaurant IDs
+  const { data: order, error: orderErr } = await supabaseAdmin
+    .from('orders')
+    .select('id, branch_id, branches!inner ( restaurant_id )')
+    .eq('id', originalOrderId)
+    .eq('customer_id', userId)
+    .maybeSingle();
+
+  if (orderErr) throw orderErr;
+  if (!order) {
+    throw Object.assign(new Error('Order not found'), { statusCode: 404 });
+  }
+
+  const branchId     = order.branch_id;
+  const restaurantId = (order as any).branches?.restaurant_id;
+
+  // 2. Fetch original items joined with current menu_item status/price
+  const { data: items, error: itemsErr } = await supabaseAdmin
+    .from('order_items')
+    .select(`
+      menu_item_id,
+      quantity,
+      notes,
+      addons,
+      menu_items!inner (
+        name,
+        price,
+        status
+      )
+    `)
+    .eq('order_id', originalOrderId);
+
+  if (itemsErr) throw itemsErr;
+  if (!items || items.length === 0) {
+    throw Object.assign(new Error('No items found in this order'), { statusCode: 404 });
+  }
+
+  // 3. Partition into available / unavailable based on current status
+  const availableItems:   any[] = [];
+  const unavailableNames: string[] = [];
+
+  for (const row of items as any[]) {
+    const mi          = row.menu_items;
+    const isUnavailable = mi.status === 'sold_out' || mi.status === 'hidden';
+
+    if (isUnavailable) {
+      unavailableNames.push(mi.name);
+    } else {
+      availableItems.push({
+        menu_item_id: row.menu_item_id,
+        quantity:     row.quantity,
+        notes:        row.notes   ?? null,
+        addons:       row.addons  ?? null,
+        name:         mi.name,
+        price:        Number(mi.price),
+      });
+    }
+  }
+
+  // 4. Hard-reject if nothing is orderable
+  if (availableItems.length === 0) {
+    throw Object.assign(
+      new Error('All items from this order are currently unavailable'),
+      { statusCode: 400 }
+    );
+  }
+
+  // 5. Build response — frontend stores this in localStorage and redirects
+  const message =
+    unavailableNames.length > 0
+      ? `Reorder ready. ${unavailableNames.length} item(s) no longer available were skipped.`
+      : 'All items are available. Review and place order.';
+
+  return {
+    items:             availableItems,
+    branch_id:         branchId,
+    restaurant_id:     restaurantId,
+    unavailable_items: unavailableNames,
+    message,
+  };
+}
+// ─── END QUICK REORDER ADDITION ───────────────────────────────────────────────
+
 // ─── Cancel Order ─────────────────────────────────────────────────────────────
 export async function cancelOrder(orderId: string, branchId: string, reason?: string) {
   const { data: order, error: fetchErr } = await supabaseAdmin

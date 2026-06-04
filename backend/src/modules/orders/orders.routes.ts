@@ -16,6 +16,8 @@ import {
   handleCallWaiter,
   handleApplyCoupon, // P3-1 ADDITION
   handleGetOrderByTable, // P3-1 ADDITION
+  handleGetLastThreeOrders, // QUICK REORDER ADDITION
+  handleReorder,            // QUICK REORDER ADDITION
 } from './orders.controller';
 
 const router: import('express').Router = Router();
@@ -65,6 +67,16 @@ router.get(
   handleGetActiveBranchOrders
 );
 
+// QUICK REORDER ADDITION ──────────────────────────────────────────────────────
+// IMPORTANT: must be registered BEFORE router.get('/:id') so the literal
+// string 'last-three' is not swallowed by the :id param matcher.
+router.get(
+  '/customer/last-three',
+  requireRole('customer'),
+  handleGetLastThreeOrders,
+);
+// END QUICK REORDER ADDITION ──────────────────────────────────────────────────
+
 // GET /orders/:id — any authenticated user
 router.get('/:id', injectTenant, handleGetOrder);
 
@@ -93,5 +105,16 @@ router.post(
   validate({ body: z.object({ code: z.string().min(1).toUpperCase() }) }),
   handleApplyCoupon
 );
+
+// QUICK REORDER ADDITION ──────────────────────────────────────────────────────
+// POST /orders/:orderId/reorder — customer only
+// Returns the items array + branch/restaurant IDs for the frontend to
+// pre-populate the cart. Nothing is written to the DB here.
+router.post(
+  '/:orderId/reorder',
+  requireRole('customer'),
+  handleReorder
+);
+// END QUICK REORDER ADDITION ──────────────────────────────────────────────────
 
 export default router;

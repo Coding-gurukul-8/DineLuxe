@@ -15,6 +15,34 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { formatCurrency } from "@/lib/utils";
 import type { Order, MenuItem, LoyaltyData } from "@/types/api";
+
+// QUICK REORDER ADDITION — types ─────────────────────────────────────────────
+interface LastOrder {
+  id: string;
+  created_at: string;
+  branch_id: string;
+  restaurant_id: string;
+  restaurant_name: string;
+  logo_url: string | null;
+  items_preview: { name: string; quantity: number }[];
+  total: number | null;
+}
+
+interface ReorderResult {
+  items: {
+    menu_item_id: string;
+    quantity: number;
+    notes: string | null;
+    addons: unknown[] | null;
+    name: string;
+    price: number;
+  }[];
+  branch_id: string;
+  restaurant_id: string;
+  unavailable_items: string[];
+  message: string;
+}
+// END QUICK REORDER ADDITION — types ─────────────────────────────────────────
 import {
   Search, QrCode, Calendar, ShoppingBag, Clock, Star,
   ChevronRight, Flame, Bell, Gift, Sparkles, MapPin,
@@ -296,6 +324,9 @@ export default function CustomerHomePage() {
   const [pulling, setPulling] = useState(false);
   const [activeMoodId, setActiveMoodId] = useState<string | null>(null);
   const [moodFilteredCount, setMoodFilteredCount] = useState<number | null>(null);
+  // QUICK REORDER ADDITION — state ─────────────────────────────────────────────
+  const [reorderingId, setReorderingId] = useState<string | null>(null);
+  // END QUICK REORDER ADDITION — state ─────────────────────────────────────────
   const { user, branchId } = useAuth();
   const router = useRouter();
 
@@ -362,6 +393,16 @@ export default function CustomerHomePage() {
     queryFn: () => apiClient.get<LoyaltyData>("/loyalty/me"),
   });
 
+  // QUICK REORDER ADDITION — query ─────────────────────────────────────────────
+  // Only fires for logged-in customers; guests see nothing.
+  const { data: lastOrders } = useQuery({
+    queryKey: ["customer", "last-orders", user?.id],
+    queryFn: () => apiClient.get<LastOrder[]>("/orders/customer/last-three"),
+    enabled: !!user?.id,
+    staleTime: 5 * 60 * 1000,
+  });
+  // END QUICK REORDER ADDITION — query ─────────────────────────────────────────
+
   // ── Mood tile handler ─────────────────────────────────────────────────────────
   const handleMoodPress = useCallback((tile: MoodTile) => {
     setActiveMoodId((prev) => {
@@ -374,6 +415,36 @@ export default function CustomerHomePage() {
       return tile.id;
     });
   }, []);
+
+  // QUICK REORDER ADDITION — handler ───────────────────────────────────────────
+  const handleReorder = async (orderId: string) => {
+    if (reorderingId) return; // prevent double-tap
+    setReorderingId(orderId);
+    try {
+      const result = await apiClient.post<ReorderResult>(`/orders/${orderId}/reorder`, {});
+      // Stash items in localStorage for the menu page to pick up
+      localStorage.setItem("reorder_items",     JSON.stringify(result.items));
+      localStorage.setItem("reorder_branch_id", result.branch_id);
+      // Navigate to the restaurant menu with a reorder flag
+      router.push(`/customer/restaurant/${result.restaurant_id}?reorder=true`);
+      if (result.unavailable_items.length > 0) {
+        const names = result.unavailable_items.join(", ");
+        const verb  = result.unavailable_items.length === 1 ? "was" : "were";
+        // toast is imported via the existing sonner dependency in this file
+        // We use a dynamic import to avoid circular-import issues
+        import("sonner").then(({ toast }) => {
+          toast.info(`${names} ${verb} not available and skipped`);
+        });
+      }
+    } catch {
+      import("sonner").then(({ toast }) => {
+        toast.error("Could not load your previous order. Try again.");
+      });
+    } finally {
+      setReorderingId(null);
+    }
+  };
+  // END QUICK REORDER ADDITION — handler ───────────────────────────────────────
 
   // Client-side search filter
   const visibleItems = searchQuery.trim()
@@ -538,6 +609,77 @@ export default function CustomerHomePage() {
             inView={moodInView}
           />
         </motion.div>
+
+        {/* QUICK REORDER ADDITION ─────────────────────────────────────────── */}
+        {/* Only rendered when the logged-in customer has at least one past order */}
+        {lastOrders && lastOrders.length > 0 && (
+          <motion.section
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+          >
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+              Order Again
+            </h3>
+            <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 no-scrollbar">
+              {lastOrders.map((order) => (
+                <div
+                  key={order.id}
+                  className="flex-none w-48 bg-white rounded-2xl border border-gray-100 shadow-sm p-3"
+                >
+                  {/* Restaurant identity row */}
+                  <div className="flex items-center gap-2 mb-2">
+                    {order.logo_url ? (
+                      <img
+                        src={order.logo_url}
+                        className="w-8 h-8 rounded-lg object-cover flex-none"
+                        alt={order.restaurant_name}
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-base flex-none">
+                        🍽️
+                      </div>
+                    )}
+                    <span className="text-xs font-semibold text-gray-800 truncate">
+                      {order.restaurant_name}
+                    </span>
+                  </div>
+
+                  {/* Items preview */}
+                  <p className="text-xs text-gray-500 mb-1 truncate">
+                    {order.items_preview.map((i) => `${i.quantity}× ${i.name}`).join(", ")}
+                  </p>
+
+                  {/* Total */}
+                  <p className="text-xs font-medium text-gray-700 mb-2">
+                    {order.total != null ? `₹${order.total.toFixed(0)}` : "—"}
+                  </p>
+
+                  {/* Reorder button */}
+                  <button
+                    onClick={() => handleReorder(order.id)}
+                    disabled={reorderingId === order.id}
+                    className="w-full text-xs py-1.5 bg-[#1A3C5E] text-white rounded-lg font-medium
+                               disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition-all"
+                  >
+                    {reorderingId === order.id ? (
+                      <span className="flex items-center justify-center gap-1.5">
+                        <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                          <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75" />
+                        </svg>
+                        Loading…
+                      </span>
+                    ) : (
+                      "Reorder"
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </motion.section>
+        )}
+        {/* END QUICK REORDER ADDITION ───────────────────────────────────── */}
 
         {/* ── Mood Results Feed (only shown when a mood is active) ─────── */}
         <AnimatePresence>

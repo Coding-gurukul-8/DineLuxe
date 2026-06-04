@@ -25,6 +25,8 @@ import {
   cancelOrder,
   applyCoupon,
   getOrderByTable,
+  getLastThreeOrders, // QUICK REORDER ADDITION
+  reorder,            // QUICK REORDER ADDITION
 } from './orders.service';
 import { callWaiter } from './waiter-call.service';
 import type { CreateOrderInput } from './orders.schema';
@@ -222,3 +224,34 @@ export async function handleGetOrderByTable(
     next(err);
   }
 }
+
+// QUICK REORDER ADDITION ──────────────────────────────────────────────────────
+
+// ── GET /orders/customer/last-three ──────────────────────────────────────────
+export async function handleGetLastThreeOrders(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const orders = await getLastThreeOrders(req.user!.id);
+    res.json(success(orders));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── POST /orders/:orderId/reorder ─────────────────────────────────────────────
+export async function handleReorder(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const result = await reorder(req.params.orderId, req.user!.id);
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+}
+// END QUICK REORDER ADDITION ──────────────────────────────────────────────────
