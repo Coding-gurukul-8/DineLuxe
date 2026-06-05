@@ -1,3 +1,12 @@
+/**
+ * backend/src/modules/users/users.controller.ts
+ *
+ * Changes vs. pre-GDPR version:
+ *   - deleteMe()      → REMOVED (was soft-deactivate only — non-compliant)
+ *   - anonymizeAccount() → NEW  (GDPR M23 full anonymisation)
+ *   - exportMyData()     → NEW  (GDPR right to data portability)
+ */
+
 import { Request, Response, NextFunction } from 'express';
 import * as authService from '../auth/auth.service';
 import * as usersService from './users.service';
@@ -9,7 +18,8 @@ type AuthenticatedRequest = Request & {
   branchId: string;
 };
 
-// GET /users/me
+// ─── GET /users/me ────────────────────────────────────────────────────────────
+
 export async function getMe(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
@@ -20,15 +30,16 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
   }
 }
 
-// GET /users?role=&restaurant_id=
+// ─── GET /users?role=&restaurant_id= ─────────────────────────────────────────
+
 export async function listUsers(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
     const role = typeof req.query.role === 'string' ? req.query.role : undefined;
-    const queryRestaurantId = typeof req.query.restaurant_id === 'string'
-      ? req.query.restaurant_id
-      : undefined;
-    const restaurantId = authReq.restaurantId || authReq.user?.restaurant_id || queryRestaurantId;
+    const queryRestaurantId =
+      typeof req.query.restaurant_id === 'string' ? req.query.restaurant_id : undefined;
+    const restaurantId =
+      authReq.restaurantId || authReq.user?.restaurant_id || queryRestaurantId;
 
     if (!restaurantId) {
       return res
@@ -43,7 +54,8 @@ export async function listUsers(req: Request, res: Response, next: NextFunction)
   }
 }
 
-// PATCH /users/me
+// ─── PATCH /users/me ──────────────────────────────────────────────────────────
+
 export async function updateMe(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
@@ -54,17 +66,26 @@ export async function updateMe(req: Request, res: Response, next: NextFunction) 
   }
 }
 
-// DELETE /users/me
-// Replaces the old soft-deactivate with a full GDPR anonymisation.
-// Spec M23: anonymise PII, revoke JWTs, delete push tokens, cancel bookings.
+// ─── DELETE /users/me ─────────────────────────────────────────────────────────
+//
+// GDPR M23: full anonymisation — replaces the old deleteMe() soft-deactivate.
+//
+// Service enforces:
+//   • role === 'customer'  (staff cannot self-delete)
+//   • is_active === true   (already-deleted accounts return 409)
+//
+// Error mapping:
+//   • "Staff accounts…"       → 403 FORBIDDEN
+//   • "already been deleted"  → 409 CONFLICT
+//   • anything else           → 500 via next(err)
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function anonymizeAccount(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
     const result = await usersService.anonymizeUserAccount(authReq.user!.id);
     res.json(success(result, result.message));
   } catch (err: any) {
-    // Surface role-guard and already-deleted errors as 403 / 409 rather than
-    // a generic 500 so clients can display a meaningful message.
     if (err?.message?.includes('Staff accounts')) {
       return res.status(403).json(error('FORBIDDEN', err.message));
     }
@@ -75,15 +96,18 @@ export async function anonymizeAccount(req: Request, res: Response, next: NextFu
   }
 }
 
-// GET /users/me/data-export
-// GDPR right to data portability — returns all data the platform holds about
-// the authenticated user as a single JSON object.
+// ─── GET /users/me/data-export ────────────────────────────────────────────────
+//
+// GDPR right to data portability (Article 20).
+// Returns a JSON snapshot of all data the platform holds for the caller.
+// Content-Disposition header allows browsers / API clients to save it directly.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function exportMyData(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
     const exportData = await usersService.exportUserData(authReq.user!.id);
 
-    // Attach a filename hint so browsers / API clients can save it easily
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="my-data-${Date.now()}.json"`,
@@ -94,14 +118,14 @@ export async function exportMyData(req: Request, res: Response, next: NextFuncti
   }
 }
 
-// GET /users/:id  (manager/owner/admin)
+// ─── GET /users/:id  (manager / owner / admin) ───────────────────────────────
+
 export async function getUserById(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
 
-    // BUG FIX: restaurantId came from req.restaurantId (set by injectTenant),
-    // but the routes file does NOT apply injectTenant for /:id — the route only
-    // uses authenticate + requireRole. Fall back to user.restaurant_id from JWT.
+    // BUG FIX: restaurantId comes from injectTenant middleware on this route;
+    // fall back to user.restaurant_id from the JWT for routes that skip it.
     const restaurantId = authReq.restaurantId || authReq.user?.restaurant_id;
     if (!restaurantId) {
       return res
@@ -116,14 +140,14 @@ export async function getUserById(req: Request, res: Response, next: NextFunctio
   }
 }
 
-// GET /users/:id/notification-preferences
+// ─── GET /users/:id/notification-preferences ─────────────────────────────────
+
 export async function getNotificationPreferences(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
     if (authReq.user.id !== req.params.id) {
       return res.status(403).json(error('FORBIDDEN', 'Cannot view another user account.'));
     }
-
     const prefs = await usersService.getNotificationPreferences(req.params.id);
     res.json(success(prefs));
   } catch (err) {
@@ -131,14 +155,14 @@ export async function getNotificationPreferences(req: Request, res: Response, ne
   }
 }
 
-// PATCH /users/:id/notification-preferences
+// ─── PATCH /users/:id/notification-preferences ───────────────────────────────
+
 export async function updateNotificationPreferences(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
     if (authReq.user.id !== req.params.id) {
       return res.status(403).json(error('FORBIDDEN', 'Cannot update another user account.'));
     }
-
     const updated = await usersService.updateNotificationPreferences(req.params.id, req.body);
     res.json(success(updated, 'Notification preferences saved'));
   } catch (err) {
@@ -146,14 +170,14 @@ export async function updateNotificationPreferences(req: Request, res: Response,
   }
 }
 
-// GET /users/:id/sessions
+// ─── GET /users/:id/sessions ──────────────────────────────────────────────────
+
 export async function getUserSessions(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
     if (authReq.user.id !== req.params.id) {
       return res.status(403).json(error('FORBIDDEN', 'Cannot view another user account.'));
     }
-
     const sessions = await usersService.getActiveSessions(req.params.id);
     res.json(success(sessions));
   } catch (err) {
@@ -161,14 +185,14 @@ export async function getUserSessions(req: Request, res: Response, next: NextFun
   }
 }
 
-// DELETE /users/:id/sessions
+// ─── DELETE /users/:id/sessions ──────────────────────────────────────────────
+
 export async function revokeUserSessions(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
     if (authReq.user.id !== req.params.id) {
       return res.status(403).json(error('FORBIDDEN', 'Cannot revoke another user account.'));
     }
-
     const result = await usersService.revokeUserSessions(req.params.id);
     res.json(success(result, 'User sessions revoked'));
   } catch (err) {
@@ -176,14 +200,14 @@ export async function revokeUserSessions(req: Request, res: Response, next: Next
   }
 }
 
-// PATCH /users/:id/password
+// ─── PATCH /users/:id/password ────────────────────────────────────────────────
+
 export async function changePassword(req: Request, res: Response, next: NextFunction) {
   try {
     const authReq = req as AuthenticatedRequest;
     if (authReq.user.id !== req.params.id) {
       return res.status(403).json(error('FORBIDDEN', 'Cannot change password for another user.'));
     }
-
     const result = await authService.changePassword(req.params.id, req.body);
     res.json(success(result, 'Password updated successfully'));
   } catch (err) {
@@ -191,13 +215,14 @@ export async function changePassword(req: Request, res: Response, next: NextFunc
   }
 }
 
-// GET /users/check-email?email=
+// ─── GET /users/check-email?email= ───────────────────────────────────────────
+
 export async function checkEmail(req: Request, res: Response, next: NextFunction) {
   try {
     const email = req.query.email as string;
 
-    // BUG FIX: original returned a plain string error (not the ErrorResponse
-    // shape) — use the error() helper for a consistent API response shape.
+    // BUG FIX: original returned a plain string error instead of the
+    // ErrorResponse shape — use the error() helper for API consistency.
     if (!email || !email.trim()) {
       return res
         .status(400)
@@ -209,6 +234,7 @@ export async function checkEmail(req: Request, res: Response, next: NextFunction
   } catch (err) {
     next(err);
   }
+}
 }
 /*import { Request, Response, NextFunction } from 'express';
 import * as authService from '../auth/auth.service';

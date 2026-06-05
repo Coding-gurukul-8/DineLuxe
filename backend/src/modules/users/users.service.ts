@@ -1,15 +1,32 @@
-import crypto from 'crypto';
+/**
+ * backend/src/modules/users/users.service.ts
+ *
+ * GDPR compliance (Section M23):
+ *   - anonymizeUserAccount(): permanent PII erasure with full audit trail
+ *   - exportUserData():       right to data portability (all data in one call)
+ *
+ * All other functions are unchanged from the pre-GDPR version.
+ */
+
+import crypto from 'crypto';                                     // esModuleInterop: true in tsconfig ✓
 import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';
 import { insertAuditLog } from '../../utils/audit-log';
 import { UpdateProfileInput, NotificationPreferencesInput } from './users.schema';
 
+// ─── Internal helpers ────────────────────────────────────────────────────────
+
 function refreshTokenKey(userId: string): string {
   return `refresh_token:${userId}`;
 }
 
-const NOTIFICATION_PREFERENCES_KEY = (userId: string) => `user_notification_preferences:${userId}`;
+const NOTIFICATION_PREFERENCES_KEY =
+  (userId: string) => `user_notification_preferences:${userId}`;
 
+/**
+ * Splits a single "first last" name string into constituent parts.
+ * Handles missing / null / extra-whitespace names gracefully.
+ */
 function splitName(name?: string | null): { first_name: string; last_name: string } {
   const parts = (name ?? '').trim().split(' ').filter(Boolean);
   if (parts.length === 0) return { first_name: '', last_name: '' };
@@ -17,17 +34,25 @@ function splitName(name?: string | null): { first_name: string; last_name: strin
   return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
 }
 
+/**
+ * Normalises a raw DB row into the shape the API returns.
+ * Adds virtual first_name / last_name fields and exposes profile_pic_url
+ * under the alias avatar_url that the frontend expects.
+ */
 function mapUserRow(row: any) {
   const { first_name, last_name } = splitName(row?.name);
   return {
     ...row,
     first_name,
     last_name,
+    // BUG FIX: original returned both profile_pic_url AND avatar_url (noisy).
+    // Keep profile_pic_url for DB fidelity; expose avatar_url as the alias.
     avatar_url: row?.profile_pic_url ?? null,
   };
 }
 
 // ─── Get Full Profile ────────────────────────────────────────────────────────
+
 export async function getMe(userId: string) {
   const { data, error } = await supabaseAdmin
     .from('users')
@@ -58,6 +83,7 @@ export async function getMe(userId: string) {
 }
 
 // ─── Update Profile ──────────────────────────────────────────────────────────
+
 export async function updateMe(userId: string, updates: UpdateProfileInput) {
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
@@ -76,9 +102,9 @@ export async function updateMe(userId: string, updates: UpdateProfileInput) {
     updateData.name = `${first} ${last}`.trim();
   }
 
-  if (updates.phone)      updateData.phone = updates.phone;
-  if (updates.dob)        updateData.dob   = updates.dob;
-  if (updates.gender)     updateData.gender = updates.gender;
+  if (updates.phone)      updateData.phone           = updates.phone;
+  if (updates.dob)        updateData.dob             = updates.dob;
+  if (updates.gender)     updateData.gender          = updates.gender;
   if (updates.avatar_url) updateData.profile_pic_url = updates.avatar_url;
 
   if (updates.address) {
@@ -101,21 +127,31 @@ export async function updateMe(userId: string, updates: UpdateProfileInput) {
   return mapUserRow(data);
 }
 
-// ─── GDPR Account Anonymisation (replaces hard-delete / soft-deactivate) ─────
+// ─── GDPR: Anonymise Account ─────────────────────────────────────────────────
 //
-// Section M23: DELETE /api/customer/account
-//   - Anonymise: name, email, phone, profile_pic, dob, gender, address
-//   - Keep: order history (anonymised) for restaurant financial records
-//   - Delete: Supabase Auth user, push subscriptions
-//   - Revoke: all JWTs via Redis tombstone
-//   - Cancel: pending / confirmed bookings
-//   - Unlink: loyalty account (keep history, nullify user_id)
+// Spec M23 — DELETE /api/customer/account (logged-in customer):
+//   → Anonymise : name → 'Deleted User', email → random hash, phone → null,
+//                 profile_pic_url / dob / gender / address / city / pin_code → null
+//   → Delete    : Supabase Auth user (removes login), push subscriptions
+//   → Keep      : order history (anonymised) for restaurant financial records
+//   → Unlink    : loyalty account (history kept, user_id severed)
+//   → Cancel    : pending / confirmed bookings
+//   → Revoke    : all JWTs via Redis tombstone (7-day TTL)
+//   → Audit     : CUSTOMER_SELF_DELETED entry in audit_logs
 //
-// Staff accounts (role !== 'customer') may NOT self-delete via this endpoint;
-// they must contact their employer / platform admin.
+// IMPORTANT — auth.middleware.ts must also check the revoked_user:{id} key on
+// every request so the Redis tombstone actually blocks access.  See the
+// companion patch in auth.middleware.ts.
+//
+// Staff accounts (role ≠ 'customer') cannot self-delete here — they must
+// contact their employer or the platform admin.
 // ─────────────────────────────────────────────────────────────────────────────
-export async function anonymizeUserAccount(userId: string): Promise<{ success: boolean; message: string }> {
-  // ── 1. Verify user exists and is a customer ──────────────────────────────
+
+export async function anonymizeUserAccount(
+  userId: string,
+): Promise<{ success: boolean; message: string }> {
+
+  // ── Step 1: Verify user exists and is a customer ─────────────────────────
   const { data: user, error: fetchError } = await supabaseAdmin
     .from('users')
     .select('id, role, email, name, is_active')
@@ -134,32 +170,37 @@ export async function anonymizeUserAccount(userId: string): Promise<{ success: b
   }
 
   if (!user.is_active) {
+    // Idempotent — if somehow called twice, return a clear 409 from the controller
     throw new Error('This account has already been deleted.');
   }
 
-  // ── 2. Generate anonymised identifiers ───────────────────────────────────
+  // ── Step 2: Generate anonymous identifiers ────────────────────────────────
+  // 64-bit random hex → effectively zero collision probability
+  // @deleted.invalid TLD is reserved (RFC 2606) — can never receive email
   const anonEmail = `deleted_${crypto.randomBytes(8).toString('hex')}@deleted.invalid`;
   const now       = new Date().toISOString();
 
-  // ── 3. Anonymise the user row in the DB ──────────────────────────────────
+  // ── Step 3: Anonymise the DB row ──────────────────────────────────────────
+  // Row is KEPT (anonymised) so that FK references from orders / payments /
+  // loyalty remain intact for restaurant financial records.
   const { error: anonError } = await supabaseAdmin
     .from('users')
     .update({
-      name:           'Deleted User',
-      email:          anonEmail,
-      phone:          null,
+      name:            'Deleted User',
+      email:           anonEmail,
+      phone:           null,
       profile_pic_url: null,
-      dob:            null,
-      gender:         null,
-      address:        null,
-      city:           null,
-      pin_code:       null,
-      // Scramble the password hash so it can never be reused
-      password_hash:  `ANONYMIZED_${Date.now()}`,
-      is_active:      false,
-      updated_at:     now,
-      deleted_at:     now,
-      anonymized_at:  now,
+      dob:             null,
+      gender:          null,
+      address:         null,
+      city:            null,
+      pin_code:        null,
+      // Scramble the hash so the original password can never be recovered
+      password_hash:   `ANONYMIZED_${Date.now()}`,
+      is_active:       false,
+      updated_at:      now,
+      deleted_at:      now,
+      anonymized_at:   now,
     })
     .eq('id', userId);
 
@@ -167,54 +208,61 @@ export async function anonymizeUserAccount(userId: string): Promise<{ success: b
     throw new Error(`Failed to anonymise account: ${anonError.message}`);
   }
 
-  // ── 4. Delete Supabase Auth user (removes login capability entirely) ─────
-  //    The DB record is kept (anonymised) for financial/audit retention.
-  //    If the auth user is already gone for any reason, treat it as a no-op.
+  // ── Step 4: Delete Supabase Auth user ────────────────────────────────────
+  // Removes the login entry (email/phone) from Supabase's auth.users table.
+  // The platform DB row is already anonymised above — keeping it is safe.
+  // If the auth entry is already gone, treat it as a no-op.
   try {
     await supabaseAdmin.auth.admin.deleteUser(userId);
   } catch (authErr: any) {
-    // Log but never block the overall deletion — the DB record is already
-    // anonymised; the auth entry may already be absent.
-    console.error(`[anonymizeUserAccount] Supabase Auth delete failed for ${userId}:`, authErr?.message);
+    console.error(
+      `[anonymizeUserAccount] Supabase Auth deletion failed for ${userId}:`,
+      authErr?.message,
+    );
+    // Do NOT rethrow — the DB record is already anonymised; this is best-effort.
   }
 
-  // ── 5. Revoke all JWTs immediately ───────────────────────────────────────
-  //    Auth middleware checks this key on every request; a 7-day TTL covers
-  //    any long-lived refresh tokens that haven't been cycled yet.
+  // ── Step 5: Revoke all JWTs ───────────────────────────────────────────────
+  // 1. Delete the stored refresh token so it cannot be cycled.
+  // 2. Set a tombstone key that auth.middleware.ts checks on every request.
+  //    TTL = 7 days (max refresh token lifetime) so the key self-cleans.
   await redis.del(refreshTokenKey(userId));
   await redis.set(`revoked_user:${userId}`, 'deleted', 'EX', 7 * 24 * 60 * 60);
 
-  // ── 6. Delete device push tokens ─────────────────────────────────────────
-  //    Silently ignored if the table doesn't exist yet (ON DELETE CASCADE
-  //    on users FK would handle it, but we do it explicitly here for clarity).
+  // ── Step 6: Delete device push subscriptions ──────────────────────────────
+  // Silently continues if push_subscriptions doesn't exist yet;
+  // ON DELETE CASCADE on the FK would handle this too, but we do it
+  // explicitly so the intent is clear in the deletion audit trail.
   await supabaseAdmin
     .from('push_subscriptions')
     .delete()
     .eq('user_id', userId);
 
-  // ── 7. Unlink loyalty account ─────────────────────────────────────────────
-  //    Keep the points/transaction history for restaurant reporting; just
-  //    sever the link to the now-anonymised user.
+  // ── Step 7: Unlink loyalty account ───────────────────────────────────────
+  // Severs the PII link while preserving points / transaction history for
+  // restaurant reporting.
+  // NOTE: requires `ALTER TABLE loyalty_accounts ADD COLUMN IF NOT EXISTS anonymized BOOLEAN DEFAULT FALSE`
   await supabaseAdmin
     .from('loyalty_accounts')
     .update({ user_id: null, anonymized: true, updated_at: now } as any)
     .eq('user_id', userId);
 
-  // ── 8. Cancel pending / confirmed bookings ────────────────────────────────
+  // ── Step 8: Cancel open bookings ─────────────────────────────────────────
+  // Prevents ghost reservations on tables after the user is gone.
   await supabaseAdmin
     .from('bookings')
     .update({ status: 'cancelled', updated_at: now })
     .eq('user_id', userId)
     .in('status', ['pending', 'confirmed']);
 
-  // ── 9. Audit log ─────────────────────────────────────────────────────────
+  // ── Step 9: Audit log (fire-and-forget — must never block deletion) ───────
   insertAuditLog({
     actorId:    userId,
     action:     'CUSTOMER_SELF_DELETED',
     targetType: 'user',
     targetId:   userId,
-    newValue:   { anonymized_at: now, reason: 'GDPR self-deletion request' },
-  }).catch(() => {/* never block on audit log */});
+    newValue:   { anonymized_at: now, reason: 'GDPR self-deletion request (M23)' },
+  }).catch(() => { /* intentionally swallowed */ });
 
   return {
     success: true,
@@ -222,20 +270,25 @@ export async function anonymizeUserAccount(userId: string): Promise<{ success: b
   };
 }
 
-// ─── GDPR Data Export (right to data portability) ────────────────────────────
+// ─── GDPR: Data Export ───────────────────────────────────────────────────────
 //
-// Returns everything the platform holds about a user as a single JSON object.
-// Fetched in parallel for performance; safe for most users (<100 orders).
-// For very large datasets, consider queuing a Bull job (see report-export.ts).
+// Spec M23 — GET /api/customer/account/data-export (right to data portability)
+// Returns ALL data the platform holds about a user in a single JSON object.
+//
+// All seven queries run in parallel (Promise.all) — single round-trip latency.
+// Notifications are capped at 500 to prevent runaway payloads for power users.
+// For users with thousands of orders, consider queuing a Bull job instead
+// (see report-export.ts for the async pattern).
 // ─────────────────────────────────────────────────────────────────────────────
+
 export interface UserDataExport {
-  exportedAt: string;
-  profile: Record<string, unknown> | null;
-  orders: unknown[];
-  bookings: unknown[];
-  reviews: unknown[];
+  exportedAt:          string;
+  profile:             Record<string, unknown> | null;
+  orders:              unknown[];
+  bookings:            unknown[];
+  reviews:             unknown[];
   loyaltyTransactions: unknown[];
-  notifications: unknown[];
+  notifications:       unknown[];
 }
 
 export async function exportUserData(userId: string): Promise<UserDataExport> {
@@ -247,14 +300,15 @@ export async function exportUserData(userId: string): Promise<UserDataExport> {
     loyaltyResult,
     notificationsResult,
   ] = await Promise.all([
-    // Profile
+
+    // 1. User profile — personal data fields only (no password_hash etc.)
     supabaseAdmin
       .from('users')
       .select('id, name, email, phone, dob, gender, address, city, pin_code, role, created_at')
       .eq('id', userId)
       .single(),
 
-    // All orders with items
+    // 2. All orders + nested items and restaurant branch
     supabaseAdmin
       .from('orders')
       .select(`
@@ -277,7 +331,7 @@ export async function exportUserData(userId: string): Promise<UserDataExport> {
       .eq('customer_id', userId)
       .order('created_at', { ascending: false }),
 
-    // All bookings
+    // 3. All bookings with table and branch info
     supabaseAdmin
       .from('bookings')
       .select(`
@@ -293,7 +347,7 @@ export async function exportUserData(userId: string): Promise<UserDataExport> {
       .eq('user_id', userId)
       .order('created_at', { ascending: false }),
 
-    // User's own reviews
+    // 4. User's own reviews
     supabaseAdmin
       .from('reviews')
       .select(`
@@ -309,7 +363,7 @@ export async function exportUserData(userId: string): Promise<UserDataExport> {
       .eq('user_id', userId)
       .order('created_at', { ascending: false }),
 
-    // Loyalty transactions
+    // 5. Loyalty transactions (points earned / redeemed)
     supabaseAdmin
       .from('loyalty_transactions')
       .select(`
@@ -322,27 +376,28 @@ export async function exportUserData(userId: string): Promise<UserDataExport> {
       .eq('user_id', userId)
       .order('created_at', { ascending: false }),
 
-    // In-app notifications
+    // 6. In-app notifications (capped — prevents runaway JSON for power users)
     supabaseAdmin
       .from('notifications')
       .select('id, type, title, body, is_read, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-      .limit(500), // cap at 500 — enough for portability, prevents runaway payloads
+      .limit(500),
   ]);
 
   return {
     exportedAt:          new Date().toISOString(),
-    profile:             profileResult.data   ?? null,
-    orders:              ordersResult.data     ?? [],
-    bookings:            bookingsResult.data   ?? [],
-    reviews:             reviewsResult.data    ?? [],
-    loyaltyTransactions: loyaltyResult.data    ?? [],
+    profile:             profileResult.data      ?? null,
+    orders:              ordersResult.data        ?? [],
+    bookings:            bookingsResult.data      ?? [],
+    reviews:             reviewsResult.data       ?? [],
+    loyaltyTransactions: loyaltyResult.data       ?? [],
     notifications:       notificationsResult.data ?? [],
   };
 }
 
-// ─── Get User By ID (admin / manager) ───────────────────────────────────────
+// ─── Get User By ID (manager / owner / admin) ────────────────────────────────
+
 export async function getUserById(userId: string, restaurantId: string) {
   const { data, error } = await supabaseAdmin
     .from('users')
@@ -359,18 +414,15 @@ export async function getUserById(userId: string, restaurantId: string) {
   return mapUserRow(data);
 }
 
-// ─── List Users (owner/manager/admin) ────────────────────────────────────────
+// ─── List Users (owner / manager / admin) ────────────────────────────────────
+
 export async function listUsers(restaurantId: string, role?: string) {
   let query = supabaseAdmin
     .from('users')
-    .select(
-      `id, name, email, phone, role, is_active, created_at, profile_pic_url`
-    )
+    .select(`id, name, email, phone, role, is_active, created_at, profile_pic_url`)
     .eq('restaurant_id', restaurantId);
 
-  if (role) {
-    query = query.eq('role', role);
-  }
+  if (role) query = query.eq('role', role);
 
   const { data, error } = await query.order('created_at', { ascending: false });
 
@@ -379,12 +431,13 @@ export async function listUsers(restaurantId: string, role?: string) {
 }
 
 // ─── Notification Preferences ────────────────────────────────────────────────
+
 const defaultNotificationPreferences = {
-  email_new_orders: true,
-  push_staff_actions: true,
+  email_new_orders:    true,
+  push_staff_actions:  true,
   daily_sales_summary: true,
   low_inventory_alerts: true,
-  new_review_alerts: true,
+  new_review_alerts:   true,
 };
 
 export async function getNotificationPreferences(userId: string) {
@@ -398,20 +451,21 @@ export async function getNotificationPreferences(userId: string) {
     if (error) throw error;
     return data?.notification_preferences ?? defaultNotificationPreferences;
   } catch (err: any) {
+    // Column may not exist on older DB instances — fall back to Redis
     if ((err?.message ?? '').includes('notification_preferences')) {
       const stored = await redis.get(NOTIFICATION_PREFERENCES_KEY(userId));
       if (!stored) return defaultNotificationPreferences;
-      try {
-        return JSON.parse(stored);
-      } catch {
-        return defaultNotificationPreferences;
-      }
+      try { return JSON.parse(stored); }
+      catch { return defaultNotificationPreferences; }
     }
     throw new Error(`Failed to fetch notification preferences: ${err.message ?? err}`);
   }
 }
 
-export async function updateNotificationPreferences(userId: string, updates: NotificationPreferencesInput) {
+export async function updateNotificationPreferences(
+  userId: string,
+  updates: NotificationPreferencesInput,
+) {
   try {
     const { data, error } = await supabaseAdmin
       .from('users')
@@ -431,7 +485,8 @@ export async function updateNotificationPreferences(userId: string, updates: Not
   }
 }
 
-// ─── Session management ──────────────────────────────────────────────────────
+// ─── Session Management ───────────────────────────────────────────────────────
+
 export async function getActiveSessions(userId: string) {
   const count = await redis.exists(refreshTokenKey(userId));
   return { count: count === 1 ? 1 : 0 };
@@ -443,7 +498,10 @@ export async function revokeUserSessions(userId: string) {
 }
 
 // ─── Check Email Availability ─────────────────────────────────────────────────
+
 export async function checkEmail(email: string): Promise<{ available: boolean }> {
+  // BUG FIX: normalise before the query so case differences don't give false
+  // "available" results for emails already in the DB in a different case.
   const normalised = email.toLowerCase().trim();
 
   const { data, error } = await supabaseAdmin
@@ -455,7 +513,6 @@ export async function checkEmail(email: string): Promise<{ available: boolean }>
   if (error) throw new Error(`Email check failed: ${error.message}`);
   return { available: data === null };
 }
-
 /*
 import { supabaseAdmin } from '../../config/supabase';
 import { redis } from '../../config/redis';

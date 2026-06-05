@@ -36,6 +36,26 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
       branch_id: decoded.branch_id,
     };
 
+    // ── GDPR M23: Revocation check (all roles) ───────────────────────────────
+    // anonymizeUserAccount() writes revoked_user:{userId} with a 7-day TTL.
+    // Without this check a deleted account's 15-minute access token would
+    // remain valid until natural expiry — this gate closes that window.
+    // Runs before the suspension check and before next() so no downstream
+    // handler ever sees a request from a deleted account.
+    // Redis failures fall through (ResilientRedis has in-memory fallback)
+    // rather than taking the API down for a cache miss.
+    try {
+      const isRevoked = await redis.exists(`revoked_user:${req.user.id}`);
+      if (isRevoked === 1) {
+        res.status(401).json(
+          error('ACCOUNT_DELETED', 'This account has been permanently deleted'),
+        );
+        return;
+      }
+    } catch (redisErr) {
+      console.error('[auth] Revocation check failed:', redisErr);
+    }
+
     // ── Suspension check (customers only) ─────────────────────────────────────
     // suspendCustomer() sets `suspended:{id}` in Redis with no TTL.
     // This gate runs on every request so banned customers are rejected
