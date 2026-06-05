@@ -19,6 +19,7 @@ import {
 
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { KPICard } from "@/components/shared/KPICard";
+import { PlatformHealthScore } from "@/components/admin/PlatformHealthScore";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +81,10 @@ function LatencyGauge({
             <p className={cn("text-xs font-medium", text)}>{qlabel}</p>
           </div>
         </div>
-        <span className="font-mono text-2xl font-bold text-gray-900">{ms}<span className="text-sm font-normal text-gray-400 ml-1">ms</span></span>
+        <span className="font-mono text-2xl font-bold text-gray-900">
+          {ms}
+          <span className="text-sm font-normal text-gray-400 ml-1">ms</span>
+        </span>
       </div>
 
       {/* Gauge bar */}
@@ -118,9 +122,7 @@ function HitRateRing({ pct }: { pct: number }) {
         <svg width={90} height={90} viewBox="0 0 90 90" className="-rotate-90">
           <circle cx={45} cy={45} r={r} fill="none" stroke="#f3f4f6" strokeWidth={8} />
           <motion.circle
-            cx={45}
-            cy={45}
-            r={r}
+            cx={45} cy={45} r={r}
             fill="none"
             stroke={color}
             strokeWidth={8}
@@ -163,7 +165,8 @@ function DegradedBanner({ onClose }: { onClose: () => void }) {
       >
         <AlertTriangle size={16} className="text-red-500 shrink-0" />
         <p className="text-sm font-medium text-red-700 flex-1">
-          Platform health is <strong>degraded</strong>. One or more services are experiencing elevated latency or failures.
+          Platform health is <strong>degraded</strong>. One or more services are experiencing
+          elevated latency or failures.
         </p>
         <button onClick={onClose} className="text-red-400 hover:text-red-600 transition-colors">
           <X size={15} />
@@ -179,7 +182,13 @@ export default function PlatformHealthPage() {
   const [bannerVisible, setBannerVisible] = useState(true);
   const [lastChecked, setLastChecked] = useState<Date>(new Date());
 
-  const { data: health, isLoading, isError, refetch, isFetching } = useQuery<HealthDetailed>({
+  const {
+    data: health,
+    isLoading,
+    isError,
+    refetch,
+    isFetching,
+  } = useQuery<HealthDetailed>({
     queryKey: ["admin", "health", "detailed"],
     queryFn: async () => {
       const data = await apiClient.get<HealthDetailed>("/admin/health/detailed");
@@ -203,7 +212,7 @@ export default function PlatformHealthPage() {
 
   return (
     <PageWrapper>
-      {/* Header */}
+      {/* ── Page header ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
           <h1
@@ -217,6 +226,7 @@ export default function PlatformHealthPage() {
             Last checked: {lastChecked.toLocaleTimeString()} · Auto-refreshes every 30s
           </p>
         </div>
+
         <div className="flex items-center gap-3">
           {/* Overall status pill */}
           {health && (
@@ -250,11 +260,15 @@ export default function PlatformHealthPage() {
         </div>
       </div>
 
-      {/* Degraded banner */}
+      {/* ── Degraded banner ──────────────────────────────────────────── */}
       {isDegraded && bannerVisible && (
         <DegradedBanner onClose={() => setBannerVisible(false)} />
       )}
 
+      {/* ── Hero: Platform Health Score (Section 6.1) ────────────────── */}
+      <PlatformHealthScore />
+
+      {/* ── Detailed metrics below ───────────────────────────────────── */}
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {Array.from({ length: 5 }).map((_, i) => (
