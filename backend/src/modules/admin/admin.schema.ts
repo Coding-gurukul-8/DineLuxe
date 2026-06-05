@@ -10,3 +10,16 @@ export const createAdminSchema = z.object({
 });
 
 export type CreateAdminInput = z.infer<typeof createAdminSchema>;
+
+// ── Section 6.5 — customer account management schemas ─────────────────────────
+
+export const suspendCustomerSchema = z.object({
+  reason: z.string().min(5, 'Suspension reason must be at least 5 characters'),
+});
+
+export const flagCustomerSchema = z.object({
+  reason: z.string().min(5, 'Flag reason must be at least 5 characters'),
+});
+
+export type SuspendCustomerInput = z.infer<typeof suspendCustomerSchema>;
+export type FlagCustomerInput = z.infer<typeof flagCustomerSchema>;

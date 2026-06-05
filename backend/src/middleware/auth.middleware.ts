@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env';
 import { error } from '../utils/response';
+import { redis } from '../config/redis';
 
 interface JwtPayload {
   sub: string;
@@ -13,7 +14,7 @@ interface JwtPayload {
   [key: string]: unknown;
 }
 
-export function authenticate(req: Request, res: Response, next: NextFunction): void {
+export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -34,6 +35,23 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
       restaurant_id: decoded.restaurant_id,
       branch_id: decoded.branch_id,
     };
+
+    // ── Suspension check (customers only) ─────────────────────────────────────
+    // suspendCustomer() sets `suspended:{id}` in Redis with no TTL.
+    // This gate runs on every request so banned customers are rejected
+    // immediately even if their JWT has not technically expired yet.
+    if (req.user.role === 'customer') {
+      const suspended = await redis.get(`suspended:${req.user.id}`);
+      if (suspended) {
+        res.status(403).json(
+          error(
+            'ACCOUNT_SUSPENDED',
+            'Your account has been suspended. Contact support@dineluxe.app',
+          ),
+        );
+        return;
+      }
+    }
 
     next();
   } catch (err) {

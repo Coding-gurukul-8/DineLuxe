@@ -17,8 +17,13 @@ import {
   getFeedback,
   createAdmin,
   signupSuperAdmin,
+  // Section 6.5 — customer account management
+  suspendCustomer,
+  unsuspendCustomer,
+  flagCustomer,
+  getCustomerDetail,
 } from './admin.controller';
-import { createAdminSchema } from './admin.schema';
+import { createAdminSchema, suspendCustomerSchema, flagCustomerSchema } from './admin.schema';
 
 const router: import('express').Router = Router();
 
@@ -65,8 +70,16 @@ router.get('/restaurants', getRestaurants);
 router.patch('/restaurants/:id/status', updateRestaurantStatus);
 
 // ── Customer management ───────────────────────────────────────────────────────
+// IMPORTANT: specific sub-paths (/suspend, /unsuspend, /flag) must be declared
+// before the parameterised GET /:id so Express doesn't consume them as IDs.
 router.get('/customers', getCustomers);
 router.patch('/customers/:id/status', updateCustomerStatus);
+
+// Section 6.5 — account lifecycle
+router.get('/customers/:id', getCustomerDetail);
+router.patch('/customers/:id/suspend', validate(suspendCustomerSchema), suspendCustomer);
+router.patch('/customers/:id/unsuspend', unsuspendCustomer);
+router.patch('/customers/:id/flag', validate(flagCustomerSchema), flagCustomer);
 
 // ── Feedback ─────────────────────────────────────────────────────────────────
 router.get('/feedback', getFeedback);

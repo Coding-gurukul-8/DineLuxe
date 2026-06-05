@@ -679,3 +679,206 @@ export async function createSuperAdmin(input: {
 }) {
   return createPrivilegedUser({ ...input, role: 'super_admin' });
 }
+
+// ─── Suspend a customer (Section 6.5) ────────────────────────────────────────
+// Sets is_active=false, writes suspension metadata to DB, stores Redis key
+// `suspended:{id}` (no TTL) so auth middleware can instantly block the user.
+export async function suspendCustomer(
+  customerId: string,
+  adminId: string,
+  reason: string,
+): Promise<{ success: true }> {
+  const now = new Date().toISOString();
+
+  // 1. Verify the target is a customer
+  const { data: user, error: fetchError } = await supabaseAdmin
+    .from('users')
+    .select('id, name, email, role')
+    .eq('id', customerId)
+    .eq('role', 'customer')
+    .single();
+
+  if (fetchError || !user) {
+    const err = Object.assign(new Error('Customer not found'), { statusCode: 404 });
+    throw err;
+  }
+
+  // 2. Update DB — mark inactive + record suspension metadata
+  const { error: updateError } = await supabaseAdmin
+    .from('users')
+    .update({
+      is_active: false,
+      suspension_reason: reason,
+      suspended_at: now,
+      suspended_by: adminId,
+      updated_at: now,
+    })
+    .eq('id', customerId)
+    .eq('role', 'customer');
+
+  if (updateError) throw updateError;
+
+  // 3. Revoke all active JWTs by setting Redis sentinel key (no TTL — persists until unsuspended)
+  await redis.set(`suspended:${customerId}`, 'true');
+
+  // 4. In-app notification to the customer
+  await createInApp(
+    customerId,
+    'system_alert',
+    'Account Suspended',
+    'Your account has been suspended. Contact support@dineluxe.app',
+  ).catch((err: unknown) => console.error('[suspendCustomer] Notification failed:', err));
+
+  // 5. Audit log (fire-and-forget)
+  insertAuditLog({
+    actorId: adminId,
+    action: 'CUSTOMER_SUSPENDED',
+    targetType: 'user',
+    targetId: customerId,
+    newValue: { is_active: false, suspension_reason: reason, suspended_at: now },
+  }).catch(() => {});
+
+  return { success: true };
+}
+
+// ─── Unsuspend a customer ─────────────────────────────────────────────────────
+export async function unsuspendCustomer(
+  customerId: string,
+  adminId: string,
+): Promise<{ success: true }> {
+  const now = new Date().toISOString();
+
+  // 1. Restore active status and clear suspension fields
+  const { error: updateError } = await supabaseAdmin
+    .from('users')
+    .update({
+      is_active: true,
+      suspension_reason: null,
+      suspended_at: null,
+      suspended_by: null,
+      updated_at: now,
+    })
+    .eq('id', customerId);
+
+  if (updateError) throw updateError;
+
+  // 2. Remove Redis sentinel key so JWTs become valid again immediately
+  await redis.del(`suspended:${customerId}`);
+
+  // 3. Audit log
+  insertAuditLog({
+    actorId: adminId,
+    action: 'CUSTOMER_UNSUSPENDED',
+    targetType: 'user',
+    targetId: customerId,
+    newValue: { is_active: true },
+  }).catch(() => {});
+
+  return { success: true };
+}
+
+// ─── Flag a customer for review ───────────────────────────────────────────────
+// Flagging ≠ suspending. The account stays active; it is marked for admin review.
+export async function flagCustomer(
+  customerId: string,
+  adminId: string,
+  flagReason: string,
+): Promise<{ success: true }> {
+  const now = new Date().toISOString();
+
+  // Attempt DB column update first (columns may not exist on older schemas)
+  const { error: updateError } = await supabaseAdmin
+    .from('users')
+    .update({
+      is_flagged: true,
+      flag_reason: flagReason,
+      flagged_at: now,
+      flagged_by: adminId,
+      updated_at: now,
+    })
+    .eq('id', customerId);
+
+  if (updateError) {
+    // Graceful fallback: store flag in Redis if columns are absent
+    console.warn('[flagCustomer] DB update failed, using Redis fallback:', updateError.message);
+    await redis.set(
+      `flagged:${customerId}`,
+      JSON.stringify({ reason: flagReason, flaggedBy: adminId, flaggedAt: now }),
+    );
+  }
+
+  // Audit log
+  insertAuditLog({
+    actorId: adminId,
+    action: 'CUSTOMER_FLAGGED',
+    targetType: 'user',
+    targetId: customerId,
+    newValue: { is_flagged: true, flag_reason: flagReason, flagged_at: now },
+  }).catch(() => {});
+
+  return { success: true };
+}
+
+// ─── Get full customer detail (admin view) ────────────────────────────────────
+export async function getCustomerDetail(customerId: string) {
+  // 1. User profile
+  const { data: user, error: userError } = await supabaseAdmin
+    .from('users')
+    .select(
+      'id, name, email, phone, date_of_birth, role, is_active, is_flagged, flag_reason, suspension_reason, suspended_at, created_at',
+    )
+    .eq('id', customerId)
+    .eq('role', 'customer')
+    .single();
+
+  if (userError || !user) {
+    const err = Object.assign(new Error('Customer not found'), { statusCode: 404 });
+    throw err;
+  }
+
+  // 2. Order history summary
+  const { data: orders } = await supabaseAdmin
+    .from('orders')
+    .select('id, total_amount, created_at, status')
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false });
+
+  const totalOrders = orders?.length ?? 0;
+  const totalSpent = (orders ?? []).reduce((sum, o: any) => sum + (o.total_amount ?? 0), 0);
+  const lastOrderDate = orders?.[0]?.created_at ?? null;
+
+  // 3. Open support tickets count
+  const { count: openTickets } = await supabaseAdmin
+    .from('support_tickets')
+    .select('id', { count: 'exact', head: true })
+    .eq('customer_id', customerId)
+    .in('status', ['open', 'in_progress']);
+
+  // 4. Pending refund requests
+  const { data: pendingRefunds } = await supabaseAdmin
+    .from('refund_requests')
+    .select('id, order_id, amount, reason, created_at, status')
+    .eq('customer_id', customerId)
+    .eq('status', 'pending');
+
+  // 5. Determine account status label
+  const isSuspended = !(user as any).is_active;
+  const isFlagged = (user as any).is_flagged === true;
+  const accountStatus: 'active' | 'suspended' | 'flagged' = isSuspended
+    ? 'suspended'
+    : isFlagged
+      ? 'flagged'
+      : 'active';
+
+  return {
+    profile: user,
+    orderSummary: {
+      totalOrders,
+      totalSpent,
+      lastOrderDate,
+    },
+    openTickets: openTickets ?? 0,
+    pendingRefunds: pendingRefunds ?? [],
+    accountStatus,
+  };
+}

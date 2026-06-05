@@ -138,3 +138,52 @@ export async function getFeedback(req: Request, res: Response, next: NextFunctio
     res.json(success(result));
   } catch (err) { next(err); }
 }
+
+// ── Section 6.5 — customer account management ─────────────────────────────────
+
+// GET /admin/customers/:id
+export async function getCustomerDetail(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await adminService.getCustomerDetail(req.params.id);
+    res.json(success(data));
+  } catch (err) { next(err); }
+}
+
+// PATCH /admin/customers/:id/suspend
+export async function suspendCustomer(req: Request, res: Response, next: NextFunction) {
+  try {
+    const adminId = (req as any).user?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
+      return;
+    }
+    const data = await adminService.suspendCustomer(req.params.id, adminId, req.body.reason);
+    res.json(success(data, 'Customer suspended successfully.'));
+  } catch (err) { next(err); }
+}
+
+// PATCH /admin/customers/:id/unsuspend
+export async function unsuspendCustomer(req: Request, res: Response, next: NextFunction) {
+  try {
+    const adminId = (req as any).user?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
+      return;
+    }
+    const data = await adminService.unsuspendCustomer(req.params.id, adminId);
+    res.json(success(data, 'Customer unsuspended successfully.'));
+  } catch (err) { next(err); }
+}
+
+// PATCH /admin/customers/:id/flag
+export async function flagCustomer(req: Request, res: Response, next: NextFunction) {
+  try {
+    const adminId = (req as any).user?.id;
+    if (!adminId) {
+      res.status(401).json({ success: false, error: { message: 'Unauthorized' } });
+      return;
+    }
+    const data = await adminService.flagCustomer(req.params.id, adminId, req.body.reason);
+    res.json(success(data, 'Customer flagged for review.'));
+  } catch (err) { next(err); }
+}
