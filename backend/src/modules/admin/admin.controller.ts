@@ -52,6 +52,14 @@ export async function getDetailedHealth(req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 }
 
+// GET /admin/health/score  (admin + super_admin)
+export async function getHealthScore(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await adminService.getHealthScore();
+    res.json(success(data));
+  } catch (err) { next(err); }
+}
+
 export async function getRestaurants(req: Request, res: Response, next: NextFunction) {
   try {
     const page = Number(req.query.page) || 1;

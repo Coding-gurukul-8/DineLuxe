@@ -7,6 +7,7 @@ import {
   getPlatformStats,
   getHealth,
   getDetailedHealth,
+  getHealthScore,
   getRestaurants,
   updateRestaurantStatus,
   getPendingRestaurants,
@@ -38,6 +39,15 @@ router.get(
   authenticate,
   requireRole('super_admin'),
   getDetailedHealth,
+);
+
+// Platform Health Score — admin + super_admin (Section 6.1)
+// Declared before the catch-all router.use so the middleware chain is explicit.
+router.get(
+  '/health/score',
+  authenticate,
+  requireRole('super_admin', 'admin'),
+  getHealthScore,
 );
 
 // Super_admin signup — no token needed.

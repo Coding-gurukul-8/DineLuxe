@@ -10,6 +10,9 @@ import { insertAuditLog } from '../../utils/audit-log';
 const DASHBOARD_CACHE_KEY = 'admin:dashboard';
 const DASHBOARD_CACHE_TTL = 300; // 5 minutes
 
+const HEALTH_SCORE_CACHE_KEY = 'admin:health_score';
+const HEALTH_SCORE_CACHE_TTL = 300; // 5 minutes
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 export async function getDashboard() {
   const cached = await redis.get(DASHBOARD_CACHE_KEY);
@@ -281,6 +284,226 @@ export async function getDetailedHealth() {
     },
     active_sessions: activeSessions,
   };
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface HealthScoreComponent {
+  name: string;
+  score: number;
+  max: number;
+  color: 'green' | 'yellow' | 'orange' | 'red';
+}
+
+export interface HealthScoreResult {
+  score: number;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  label: string;
+  components: HealthScoreComponent[];
+  computed_at: string;
+}
+
+// ─── Platform Health Score (Section 6.1) ─────────────────────────────────────
+// Composite 0-100 score from: uptime (30), order completion (30),
+// API response time (20), customer satisfaction (20).
+export async function getHealthScore(): Promise<HealthScoreResult> {
+  // ── Cache check ────────────────────────────────────────────────────────────
+  try {
+    const cached = await redis.get(HEALTH_SCORE_CACHE_KEY);
+    if (cached) return JSON.parse(cached) as HealthScoreResult;
+  } catch {
+    // Cache miss or Redis unavailable — recompute
+  }
+
+  const components: HealthScoreComponent[] = [];
+
+  // ── Component 1: System Uptime (30 pts) ───────────────────────────────────
+  // Probe DB and Redis independently; same 500ms timeout as getBasicHealth.
+  let dbOk = false;
+  let redisUp = false;
+
+  try {
+    const dbCheck = supabaseAdmin
+      .from('restaurants')
+      .select('id', { count: 'exact', head: true });
+    const timeout = new Promise<{ timeout: true }>((res) =>
+      setTimeout(() => res({ timeout: true }), 500),
+    );
+    const result = await Promise.race([dbCheck, timeout as unknown]);
+    dbOk = !(result as any)?.timeout && !(result as any)?.error;
+  } catch {
+    dbOk = false;
+  }
+
+  try {
+    await redis.ping();
+    redisUp = true;
+  } catch {
+    redisUp = false;
+  }
+
+  const uptimeScore = dbOk && redisUp ? 30 : dbOk || redisUp ? 15 : 0;
+  const uptimeColor: HealthScoreComponent['color'] =
+    uptimeScore === 30 ? 'green' : uptimeScore === 15 ? 'yellow' : 'red';
+
+  components.push({
+    name: 'System Uptime',
+    score: uptimeScore,
+    max: 30,
+    color: uptimeColor,
+  });
+
+  // ── Component 2: Order Completion Rate (30 pts) ───────────────────────────
+  // COUNT completed / COUNT total for orders in last 24 hours.
+  let orderScore = 5; // safe floor if query fails
+  try {
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    const [totalRes, completedRes] = await Promise.all([
+      supabaseAdmin
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .gte('created_at', since24h),
+      supabaseAdmin
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .gte('created_at', since24h)
+        .in('status', ['paid', 'served', 'closed']),
+    ]);
+
+    const total = totalRes.count ?? 0;
+    const completed = completedRes.count ?? 0;
+
+    if (total === 0) {
+      // No orders in window — no failures to penalise; award full marks
+      orderScore = 30;
+    } else {
+      const pct = (completed / total) * 100;
+      if (pct > 90)        orderScore = 30;
+      else if (pct >= 75)  orderScore = 22;
+      else if (pct >= 60)  orderScore = 15;
+      else                 orderScore = 5;
+    }
+  } catch {
+    // DB unavailable — already penalised in uptime; leave floor score
+  }
+
+  const orderColor: HealthScoreComponent['color'] =
+    orderScore === 30 ? 'green'
+    : orderScore === 22 ? 'yellow'
+    : orderScore === 15 ? 'orange'
+    : 'red';
+
+  components.push({
+    name: 'Order Completion',
+    score: orderScore,
+    max: 30,
+    color: orderColor,
+  });
+
+  // ── Component 3: API Response Time (20 pts) ───────────────────────────────
+  // Average of last 100 values in Redis list `metric:query_times`.
+  let responseScore = 20; // full marks when no data (cold start / no traffic)
+  try {
+    const rawTimes = (await redis.call(
+      'LRANGE', 'metric:query_times', '0', '99',
+    )) as string[];
+
+    if (Array.isArray(rawTimes) && rawTimes.length > 0) {
+      const times = rawTimes.map(Number).filter(Number.isFinite);
+      if (times.length > 0) {
+        const avgMs = times.reduce((a, b) => a + b, 0) / times.length;
+        if (avgMs < 200)        responseScore = 20;
+        else if (avgMs < 500)   responseScore = 15;
+        else if (avgMs < 1000)  responseScore = 8;
+        else                    responseScore = 0;
+      }
+    }
+  } catch {
+    // Redis unavailable — uptime already penalised; award full marks here
+  }
+
+  const responseColor: HealthScoreComponent['color'] =
+    responseScore === 20 ? 'green'
+    : responseScore === 15 ? 'yellow'
+    : responseScore === 8 ? 'orange'
+    : 'red';
+
+  components.push({
+    name: 'Response Time',
+    score: responseScore,
+    max: 20,
+    color: responseColor,
+  });
+
+  // ── Component 4: Customer Satisfaction (20 pts) ───────────────────────────
+  // AVG(overall_rating) from reviews in the last 7 days.
+  let satisfactionScore = 16; // default to second tier when no data
+  try {
+    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: reviewRows, error: reviewError } = await supabaseAdmin
+      .from('reviews')
+      .select('overall_rating')
+      .gte('created_at', since7d);
+
+    if (!reviewError && reviewRows && reviewRows.length > 0) {
+      const ratings = reviewRows
+        .map((r: any) => Number(r.overall_rating))
+        .filter(Number.isFinite);
+
+      if (ratings.length > 0) {
+        const avg = ratings.reduce((a, b) => a + b, 0) / ratings.length;
+        if (avg > 4.5)       satisfactionScore = 20;
+        else if (avg >= 4.0) satisfactionScore = 16;
+        else if (avg >= 3.5) satisfactionScore = 10;
+        else                 satisfactionScore = 5;
+      }
+    }
+  } catch {
+    // Query failed — leave default
+  }
+
+  const satisfactionColor: HealthScoreComponent['color'] =
+    satisfactionScore >= 16 ? 'green'
+    : satisfactionScore === 10 ? 'yellow'
+    : 'red';
+
+  components.push({
+    name: 'Customer Satisfaction',
+    score: satisfactionScore,
+    max: 20,
+    color: satisfactionColor,
+  });
+
+  // ── Composite score + grade ────────────────────────────────────────────────
+  const score = components.reduce((sum, c) => sum + c.score, 0);
+
+  let grade: HealthScoreResult['grade'];
+  let label: string;
+
+  if (score >= 85)      { grade = 'A'; label = 'Excellent'; }
+  else if (score >= 70) { grade = 'B'; label = 'Good'; }
+  else if (score >= 55) { grade = 'C'; label = 'Fair'; }
+  else if (score >= 40) { grade = 'D'; label = 'Poor'; }
+  else                  { grade = 'F'; label = 'Critical'; }
+
+  const result: HealthScoreResult = {
+    score,
+    grade,
+    label,
+    components,
+    computed_at: new Date().toISOString(),
+  };
+
+  // ── Cache result ───────────────────────────────────────────────────────────
+  try {
+    await redis.setex(HEALTH_SCORE_CACHE_KEY, HEALTH_SCORE_CACHE_TTL, JSON.stringify(result));
+  } catch {
+    // Non-fatal — cache write failure
+  }
+
+  return result;
 }
 
 // ─── Get all restaurants (paginated) ─────────────────────────────────────────
