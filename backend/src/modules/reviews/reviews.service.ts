@@ -1,347 +1,348 @@
 import { supabaseAdmin } from '../../config/supabase';
-import { paginate } from '../../utils/pagination';
-import { redis } from '../../config/redis';
 
-const POSITIVE_WORDS = [
-  'great', 'excellent', 'amazing', 'good', 'fantastic', 'delicious', 'love', 'perfect', 'wonderful', 'best',
-  'tasty', 'friendly', 'fast', 'prompt', 'clean', 'cozy', 'fresh', 'recommend', 'yummy', 'pleasant', 'awesome',
-  'satisfying', 'superb', 'impressive', 'stellar', 'outstanding'
-];
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-const NEGATIVE_WORDS = [
-  'bad', 'terrible', 'awful', 'horrible', 'disgusting', 'worst', 'poor', 'disappointing', 'slow', 'rude',
-  'stale', 'cold', 'burnt', 'bland', 'undercooked', 'overcooked', 'dirty', 'smelly', 'late', 'noisy'
-];
+export interface Review {
+  id: string;
+  order_id: string;
+  customer_id: string;
+  restaurant_id: string;
+  overall_rating: number;
+  food_rating?: number;
+  service_rating?: number;
+  ambiance_rating?: number;
+  comment?: string;
+  photo_urls?: string[];
+  is_anonymous: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
-// ─── Create review ─────────────────────────────────────────────────────────────
-export async function create(
-  userId: string,
-  payload: {
-    order_id: string;
-    restaurant_id: string;
-    overall_rating: number;
-    text_review?: string;
-    item_ratings?: { order_item_id: string; rating: number }[];
-    photos?: string[];
-  }
-) {
-  // Validate: user must have a completed order at this restaurant
-  // FIX: orders never reach 'completed' status; valid terminal statuses are 'paid', 'served', 'closed'
-  const { data: order, error: orderErr } = await supabaseAdmin
-    .from('orders')
-    .select('id, status')
-    .eq('id', payload.order_id)
-    .eq('customer_id', userId)
-    .in('status', ['paid', 'served', 'closed'])
-    .single();
+export interface CreateReviewDto {
+  order_id: string;
+  customer_id: string;
+  restaurant_id: string;
+  overall_rating: number;
+  food_rating?: number;
+  service_rating?: number;
+  ambiance_rating?: number;
+  comment?: string;
+  is_anonymous?: boolean;
+}
 
-  if (orderErr || !order) {
-    throw Object.assign(new Error('No completed order found for this user'), { statusCode: 422 });
-  }
+export interface ReviewSummary {
+  restaurant_id: string;
+  average_overall: number;
+  average_food: number;
+  average_service: number;
+  average_ambiance: number;
+  total_reviews: number;
+}
 
-  // Check duplicate
-  const { data: existing } = await supabaseAdmin
-    .from('reviews')
-    .select('id')
-    .eq('order_id', payload.order_id)
-    .eq('user_id', userId)
-    .single();
+// ---------------------------------------------------------------------------
+// Allowed MIME types for review photos
+// ---------------------------------------------------------------------------
 
-  if (existing) {
-    throw Object.assign(new Error('Review already submitted for this order'), { statusCode: 409 });
-  }
+const ALLOWED_PHOTO_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+};
 
-  // Insert main review
-  // FIX: fetch branch_id from order so getByBranch queries can filter correctly
-  const { data: orderBranch } = await supabaseAdmin
-    .from('orders')
-    .select('branch_id')
-    .eq('id', payload.order_id)
-    .maybeSingle();
+const MAX_PHOTOS = 3;
 
-  const { data: review, error } = await supabaseAdmin
+// ---------------------------------------------------------------------------
+// Derive the Supabase storage domain from the project URL so we can
+// validate that incoming URLs belong to our own bucket before persisting.
+// ---------------------------------------------------------------------------
+
+const getStorageDomain = (): string => {
+  const url = process.env.SUPABASE_URL ?? '';
+  // e.g. https://<project>.supabase.co  →  <project>.supabase.co
+  return url.replace(/^https?:\/\//, '');
+};
+
+// ---------------------------------------------------------------------------
+// Core CRUD
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a new review for a completed order.
+ */
+export const createReview = async (dto: CreateReviewDto): Promise<Review> => {
+  const { data, error } = await supabaseAdmin
     .from('reviews')
     .insert({
-      user_id: userId,
-      order_id: payload.order_id,
-      restaurant_id: payload.restaurant_id,
-      branch_id: orderBranch?.branch_id ?? null,
-      overall_rating: payload.overall_rating,
-      text_review: payload.text_review ?? null,
-      photos: payload.photos ?? [],
-      sentiment_label: null,
-      sentiment_score: null,
+      order_id: dto.order_id,
+      customer_id: dto.customer_id,
+      restaurant_id: dto.restaurant_id,
+      overall_rating: dto.overall_rating,
+      food_rating: dto.food_rating ?? null,
+      service_rating: dto.service_rating ?? null,
+      ambiance_rating: dto.ambiance_rating ?? null,
+      comment: dto.comment ?? null,
+      is_anonymous: dto.is_anonymous ?? false,
+      photo_urls: [],
     })
     .select()
     .single();
 
-  if (error) throw error;
-
-  // Insert item-level ratings
-  if (payload.item_ratings?.length) {
-    const itemRatings = payload.item_ratings.map((r) => ({
-      review_id: review.id,
-      order_item_id: r.order_item_id,
-      rating: r.rating,
-    }));
-    await supabaseAdmin.from('review_item_ratings').insert(itemRatings);
+  if (error) {
+    console.error('[ReviewsService] createReview error:', error);
+    throw new Error(`Failed to create review: ${error.message}`);
   }
 
-  // Recalculate restaurant avg rating
-  await recalculateAvgRating(payload.restaurant_id);
+  return data as Review;
+};
 
-  // Async sentiment analysis — fire and forget (writes back label+score and busts cache)
-  const _text = payload.text_review ?? '';
-  setImmediate(async () => {
-    try {
-      if (!_text) return;
-      const { label, score } = await analyzeSentiment(_text);
-      await supabaseAdmin.from('reviews').update({ sentiment_label: label, sentiment_score: score }).eq('id', review.id);
-
-      // Best-effort cache invalidation for sentiment caches related to this restaurant
-      try {
-        const raw = (redis as any).client as import('ioredis').Redis | undefined;
-        if (raw && typeof raw.keys === 'function') {
-          const pattern = `sentiment:${payload.restaurant_id}:*`;
-          const keys: string[] = await raw.keys(pattern);
-          if (keys?.length) await redis.del(...keys);
-        }
-      } catch (e) {
-        console.warn('[reviews] cache bust failed', e);
-      }
-    } catch (err) {
-      console.warn('[reviews] sentiment analysis failed', err);
-    }
-  });
-
-  return review;
-}
-
-// ─── Get reviews by restaurant ─────────────────────────────────────────────────
-export async function getByRestaurant(
-  restaurantId: string,
-  page: number,
-  limit: number,
-  minRating?: number,
-  maxRating?: number
-) {
-  const { from, to } = paginate(page, limit);
-
-  let query = supabaseAdmin
-    .from('reviews')
-    .select(
-      `
-      *,
-      user:users(id, name, profile_pic_url)
-    `,
-      { count: 'exact' }
-    )
-    .eq('restaurant_id', restaurantId)
-    .order('created_at', { ascending: false })
-    .range(from, to);
-
-  if (minRating !== undefined) query = query.gte('overall_rating', minRating);
-  if (maxRating !== undefined) query = query.lte('overall_rating', maxRating);
-
-  const { data, error, count } = await query;
-  if (error) throw error;
-  return { data, count };
-}
-
-// ─── Get reviews by branch ─────────────────────────────────────────────────────
-// FIX: reviews table has no branch_id column — resolve via orders join
-export async function getByBranch(branchId: string, page: number, limit: number) {
-  const { from, to } = paginate(page, limit);
-
-  // Step 1: collect order IDs that belong to this branch
-  const { data: branchOrders, error: ordersErr } = await supabaseAdmin
-    .from('orders')
-    .select('id')
-    .eq('branch_id', branchId);
-
-  if (ordersErr) throw ordersErr;
-
-  const orderIds = (branchOrders ?? []).map((o: any) => o.id);
-  if (!orderIds.length) return { data: [], count: 0 };
-
-  // Step 2: get paginated reviews for those orders
-  const { data, error, count } = await supabaseAdmin
-    .from('reviews')
-    .select('*, user:users(id, name, profile_pic_url)', { count: 'exact' })
-    .in('order_id', orderIds)
-    .order('created_at', { ascending: false })
-    .range(from, to);
-
-  if (error) throw error;
-  return { data, count };
-}
-
-// ─── Get review by order ───────────────────────────────────────────────────────
-export async function getByOrder(orderId: string, userId: string) {
+/**
+ * Fetch a single review by ID.
+ */
+export const getReviewById = async (reviewId: string): Promise<Review | null> => {
   const { data, error } = await supabaseAdmin
     .from('reviews')
     .select('*')
-    .eq('order_id', orderId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data;
-}
-
-// ─── Delete review ─────────────────────────────────────────────────────────────
-export async function deleteReview(id: string) {
-  const { data: review, error: fetchErr } = await supabaseAdmin
-    .from('reviews')
-    .select('restaurant_id')
-    .eq('id', id)
+    .eq('id', reviewId)
     .single();
 
-  if (fetchErr) throw fetchErr;
+  if (error) {
+    if (error.code === 'PGRST116') return null; // row not found
+    console.error('[ReviewsService] getReviewById error:', error);
+    throw new Error(`Failed to fetch review: ${error.message}`);
+  }
 
-  const { error } = await supabaseAdmin.from('reviews').delete().eq('id', id);
-  if (error) throw error;
+  return data as Review;
+};
 
-  await recalculateAvgRating(review.restaurant_id);
-}
-
-// ─── Recalculate restaurant avg rating ────────────────────────────────────────
-async function recalculateAvgRating(restaurantId: string) {
+/**
+ * Get all reviews for a given restaurant, newest first.
+ */
+export const getReviewsByRestaurant = async (restaurantId: string): Promise<Review[]> => {
   const { data, error } = await supabaseAdmin
     .from('reviews')
-    .select('overall_rating')
+    .select('*')
+    .eq('restaurant_id', restaurantId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('[ReviewsService] getReviewsByRestaurant error:', error);
+    throw new Error(`Failed to fetch reviews: ${error.message}`);
+  }
+
+  return (data ?? []) as Review[];
+};
+
+/**
+ * Get all reviews submitted by a customer.
+ */
+export const getReviewsByCustomer = async (customerId: string): Promise<Review[]> => {
+  const { data, error } = await supabaseAdmin
+    .from('reviews')
+    .select('*')
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('[ReviewsService] getReviewsByCustomer error:', error);
+    throw new Error(`Failed to fetch reviews: ${error.message}`);
+  }
+
+  return (data ?? []) as Review[];
+};
+
+/**
+ * Get the rating summary/aggregate for a restaurant.
+ */
+export const getRestaurantReviewSummary = async (
+  restaurantId: string,
+): Promise<ReviewSummary> => {
+  const { data, error } = await supabaseAdmin
+    .from('reviews')
+    .select('overall_rating, food_rating, service_rating, ambiance_rating')
     .eq('restaurant_id', restaurantId);
 
-  if (error || !data?.length) return;
+  if (error) {
+    console.error('[ReviewsService] getRestaurantReviewSummary error:', error);
+    throw new Error(`Failed to fetch review summary: ${error.message}`);
+  }
 
-  const avg = data.reduce((sum: number, r: any) => sum + r.overall_rating, 0) / data.length;
+  const reviews = (data ?? []) as Array<{
+    overall_rating: number;
+    food_rating: number | null;
+    service_rating: number | null;
+    ambiance_rating: number | null;
+  }>;
 
-  await supabaseAdmin
-    .from('restaurants')
-    .update({ avg_rating: Math.round(avg * 10) / 10 })
-    .eq('id', restaurantId);
-}
+  if (reviews.length === 0) {
+    return {
+      restaurant_id: restaurantId,
+      average_overall: 0,
+      average_food: 0,
+      average_service: 0,
+      average_ambiance: 0,
+      total_reviews: 0,
+    };
+  }
 
-// ─── Sentiment analysis (public) ───────────────────────────────────────────
-export async function analyzeSentiment(text: string): Promise<{ label: 'positive' | 'neutral' | 'negative'; score: number }> {
-  const lower = (text ?? '').toLowerCase();
+  const avg = (nums: (number | null)[]): number => {
+    const valid = nums.filter((n): n is number => n !== null);
+    return valid.length === 0 ? 0 : valid.reduce((a, b) => a + b, 0) / valid.length;
+  };
 
-  let positiveCount = 0;
-  let negativeCount = 0;
-  for (const word of POSITIVE_WORDS) if (lower.includes(word)) positiveCount++;
-  for (const word of NEGATIVE_WORDS) if (lower.includes(word)) negativeCount++;
+  return {
+    restaurant_id: restaurantId,
+    average_overall: avg(reviews.map((r) => r.overall_rating)),
+    average_food: avg(reviews.map((r) => r.food_rating)),
+    average_service: avg(reviews.map((r) => r.service_rating)),
+    average_ambiance: avg(reviews.map((r) => r.ambiance_rating)),
+    total_reviews: reviews.length,
+  };
+};
 
-  const keywordScore = positiveCount + negativeCount ? (positiveCount - negativeCount) / (positiveCount + negativeCount) : 0; // -1..1
-  let label: 'positive' | 'neutral' | 'negative' = 'neutral';
-  if (keywordScore > 0) label = 'positive';
-  else if (keywordScore < 0) label = 'negative';
+/**
+ * Soft-delete / mark a review as hidden (admin / moderation use).
+ */
+export const deleteReview = async (reviewId: string): Promise<void> => {
+  const { error } = await supabaseAdmin
+    .from('reviews')
+    .delete()
+    .eq('id', reviewId);
 
-  let finalScore = keywordScore;
+  if (error) {
+    console.error('[ReviewsService] deleteReview error:', error);
+    throw new Error(`Failed to delete review: ${error.message}`);
+  }
+};
 
-  // Option B: call HuggingFace classifier if key present and text long enough
-  const hfKey = process.env.HUGGINGFACE_API_KEY;
-  if (hfKey && text.length > 20) {
-    try {
-      const resp = await fetch('https://api-inference.huggingface.co/models/distilbert-base-uncased-finetuned-sst-2-english', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${hfKey}`,
-        },
-        body: JSON.stringify({ inputs: text }),
+// ---------------------------------------------------------------------------
+// Photo upload pipeline  (P3-18 — Section 9.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a short-lived Supabase Storage signed upload URL so the
+ * frontend can PUT a photo directly to the bucket without proxying
+ * the bytes through our API server.
+ *
+ * @param reviewId   - UUID of the review these photos belong to
+ * @param photoIndex - Slot index 0–2 (up to MAX_PHOTOS slots per review)
+ * @param fileType   - MIME type supplied by the client
+ * @returns upload_url  — signed URL the client should PUT to
+ *          public_url  — permanent public URL to persist after upload
+ */
+export const getReviewPhotoUploadUrl = async (
+  reviewId: string,
+  photoIndex: number,
+  fileType: string,
+): Promise<{ upload_url: string; public_url: string }> => {
+  // --- Validate MIME type ---
+  const extension = ALLOWED_PHOTO_TYPES[fileType];
+  if (!extension) {
+    throw Object.assign(
+      new Error(
+        `Unsupported file type "${fileType}". Allowed types: ${Object.keys(ALLOWED_PHOTO_TYPES).join(', ')}`,
+      ),
+      { statusCode: 400 },
+    );
+  }
+
+  // --- Validate photo slot index ---
+  if (photoIndex < 0 || photoIndex >= MAX_PHOTOS || !Number.isInteger(photoIndex)) {
+    throw Object.assign(
+      new Error(`photo_index must be an integer between 0 and ${MAX_PHOTOS - 1}`),
+      { statusCode: 400 },
+    );
+  }
+
+  // --- Build unique storage key ---
+  // Pattern: reviews/<reviewId>/photo_<index>_<timestamp>.<ext>
+  const key = `reviews/${reviewId}/photo_${photoIndex}_${Date.now()}.${extension}`;
+
+  // --- Request a signed upload URL from Supabase Storage ---
+  const { data, error } = await supabaseAdmin.storage
+    .from('reviews') // bucket name: 'reviews'
+    .createSignedUploadUrl(key);
+
+  if (error || !data) {
+    console.error('[ReviewsService] createSignedUploadUrl error:', error);
+    throw Object.assign(
+      new Error('Failed to generate upload URL. Please try again.'),
+      { statusCode: 500 },
+    );
+  }
+
+  // --- Derive the permanent public URL for this key ---
+  const { data: urlData } = supabaseAdmin.storage
+    .from('reviews')
+    .getPublicUrl(key);
+
+  return {
+    upload_url: data.signedUrl,
+    public_url: urlData.publicUrl,
+  };
+};
+
+/**
+ * Persist an array of already-uploaded photo URLs onto a review row.
+ *
+ * Called by the frontend after the review has been created and all
+ * direct-to-storage uploads have completed.
+ *
+ * @param reviewId  - UUID of the review to update
+ * @param photoUrls - Array of public Supabase Storage URLs (max 3)
+ */
+export const attachPhotosToReview = async (
+  reviewId: string,
+  photoUrls: string[],
+): Promise<void> => {
+  // --- Validate count ---
+  if (!Array.isArray(photoUrls)) {
+    throw Object.assign(new Error('photo_urls must be an array'), { statusCode: 400 });
+  }
+  if (photoUrls.length > MAX_PHOTOS) {
+    throw Object.assign(
+      new Error(`Maximum ${MAX_PHOTOS} photos allowed per review`),
+      { statusCode: 400 },
+    );
+  }
+
+  // --- Validate each URL belongs to our Supabase Storage domain ---
+  const storageDomain = getStorageDomain();
+  for (const url of photoUrls) {
+    if (!url || typeof url !== 'string') {
+      throw Object.assign(new Error('Each photo URL must be a non-empty string'), {
+        statusCode: 400,
       });
-
-      const json = await resp.json();
-      // Expecting an array like [{label: 'POSITIVE', score: 0.99}]
-      if (Array.isArray(json) && json[0] && typeof json[0].label === 'string' && typeof json[0].score === 'number') {
-        const hfLabel = json[0].label.toLowerCase().includes('pos') ? 'positive' : 'negative';
-        const hfScore = json[0].score;
-        finalScore = hfLabel === 'positive' ? hfScore : -hfScore;
-        label = hfLabel as 'positive' | 'negative';
-      }
-    } catch (e) {
-      // silent fallback to keyword scoring
-      console.warn('[reviews] HuggingFace sentiment call failed', e);
+    }
+    // Must be HTTPS and reference our Supabase project domain
+    if (!url.startsWith('https://') || !url.includes(storageDomain)) {
+      throw Object.assign(
+        new Error(`Invalid photo URL: "${url}". URLs must belong to the application storage domain.`),
+        { statusCode: 400 },
+      );
     }
   }
 
-  return { label, score: Number(finalScore) };
-}
-
-// ─── Restaurant sentiment summary (cached) ─────────────────────────────────
-export async function getRestaurantSentimentSummary(restaurantId: string, periodDays = 30) {
-  const key = `sentiment:${restaurantId}:${periodDays}`;
-  try {
-    const cached = await redis.get(key);
-    if (cached) return JSON.parse(cached);
-  } catch (e) {
-    // ignore cache errors
+  // --- Verify the review exists before updating ---
+  const review = await getReviewById(reviewId);
+  if (!review) {
+    throw Object.assign(new Error(`Review "${reviewId}" not found`), { statusCode: 404 });
   }
 
-  const now = new Date();
-  const currentStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
-  const previousStart = new Date(now.getTime() - periodDays * 2 * 24 * 60 * 60 * 1000);
+  // --- Persist photo_urls onto the review row ---
+  // photo_urls is a TEXT[] column in the reviews table.
+  const { error } = await supabaseAdmin
+    .from('reviews')
+    .update({ photo_urls: photoUrls, updated_at: new Date().toISOString() })
+    .eq('id', reviewId);
 
-  const [currentRes, prevRes] = await Promise.all([
-    supabaseAdmin
-      .from('reviews')
-      .select('sentiment_label, text_review')
-      .eq('restaurant_id', restaurantId)
-      .gte('created_at', currentStart.toISOString())
-      .lte('created_at', now.toISOString()),
-    supabaseAdmin
-      .from('reviews')
-      .select('sentiment_label')
-      .eq('restaurant_id', restaurantId)
-      .gte('created_at', previousStart.toISOString())
-      .lt('created_at', currentStart.toISOString()),
-  ]);
-
-  if (currentRes.error) throw currentRes.error;
-  if (prevRes.error) throw prevRes.error;
-
-  const current = currentRes.data ?? [];
-  const previous = prevRes.data ?? [];
-
-  const total = current.length;
-  const pos = current.filter((r: any) => r.sentiment_label === 'positive').length;
-  const neg = current.filter((r: any) => r.sentiment_label === 'negative').length;
-  const neu = total - pos - neg;
-
-  const prevTotal = previous.length;
-  const prevPos = previous.filter((r: any) => r.sentiment_label === 'positive').length;
-
-  const toPct = (n: number, t: number) => (t ? Math.round((n / t) * 1000) / 10 : 0);
-
-  // Top keywords by frequency in current period
-  const posKeywords: Record<string, number> = {};
-  const negKeywords: Record<string, number> = {};
-  for (const r of current) {
-    const text = (r.text_review ?? '').toLowerCase();
-    for (const word of POSITIVE_WORDS) if (text.includes(word)) posKeywords[word] = (posKeywords[word] ?? 0) + 1;
-    for (const word of NEGATIVE_WORDS) if (text.includes(word)) negKeywords[word] = (negKeywords[word] ?? 0) + 1;
+  if (error) {
+    console.error('[ReviewsService] attachPhotosToReview error:', error);
+    throw Object.assign(
+      new Error(`Failed to attach photos to review: ${error.message}`),
+      { statusCode: 500 },
+    );
   }
-
-  const topN = (map: Record<string, number>, n = 5) =>
-    Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ keyword: k, count: v }));
-
-  const result = {
-    restaurant_id: restaurantId,
-    period_days: periodDays,
-    total_reviews: total,
-    positive_pct: toPct(pos, total),
-    neutral_pct: toPct(neu, total),
-    negative_pct: toPct(neg, total),
-    top_positive_keywords: topN(posKeywords),
-    top_negative_keywords: topN(negKeywords),
-    trend_positive_pct: toPct(pos, total) - toPct(prevPos, prevTotal),
-  };
-
-  try {
-    await redis.setex(key, 3600, JSON.stringify(result));
-  } catch (e) {
-    // ignore cache write errors
-  }
-
-  return result;
-}
+};
