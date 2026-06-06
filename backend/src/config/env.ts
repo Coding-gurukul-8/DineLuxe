@@ -61,6 +61,21 @@ const envSchema = z.object({
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_CONTACT_EMAIL: z.string().email('VAPID_CONTACT_EMAIL must be a valid email').optional(),
 
+  // ─── Firebase Cloud Messaging (FCM) ─────────────────────────────────────
+  // Required for push notifications to iOS Safari and native Android apps.
+  // All three keys are optional — if absent, FCM is silently disabled and the
+  // system falls back to Web Push only (desktops + Android Chrome).
+  //
+  // Obtain from: Firebase Console → Project Settings →
+  //              Service Accounts → Generate New Private Key
+  //
+  // FIREBASE_PROJECT_ID    — e.g. "my-restaurant-app"
+  // FIREBASE_CLIENT_EMAIL  — service account email from the downloaded JSON
+  // FIREBASE_PRIVATE_KEY   — paste the full PEM string (with \n literals)
+  FIREBASE_PROJECT_ID: z.string().optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().email('FIREBASE_CLIENT_EMAIL must be a valid email').optional(),
+  FIREBASE_PRIVATE_KEY: z.string().optional(),
+
   // ─── SMS (MSG91 for India / Twilio fallback) ─────────────────────────────
   MSG91_AUTH_KEY: z.string().optional(),
   MSG91_DEFAULT_TEMPLATE_ID: z.string().optional(),
@@ -92,4 +107,3 @@ if (!parsed.success) {
 
 export const config = parsed.data;
 export type Config = typeof config;
-

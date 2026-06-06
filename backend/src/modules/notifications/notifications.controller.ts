@@ -198,3 +198,34 @@ export async function unsubscribePush(
     next(err);
   }
 }
+
+// ─── FCM: store device token ──────────────────────────────────────────────────
+
+/**
+ * POST /notifications/push/fcm-token
+ *
+ * Authenticated. Saves an FCM device registration token for the current user.
+ * Called by the useFCMToken hook after Firebase SDK returns a token on the
+ * client (iOS, Android, or PWA).
+ *
+ * Body (validated by storeFCMTokenSchema):
+ *   { "fcm_token": "<firebase-registration-token>" }
+ *
+ * Response:
+ *   200 { success: true, data: { success: true } }
+ */
+export async function storeFCMToken(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const { fcm_token } = req.body as { fcm_token: string };
+
+    await notificationsService.storeFCMToken(req.user!.id, fcm_token);
+
+    res.json(success({ success: true }));
+  } catch (err) {
+    next(err);
+  }
+}

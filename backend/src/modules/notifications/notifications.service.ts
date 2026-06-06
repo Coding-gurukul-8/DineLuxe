@@ -1,58 +1,48 @@
 /**
  * backend/src/modules/notifications/notifications.service.ts
  *
- * Notification delivery layer — three channels:
+ * Notification delivery layer — four channels:
  *   1. In-app  — persisted to `notifications` table, broadcast via Supabase
  *                Realtime so the client badge updates instantly.
  *   2. Email   — delegated to src/email/send.ts (Resend).
  *   3. Web Push — VAPID-based push via the `web-push` npm package.
+ *                 Works on desktops and Android Chrome.
  *                 Gracefully disabled when VAPID keys are absent from env.
+ *   4. FCM     — Firebase Cloud Messaging via `firebase-admin`.
+ *                 Required for iOS Safari and native Android apps.
+ *                 Gracefully disabled when FIREBASE_PROJECT_ID is absent.
  *
- * ─── push_subscriptions table (run once in Supabase SQL editor) ─────────────
+ * sendPush() runs BOTH Web Push and FCM in parallel via Promise.allSettled so
+ * each user gets the notification on whichever channel(s) they're subscribed to.
+ *
+ * ─── push_subscriptions table ───────────────────────────────────────────────
+ *
+ *   The same table stores both Web Push and FCM tokens, differentiated by
+ *   the `subscription_data.type` field:
+ *
+ *   Web Push row:
+ *     subscription_data = {
+ *       endpoint: "https://fcm.googleapis.com/fcm/send/...",
+ *       keys: { p256dh: "...", auth: "..." }
+ *     }
+ *     device_type = 'web'
+ *
+ *   FCM row:
+ *     subscription_data = { type: "fcm", token: "<fcm-token>" }
+ *     device_type = 'mobile'
  *
  *   CREATE TABLE IF NOT EXISTS push_subscriptions (
  *     id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
  *     user_id          UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  *     subscription_data JSONB       NOT NULL,
- *     device_type      VARCHAR(20)  NOT NULL DEFAULT 'web',   -- 'web' | 'android' | 'ios'
+ *     device_type      VARCHAR(20)  NOT NULL DEFAULT 'web',
  *     created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
- *     -- One row per (user, endpoint). Duplicate subscribe calls are idempotent.
- *     UNIQUE (user_id, (subscription_data->>'endpoint'))
+ *     UNIQUE (user_id, (subscription_data->>'endpoint')),
+ *     UNIQUE (user_id, (subscription_data->>'token'))
  *   );
  *
- *   -- Lookup subscriptions by user quickly
  *   CREATE INDEX IF NOT EXISTS push_subscriptions_user_id_idx
  *     ON push_subscriptions (user_id);
- *
- * ─── Frontend integration overview ──────────────────────────────────────────
- *
- *   // 1. Register a service worker (must be at /public/sw.js)
- *   const registration = await navigator.serviceWorker.register('/sw.js');
- *   await navigator.serviceWorker.ready;
- *
- *   // 2. Fetch the VAPID public key from your API
- *   const { data } = await apiClient.get('/notifications/push/vapid-key');
- *   const vapidPublicKey = data.vapidPublicKey;           // base64url string
- *
- *   // 3. Subscribe via PushManager
- *   const subscription = await registration.pushManager.subscribe({
- *     userVisibleOnly: true,
- *     applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
- *   });
- *
- *   // 4. Send the subscription object to the backend
- *   await apiClient.post('/notifications/push/subscribe', {
- *     subscription: subscription.toJSON(),
- *     deviceType: 'web',
- *   });
- *
- *   // Helper used in step 3:
- *   function urlBase64ToUint8Array(base64String) {
- *     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
- *     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
- *     const rawData = atob(base64);
- *     return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
- *   }
  */
 
 import { supabaseAdmin } from '../../config/supabase';
@@ -63,16 +53,28 @@ import {
   sendWebPushNotification,
   type PushPayload,
 } from '../../utils/push';
+import {
+  isFCMEnabled,
+  sendFCMNotification,
+} from '../../utils/fcm';
 import type { PushSubscription } from 'web-push';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-/** Shape stored in the `subscription_data` JSONB column. */
-interface StoredSubscription {
+/** Shape stored in the `subscription_data` JSONB column for Web Push. */
+interface StoredWebSubscription {
   endpoint: string;
   keys: { p256dh: string; auth: string };
   expirationTime?: number | null;
 }
+
+/** Shape stored in the `subscription_data` JSONB column for FCM. */
+interface StoredFCMSubscription {
+  type: 'fcm';
+  token: string;
+}
+
+type StoredSubscription = StoredWebSubscription | StoredFCMSubscription;
 
 /** Row returned from `push_subscriptions`. */
 interface PushSubscriptionRow {
@@ -82,13 +84,61 @@ interface PushSubscriptionRow {
   device_type: string;
 }
 
-// ─── Push subscription management ────────────────────────────────────────────
+// ─── FCM token storage ────────────────────────────────────────────────────────
 
 /**
- * Stores (or replaces) a browser push subscription for a user.
+ * Stores (or updates) an FCM device token for a user.
  *
- * The UNIQUE constraint on (user_id, endpoint) makes this idempotent:
- * calling subscribe again from the same browser re-uses or updates the row.
+ * Tokens are upserted so re-registering from the same device replaces the
+ * old token rather than creating a duplicate row.
+ *
+ * @param userId   - Authenticated user UUID
+ * @param fcmToken - FCM registration token from the Firebase SDK on the client
+ */
+export async function storeFCMToken(
+  userId: string,
+  fcmToken: string,
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('push_subscriptions')
+    .upsert(
+      {
+        user_id: userId,
+        subscription_data: { type: 'fcm', token: fcmToken },
+        device_type: 'mobile',
+        created_at: new Date().toISOString(),
+      },
+      {
+        // Conflict on (user_id, token) — update the row so the token stays fresh
+        onConflict: 'user_id, subscription_data->>token',
+        ignoreDuplicates: false,
+      },
+    );
+
+  if (error) {
+    // Surface a descriptive message when the table isn't set up yet
+    if (
+      error.message?.includes('there is no unique or exclusion constraint') ||
+      error.message?.includes('Could not find')
+    ) {
+      throw Object.assign(
+        new Error(
+          'push_subscriptions table not found or missing UNIQUE constraint on token. ' +
+          'Run the CREATE TABLE / ALTER TABLE statements in notifications.service.ts.',
+        ),
+        { statusCode: 503 },
+      );
+    }
+    throw error;
+  }
+}
+
+// ─── Web Push subscription management ────────────────────────────────────────
+
+/**
+ * Stores (or replaces) a browser Web Push subscription for a user.
+ *
+ * The UNIQUE constraint on (user_id, endpoint) makes this idempotent.
  *
  * @param userId           - Authenticated user's UUID
  * @param subscriptionData - Raw object from `PushSubscription.toJSON()`
@@ -122,22 +172,18 @@ export async function registerPushSubscription(
         created_at: new Date().toISOString(),
       },
       {
-        // Conflict target matches the UNIQUE constraint
         onConflict: 'user_id, subscription_data->>endpoint',
-        ignoreDuplicates: false, // update on conflict so we get the id back
+        ignoreDuplicates: false,
       },
     )
     .select('id')
     .single();
 
   if (error) {
-    // Supabase/PostgREST returns a code when the upsert column expression
-    // isn't a plain column name — fallback to a plain insert + ignore duplicate
     if (
       error.message?.includes('there is no unique or exclusion constraint') ||
       error.message?.includes('Could not find')
     ) {
-      // Table likely missing — surface a clear message
       throw Object.assign(
         new Error(
           'push_subscriptions table not found. ' +
@@ -153,7 +199,7 @@ export async function registerPushSubscription(
 }
 
 /**
- * Removes a specific push subscription endpoint for a user.
+ * Removes a specific Web Push subscription endpoint for a user.
  * Called when the user explicitly opts out of push, or on 410/404 push error.
  */
 export async function removePushSubscriptionByEndpoint(
@@ -167,22 +213,23 @@ export async function removePushSubscriptionByEndpoint(
     .eq('subscription_data->>endpoint', endpoint);
 }
 
-// ─── Send push notification ───────────────────────────────────────────────────
+// ─── Send push notification (Web Push + FCM in parallel) ─────────────────────
 
 /**
- * Sends a Web Push notification to all registered browser endpoints for one user.
+ * Sends a push notification to all registered endpoints for one user.
  *
- * - If VAPID keys are not configured, logs a warning and returns silently
- *   (graceful degradation — email + in-app still work).
- * - Stale subscriptions (HTTP 410 / 404 from the push service) are deleted
- *   automatically so the table doesn't accumulate dead rows.
- * - Never throws — push failures must not break order flows, payment
- *   confirmations, or any other caller.
+ * Tries BOTH channels concurrently:
+ *   - Web Push (VAPID) for browser/desktop subscriptions
+ *   - FCM for mobile device tokens (iOS + Android)
+ *
+ * - Gracefully degrades when either channel is not configured.
+ * - Stale subscriptions are deleted automatically.
+ * - Never throws — push failures must not break order flows or payments.
  *
  * @param userId  - Target user UUID
  * @param title   - Notification title (shown in OS notification tray)
  * @param body    - Notification body text
- * @param data    - Optional key/value payload available in the service worker
+ * @param data    - Optional key/value payload for the service worker / app
  */
 export async function sendPush(
   userId: string,
@@ -190,15 +237,18 @@ export async function sendPush(
   body: string,
   data?: Record<string, unknown>,
 ): Promise<void> {
-  if (!isWebPushEnabled()) {
+  const webPushEnabled = isWebPushEnabled();
+  const fcmEnabled = isFCMEnabled();
+
+  if (!webPushEnabled && !fcmEnabled) {
     console.warn(
-      `[push] VAPID keys not configured — push to user ${userId} skipped. ` +
-      'Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CONTACT_EMAIL in .env to enable.',
+      `[push] No push channel configured — notification to user ${userId} skipped. ` +
+      'Set VAPID_* or FIREBASE_* env vars to enable push.',
     );
     return;
   }
 
-  // Fetch all active subscriptions for this user
+  // Fetch all active subscriptions for this user (both web and FCM)
   const { data: rows, error: fetchError } = await supabaseAdmin
     .from('push_subscriptions')
     .select('id, subscription_data, device_type')
@@ -210,10 +260,15 @@ export async function sendPush(
     return;
   }
 
-  if (!rows || rows.length === 0) {
-    // User has no registered push endpoints — nothing to do
-    return;
-  }
+  if (!rows || rows.length === 0) return;
+
+  // Separate rows into Web Push and FCM buckets
+  const webRows = rows.filter(
+    (r) => !('type' in r.subscription_data) || (r.subscription_data as any).type !== 'fcm',
+  );
+  const fcmRows = rows.filter(
+    (r) => 'type' in r.subscription_data && (r.subscription_data as any).type === 'fcm',
+  );
 
   const payload: PushPayload = {
     title,
@@ -224,50 +279,60 @@ export async function sendPush(
     ...(data ? { data } : {}),
   };
 
-  // Fan out to all endpoints (usually just 1 per user, occasionally more
-  // if they're logged in on multiple devices/browsers)
-  const staleIds: string[] = [];
+  // Stringify data values for FCM (FCM only accepts string values in the data map)
+  const fcmData: Record<string, string> | undefined = data
+    ? Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, String(v)]),
+      )
+    : undefined;
 
-  await Promise.allSettled(
-    rows.map(async (row) => {
-      const subscription = row.subscription_data as unknown as PushSubscription;
-      const result = await sendWebPushNotification(subscription, payload);
+  const staleWebIds: string[] = [];
 
-      if (result === 'gone') {
-        // Endpoint is expired — queue for deletion
-        staleIds.push(row.id);
-        console.info(
-          `[push] Subscription ${row.id} returned 410/404 — marked for removal.`,
-        );
-      }
-    }),
-  );
+  // Build Web Push promises
+  const webPushPromises: Promise<void>[] = webPushEnabled
+    ? webRows.map(async (row) => {
+        const subscription = row.subscription_data as unknown as PushSubscription;
+        const result = await sendWebPushNotification(subscription, payload);
+        if (result === 'gone') {
+          staleWebIds.push(row.id);
+          console.info(`[push] Web Push subscription ${row.id} returned 410/404 — marking for removal.`);
+        }
+      })
+    : [];
 
-  // Clean up stale subscriptions in one batch
-  if (staleIds.length > 0) {
+  // Build FCM promises
+  const fcmPromises: Promise<void>[] = fcmEnabled
+    ? fcmRows.map(async (row) => {
+        const stored = row.subscription_data as StoredFCMSubscription;
+        await sendFCMNotification(stored.token, title, body, fcmData);
+      })
+    : [];
+
+  // Fire all channels in parallel
+  await Promise.allSettled([...webPushPromises, ...fcmPromises]);
+
+  // Clean up stale Web Push subscriptions in one batch
+  if (staleWebIds.length > 0) {
     const { error: deleteError } = await supabaseAdmin
       .from('push_subscriptions')
       .delete()
-      .in('id', staleIds);
+      .in('id', staleWebIds);
 
     if (deleteError) {
-      console.error('[push] Failed to delete stale subscriptions:', deleteError);
+      console.error('[push] Failed to delete stale Web Push subscriptions:', deleteError);
     }
   }
 }
 
 /**
- * Sends a Web Push notification to every staff member with a given role
+ * Sends a push notification to every staff member with a given role
  * in a given branch. Useful for broadcast events like "new order arrived".
- *
- * Fetches the user list from the `users` table (role + branch_id columns)
- * then fans out to sendPush() for each matching user.
  *
  * @param branchId - Branch UUID to scope the role search
  * @param role     - Staff role string (e.g. 'chef', 'waiter', 'manager')
  * @param title    - Notification title
  * @param body     - Notification body
- * @param data     - Optional extra payload for the service worker
+ * @param data     - Optional extra payload for the service worker / app
  */
 export async function sendPushToRole(
   branchId: string,
@@ -276,11 +341,6 @@ export async function sendPushToRole(
   body: string,
   data?: Record<string, unknown>,
 ): Promise<void> {
-  if (!isWebPushEnabled()) {
-    console.warn(`[push] VAPID keys not configured — role broadcast (${role}@${branchId}) skipped.`);
-    return;
-  }
-
   const { data: users, error } = await supabaseAdmin
     .from('users')
     .select('id')

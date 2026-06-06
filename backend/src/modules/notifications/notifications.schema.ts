@@ -47,3 +47,22 @@ export const registerPushSubscriptionSchema = z.object({
 });
 
 export type RegisterPushSubscriptionInput = z.infer<typeof registerPushSubscriptionSchema>;
+
+// ─── FCM: Firebase Cloud Messaging token registration ────────────────────────
+
+/**
+ * Body schema for POST /notifications/push/fcm-token
+ *
+ * The client sends:
+ *   { "fcm_token": "<firebase-registration-token>" }
+ *
+ * FCM tokens are long strings (152+ characters) returned by the Firebase SDK
+ * after the user grants notification permission.
+ */
+export const storeFCMTokenSchema = z.object({
+  fcm_token: z
+    .string()
+    .min(20, 'fcm_token must be a valid Firebase registration token'),
+});
+
+export type StoreFCMTokenInput = z.infer<typeof storeFCMTokenSchema>;

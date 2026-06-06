@@ -20,10 +20,12 @@ import {
   getVapidKey,
   subscribePush,
   unsubscribePush,
+  storeFCMToken,
 } from './notifications.controller';
 import {
   registerDeviceSchema,
   registerPushSubscriptionSchema,
+  storeFCMTokenSchema,
 } from './notifications.schema';
 
 const router: import('express').Router = Router();
@@ -78,6 +80,23 @@ router.post(
  * Body: { endpoint: "https://..." }
  */
 router.delete('/push/subscribe', unsubscribePush);
+
+// ── FCM token registration ────────────────────────────────────────────────────
+
+/**
+ * POST /notifications/push/fcm-token
+ *
+ * Saves an FCM device registration token for the authenticated user.
+ * Called by the useFCMToken hook after Firebase SDK returns a token.
+ *
+ * Body: { fcm_token: string }
+ * Response: { success: true }
+ */
+router.post(
+  '/push/fcm-token',
+  validate(storeFCMTokenSchema),
+  storeFCMToken,
+);
 
 // ── Legacy FCM device token (kept for backwards compatibility) ────────────────
 
