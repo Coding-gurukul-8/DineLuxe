@@ -23,6 +23,10 @@ import {
   unsuspendCustomer,
   flagCustomer,
   getCustomerDetail,
+  // Section 9.2 / 19.1 — Sponsored Placements (admin-side CRUD)
+  listSponsorships,
+  createSponsorship,
+  toggleSponsorship,
 } from './admin.controller';
 import { createAdminSchema, suspendCustomerSchema, flagCustomerSchema } from './admin.schema';
 
@@ -93,5 +97,30 @@ router.patch('/customers/:id/flag', validate(flagCustomerSchema), flagCustomer);
 
 // ── Feedback ─────────────────────────────────────────────────────────────────
 router.get('/feedback', getFeedback);
+
+// ── Sponsored Placements — Section 9.2 / 19.1 ────────────────────────────────
+// Super admin only — ordinary admins cannot manage paid placements.
+//
+// NOTE: The middleware chain from router.use(authenticate, requireRole(...))
+// above already requires 'admin' or 'super_admin'. The extra requireRole here
+// narrows it specifically to 'super_admin' for these three routes.
+//
+// Public read/impression/click endpoints live in a *separate* router
+// (sponsorship.public.routes.ts) mounted at /api/v1/sponsorships in app.ts.
+router.get(
+  '/sponsorships',
+  requireRole('super_admin'),
+  listSponsorships,
+);
+router.post(
+  '/sponsorships',
+  requireRole('super_admin'),
+  createSponsorship,
+);
+router.patch(
+  '/sponsorships/:id/toggle',
+  requireRole('super_admin'),
+  toggleSponsorship,
+);
 
 export default router;

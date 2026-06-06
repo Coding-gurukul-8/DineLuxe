@@ -486,3 +486,36 @@ app.use(errorMiddleware);
 export default app;
 
 */
+
+
+// ─── Sponsored Placements — Section 9.2 / 19.1 ───────────────────────────────
+// Add this block to the END of types/api.ts
+
+export type SponsoredPlacementType = 'home_banner' | 'search_top' | 'featured_card';
+
+/**
+ * Returned by:
+ *   GET /api/v1/sponsorships/active?type=home_banner  (public, customer app)
+ *   GET /api/v1/admin/sponsorships                    (admin panel)
+ *
+ * The backend flattens the restaurant + restaurant_branding joins into
+ * top-level fields so the frontend doesn't need to drill into nested objects.
+ */
+export interface SponsoredPlacement {
+  id:               string;
+  restaurant_id:    string;
+  placement_type:   SponsoredPlacementType;
+  banner_url:       string | null;
+  headline:         string | null;
+  cta_text:         string | null;
+  is_active:        boolean;
+  starts_at:        string;          // ISO 8601 timestamptz
+  ends_at:          string;          // ISO 8601 timestamptz
+  impression_count: number;
+  click_count:      number;
+  created_at:       string;
+  // Flattened from JOIN with restaurants + restaurant_branding
+  restaurant_name:  string | null;
+  logo_url:         string | null;
+  primary_color:    string | null;
+}

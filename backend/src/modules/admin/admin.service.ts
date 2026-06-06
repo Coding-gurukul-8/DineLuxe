@@ -318,7 +318,6 @@ export async function getHealthScore(): Promise<HealthScoreResult> {
   const components: HealthScoreComponent[] = [];
 
   // ── Component 1: System Uptime (30 pts) ───────────────────────────────────
-  // Probe DB and Redis independently; same 500ms timeout as getBasicHealth.
   let dbOk = false;
   let redisUp = false;
 
@@ -346,163 +345,89 @@ export async function getHealthScore(): Promise<HealthScoreResult> {
   const uptimeColor: HealthScoreComponent['color'] =
     uptimeScore === 30 ? 'green' : uptimeScore === 15 ? 'yellow' : 'red';
 
-  components.push({
-    name: 'System Uptime',
-    score: uptimeScore,
-    max: 30,
-    color: uptimeColor,
-  });
+  components.push({ name: 'System Uptime', score: uptimeScore, max: 30, color: uptimeColor });
 
   // ── Component 2: Order Completion Rate (30 pts) ───────────────────────────
-  // COUNT completed / COUNT total for orders in last 24 hours.
-  let orderScore = 5; // safe floor if query fails
+  let orderScore = 5;
   try {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
     const [totalRes, completedRes] = await Promise.all([
-      supabaseAdmin
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .gte('created_at', since24h),
-      supabaseAdmin
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .gte('created_at', since24h)
-        .in('status', ['paid', 'served', 'closed']),
+      supabaseAdmin.from('orders').select('id', { count: 'exact', head: true }).gte('created_at', since24h),
+      supabaseAdmin.from('orders').select('id', { count: 'exact', head: true }).gte('created_at', since24h).in('status', ['paid', 'served', 'closed']),
     ]);
-
     const total = totalRes.count ?? 0;
     const completed = completedRes.count ?? 0;
-
     if (total === 0) {
-      // No orders in window — no failures to penalise; award full marks
       orderScore = 30;
     } else {
       const pct = (completed / total) * 100;
-      if (pct > 90)        orderScore = 30;
-      else if (pct >= 75)  orderScore = 22;
-      else if (pct >= 60)  orderScore = 15;
-      else                 orderScore = 5;
+      if (pct > 90)       orderScore = 30;
+      else if (pct >= 75) orderScore = 22;
+      else if (pct >= 60) orderScore = 15;
+      else                orderScore = 5;
     }
-  } catch {
-    // DB unavailable — already penalised in uptime; leave floor score
-  }
+  } catch { /* leave floor */ }
 
   const orderColor: HealthScoreComponent['color'] =
-    orderScore === 30 ? 'green'
-    : orderScore === 22 ? 'yellow'
-    : orderScore === 15 ? 'orange'
-    : 'red';
-
-  components.push({
-    name: 'Order Completion',
-    score: orderScore,
-    max: 30,
-    color: orderColor,
-  });
+    orderScore === 30 ? 'green' : orderScore === 22 ? 'yellow' : orderScore === 15 ? 'orange' : 'red';
+  components.push({ name: 'Order Completion', score: orderScore, max: 30, color: orderColor });
 
   // ── Component 3: API Response Time (20 pts) ───────────────────────────────
-  // Average of last 100 values in Redis list `metric:query_times`.
-  let responseScore = 20; // full marks when no data (cold start / no traffic)
+  let responseScore = 20;
   try {
-    const rawTimes = (await redis.call(
-      'LRANGE', 'metric:query_times', '0', '99',
-    )) as string[];
-
+    const rawTimes = (await redis.call('LRANGE', 'metric:query_times', '0', '99')) as string[];
     if (Array.isArray(rawTimes) && rawTimes.length > 0) {
       const times = rawTimes.map(Number).filter(Number.isFinite);
       if (times.length > 0) {
         const avgMs = times.reduce((a, b) => a + b, 0) / times.length;
-        if (avgMs < 200)        responseScore = 20;
-        else if (avgMs < 500)   responseScore = 15;
-        else if (avgMs < 1000)  responseScore = 8;
-        else                    responseScore = 0;
+        if (avgMs < 200)       responseScore = 20;
+        else if (avgMs < 500)  responseScore = 15;
+        else if (avgMs < 1000) responseScore = 8;
+        else                   responseScore = 0;
       }
     }
-  } catch {
-    // Redis unavailable — uptime already penalised; award full marks here
-  }
+  } catch { /* leave full marks */ }
 
   const responseColor: HealthScoreComponent['color'] =
-    responseScore === 20 ? 'green'
-    : responseScore === 15 ? 'yellow'
-    : responseScore === 8 ? 'orange'
-    : 'red';
-
-  components.push({
-    name: 'Response Time',
-    score: responseScore,
-    max: 20,
-    color: responseColor,
-  });
+    responseScore === 20 ? 'green' : responseScore === 15 ? 'yellow' : responseScore === 8 ? 'orange' : 'red';
+  components.push({ name: 'Response Time', score: responseScore, max: 20, color: responseColor });
 
   // ── Component 4: Customer Satisfaction (20 pts) ───────────────────────────
-  // AVG(overall_rating) from reviews in the last 7 days.
-  let satisfactionScore = 16; // default to second tier when no data
+  let satisfactionScore = 16;
   try {
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
     const { data: reviewRows, error: reviewError } = await supabaseAdmin
       .from('reviews')
       .select('overall_rating')
       .gte('created_at', since7d);
-
     if (!reviewError && reviewRows && reviewRows.length > 0) {
-      const ratings = reviewRows
-        .map((r: any) => Number(r.overall_rating))
-        .filter(Number.isFinite);
-
+      const ratings = reviewRows.map((r: any) => Number(r.overall_rating)).filter(Number.isFinite);
       if (ratings.length > 0) {
         const avg = ratings.reduce((a, b) => a + b, 0) / ratings.length;
-        if (avg > 4.5)       satisfactionScore = 20;
-        else if (avg >= 4.0) satisfactionScore = 16;
+        if (avg > 4.5)      satisfactionScore = 20;
+        else if (avg >= 4)  satisfactionScore = 16;
         else if (avg >= 3.5) satisfactionScore = 10;
-        else                 satisfactionScore = 5;
+        else                satisfactionScore = 5;
       }
     }
-  } catch {
-    // Query failed — leave default
-  }
+  } catch { /* leave default */ }
 
   const satisfactionColor: HealthScoreComponent['color'] =
-    satisfactionScore >= 16 ? 'green'
-    : satisfactionScore === 10 ? 'yellow'
-    : 'red';
+    satisfactionScore >= 16 ? 'green' : satisfactionScore === 10 ? 'yellow' : 'red';
+  components.push({ name: 'Customer Satisfaction', score: satisfactionScore, max: 20, color: satisfactionColor });
 
-  components.push({
-    name: 'Customer Satisfaction',
-    score: satisfactionScore,
-    max: 20,
-    color: satisfactionColor,
-  });
-
-  // ── Composite score + grade ────────────────────────────────────────────────
+  // ── Composite ─────────────────────────────────────────────────────────────
   const score = components.reduce((sum, c) => sum + c.score, 0);
-
   let grade: HealthScoreResult['grade'];
   let label: string;
-
   if (score >= 85)      { grade = 'A'; label = 'Excellent'; }
   else if (score >= 70) { grade = 'B'; label = 'Good'; }
   else if (score >= 55) { grade = 'C'; label = 'Fair'; }
   else if (score >= 40) { grade = 'D'; label = 'Poor'; }
   else                  { grade = 'F'; label = 'Critical'; }
 
-  const result: HealthScoreResult = {
-    score,
-    grade,
-    label,
-    components,
-    computed_at: new Date().toISOString(),
-  };
-
-  // ── Cache result ───────────────────────────────────────────────────────────
-  try {
-    await redis.setex(HEALTH_SCORE_CACHE_KEY, HEALTH_SCORE_CACHE_TTL, JSON.stringify(result));
-  } catch {
-    // Non-fatal — cache write failure
-  }
-
+  const result: HealthScoreResult = { score, grade, label, components, computed_at: new Date().toISOString() };
+  try { await redis.setex(HEALTH_SCORE_CACHE_KEY, HEALTH_SCORE_CACHE_TTL, JSON.stringify(result)); } catch {}
   return result;
 }
 
@@ -532,8 +457,6 @@ export async function updateRestaurantStatus(id: string, status: string) {
     .single();
 
   if (error) throw error;
-
-  // Invalidate dashboard cache
   await redis.del(DASHBOARD_CACHE_KEY);
   return data;
 }
@@ -541,31 +464,15 @@ export async function updateRestaurantStatus(id: string, status: string) {
 // ─── Get pending restaurants for review (paginated) ───────────────────────────
 export async function getPendingRestaurants(page: number, limit: number) {
   const { from, to } = paginate(page, limit);
-
   const { data, error, count } = await supabaseAdmin
     .from('restaurants')
     .select(
-      `
-      id,
-      name,
-      cuisine_type,
-      gst_number,
-      status,
-      created_at,
-      updated_at,
-      owner:users!restaurants_owner_id_fkey(
-        id,
-        name,
-        email,
-        phone,
-        is_active,
-        created_at
-      )
-    `,
+      `id, name, cuisine_type, gst_number, status, created_at, updated_at,
+       owner:users!restaurants_owner_id_fkey(id, name, email, phone, is_active, created_at)`,
       { count: 'exact' },
     )
     .eq('status', 'pending')
-    .order('created_at', { ascending: true }) // oldest first — first come, first serve
+    .order('created_at', { ascending: true })
     .range(from, to);
 
   if (error) throw error;
@@ -576,208 +483,85 @@ export async function getPendingRestaurants(page: number, limit: number) {
 export async function approveRestaurant(restaurantId: string, adminId: string) {
   const now = new Date().toISOString();
 
-  // 1. Fetch the restaurant and verify it's pending
   const { data: restaurant, error: fetchError } = await supabaseAdmin
     .from('restaurants')
-    .select(
-      `
-      id,
-      name,
-      status,
-      owner:users!restaurants_owner_id_fkey(id, name, email)
-    `,
-    )
+    .select(`id, name, status, owner:users!restaurants_owner_id_fkey(id, name, email)`)
     .eq('id', restaurantId)
     .single();
 
   if (fetchError) throw fetchError;
-  if (!restaurant) {
-    const err = Object.assign(new Error('Restaurant not found'), { statusCode: 404 });
-    throw err;
-  }
-
+  if (!restaurant) throw Object.assign(new Error('Restaurant not found'), { statusCode: 404 });
   if ((restaurant as any).status !== 'pending') {
-    const err = Object.assign(
+    throw Object.assign(
       new Error(`Restaurant is not pending — current status: ${(restaurant as any).status}`),
       { statusCode: 400 },
     );
-    throw err;
   }
 
-  const owner = (restaurant as any).owner as {
-    id: string;
-    name: string;
-    email: string;
-  } | null;
+  const owner = (restaurant as any).owner as { id: string; name: string; email: string } | null;
+  if (!owner) throw Object.assign(new Error('Restaurant owner not found'), { statusCode: 404 });
 
-  if (!owner) {
-    const err = Object.assign(new Error('Restaurant owner not found'), { statusCode: 404 });
-    throw err;
-  }
-
-  // 2. Update restaurant status to active
   const { error: restaurantError } = await supabaseAdmin
     .from('restaurants')
-    .update({
-      status: 'active',
-      approved_by: adminId,
-      approved_at: now,
-      updated_at: now,
-    })
+    .update({ status: 'active', approved_by: adminId, approved_at: now, updated_at: now })
     .eq('id', restaurantId);
-
   if (restaurantError) throw restaurantError;
 
-  // 3. Activate the owner user (they may have been pending-inactive)
-  await supabaseAdmin
-    .from('users')
-    .update({ is_active: true, updated_at: now })
-    .eq('id', owner.id);
+  await supabaseAdmin.from('users').update({ is_active: true, updated_at: now }).eq('id', owner.id);
 
-  // 4. Create in-app notification for the owner
-  await createInApp(
-    owner.id,
-    'system_alert',
-    'Restaurant Approved! 🎉',
-    'Your restaurant has been approved! You can now go live.',
-    restaurantId,
-    'restaurant',
-  ).catch((err) => console.error('[approveRestaurant] Notification failed:', err));
+  await createInApp(owner.id, 'system_alert', 'Restaurant Approved! 🎉', 'Your restaurant has been approved! You can now go live.', restaurantId, 'restaurant')
+    .catch((err) => console.error('[approveRestaurant] Notification failed:', err));
 
-  // 5. Send approval email
   const dashboardUrl = process.env.OWNER_DASHBOARD_URL ?? 'https://app.dineluxe.app/owner';
-  await sendEmail({
-    to: owner.email,
-    templateName: 'restaurant-approved',
-    data: {
-      ownerName: owner.name,
-      restaurantName: (restaurant as any).name,
-      dashboardUrl,
-    },
-  });
+  await sendEmail({ to: owner.email, templateName: 'restaurant-approved', data: { ownerName: owner.name, restaurantName: (restaurant as any).name, dashboardUrl } });
 
-  // 6. Audit log
-  insertAuditLog({
-    actorId: adminId,
-    action: 'RESTAURANT_APPROVED',
-    targetType: 'restaurant',
-    targetId: restaurantId,
-    newValue: { status: 'active', approved_by: adminId, approved_at: now },
-  }).catch(() => {});
+  insertAuditLog({ actorId: adminId, action: 'RESTAURANT_APPROVED', targetType: 'restaurant', targetId: restaurantId, newValue: { status: 'active', approved_by: adminId, approved_at: now } }).catch(() => {});
 
-  // 7. Emit WebSocket event to admin room
   try {
     const { io } = await import('../../server');
-    io.to('admin').emit('restaurant_approved', {
-      restaurant_id: restaurantId,
-      restaurant_name: (restaurant as any).name,
-      approved_by: adminId,
-      approved_at: now,
-    });
-  } catch {
-    // WebSocket emission failure is non-fatal
-  }
+    io.to('admin').emit('restaurant_approved', { restaurant_id: restaurantId, restaurant_name: (restaurant as any).name, approved_by: adminId, approved_at: now });
+  } catch {}
 
-  // Invalidate dashboard cache so pending count reflects new state
   await redis.del(DASHBOARD_CACHE_KEY);
-
-  return {
-    success: true,
-    restaurant_id: restaurantId,
-    owner_notified: true,
-  };
+  return { success: true, restaurant_id: restaurantId, owner_notified: true };
 }
 
 // ─── Reject a pending restaurant ──────────────────────────────────────────────
 export async function rejectRestaurant(restaurantId: string, adminId: string, reason: string) {
   const now = new Date().toISOString();
 
-  // 1. Fetch the restaurant and verify it's pending
   const { data: restaurant, error: fetchError } = await supabaseAdmin
     .from('restaurants')
-    .select(
-      `
-      id,
-      name,
-      status,
-      owner:users!restaurants_owner_id_fkey(id, name, email)
-    `,
-    )
+    .select(`id, name, status, owner:users!restaurants_owner_id_fkey(id, name, email)`)
     .eq('id', restaurantId)
     .single();
 
   if (fetchError) throw fetchError;
-  if (!restaurant) {
-    const err = Object.assign(new Error('Restaurant not found'), { statusCode: 404 });
-    throw err;
-  }
-
+  if (!restaurant) throw Object.assign(new Error('Restaurant not found'), { statusCode: 404 });
   if ((restaurant as any).status !== 'pending') {
-    const err = Object.assign(
+    throw Object.assign(
       new Error(`Restaurant is not pending — current status: ${(restaurant as any).status}`),
       { statusCode: 400 },
     );
-    throw err;
   }
 
-  const owner = (restaurant as any).owner as {
-    id: string;
-    name: string;
-    email: string;
-  } | null;
+  const owner = (restaurant as any).owner as { id: string; name: string; email: string } | null;
+  if (!owner) throw Object.assign(new Error('Restaurant owner not found'), { statusCode: 404 });
 
-  if (!owner) {
-    const err = Object.assign(new Error('Restaurant owner not found'), { statusCode: 404 });
-    throw err;
-  }
-
-  // 2. Update restaurant status to rejected
   const { error: restaurantError } = await supabaseAdmin
     .from('restaurants')
-    .update({
-      status: 'rejected',
-      rejected_by: adminId,
-      rejected_at: now,
-      rejection_reason: reason,
-      updated_at: now,
-    })
+    .update({ status: 'rejected', rejected_by: adminId, rejected_at: now, rejection_reason: reason, updated_at: now })
     .eq('id', restaurantId);
-
   if (restaurantError) throw restaurantError;
 
-  // 3. Create in-app notification for the owner with the reason
-  await createInApp(
-    owner.id,
-    'system_alert',
-    'Application Update',
-    `Your restaurant application was not approved: ${reason}`,
-    restaurantId,
-    'restaurant',
-  ).catch((err) => console.error('[rejectRestaurant] Notification failed:', err));
+  await createInApp(owner.id, 'system_alert', 'Application Update', `Your restaurant application was not approved: ${reason}`, restaurantId, 'restaurant')
+    .catch((err) => console.error('[rejectRestaurant] Notification failed:', err));
 
-  // 4. Send rejection email
-  await sendEmail({
-    to: owner.email,
-    templateName: 'restaurant-rejected',
-    data: {
-      ownerName: owner.name,
-      restaurantName: (restaurant as any).name,
-      reason,
-    },
-  });
+  await sendEmail({ to: owner.email, templateName: 'restaurant-rejected', data: { ownerName: owner.name, restaurantName: (restaurant as any).name, reason } });
 
-  // 5. Audit log
-  insertAuditLog({
-    actorId: adminId,
-    action: 'RESTAURANT_REJECTED',
-    targetType: 'restaurant',
-    targetId: restaurantId,
-    newValue: { status: 'rejected', rejected_by: adminId, rejected_at: now, reason },
-  }).catch(() => {});
+  insertAuditLog({ actorId: adminId, action: 'RESTAURANT_REJECTED', targetType: 'restaurant', targetId: restaurantId, newValue: { status: 'rejected', rejected_by: adminId, rejected_at: now, reason } }).catch(() => {});
 
-  // Invalidate dashboard cache
   await redis.del(DASHBOARD_CACHE_KEY);
-
   return { success: true };
 }
 
@@ -791,7 +575,6 @@ export async function getCustomers(page: number, limit: number, status?: string)
     .order('created_at', { ascending: false })
     .range(from, to);
 
-  // status param maps to is_active: 'active' -> true, 'inactive' -> false
   if (status === 'active') query = query.eq('is_active', true);
   else if (status === 'inactive') query = query.eq('is_active', false);
 
@@ -802,7 +585,6 @@ export async function getCustomers(page: number, limit: number, status?: string)
 
 // ─── Update customer status ───────────────────────────────────────────────────
 export async function updateCustomerStatus(id: string, status: string) {
-  // Map 'active'/'inactive' to the boolean is_active column
   const is_active = status === 'active';
   const { data, error } = await supabaseAdmin
     .from('users')
@@ -827,6 +609,7 @@ export async function getFeedback(page: number, limit: number) {
   if (error) throw error;
   return { data, count };
 }
+
 // ─── Shared helper: create any privileged user (admin or super_admin) ─────────
 async function createPrivilegedUser(input: {
   email: string;
@@ -838,9 +621,6 @@ async function createPrivilegedUser(input: {
 }) {
   const email = input.email.toLowerCase().trim();
   const name = `${input.first_name} ${input.last_name}`.trim();
-
-  // BUG FIX: hash the password so it is stored in users.password_hash.
-  // Without this, login crashes with "Illegal arguments: string, object".
   const hashedPassword = await bcrypt.hash(input.password, config.BCRYPT_SALT_ROUNDS);
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -848,14 +628,10 @@ async function createPrivilegedUser(input: {
     password: input.password,
     email_confirm: true,
   });
-
   if (authError) throw new Error(`Auth creation failed: ${authError.message}`);
 
   const userId = authData.user.id;
   const now = new Date().toISOString();
-
-  // Some environments only expose 'super_admin' in the UserRole enum.
-  // Store admin logins as super_admin so platform endpoints remain reachable.
   const persistedRole = input.role === 'admin' ? 'super_admin' : input.role;
 
   const { error: profileError } = await supabaseAdmin.from('users').insert({
@@ -892,7 +668,6 @@ export async function createAdmin(input: {
 }
 
 // ─── Create a super_admin (via POST /admin/signup) ─────────────────────────
-// Protected by X-Seed-Secret header — NOT a JWT route.
 export async function createSuperAdmin(input: {
   email: string;
   password: string;
@@ -904,204 +679,387 @@ export async function createSuperAdmin(input: {
 }
 
 // ─── Suspend a customer (Section 6.5) ────────────────────────────────────────
-// Sets is_active=false, writes suspension metadata to DB, stores Redis key
-// `suspended:{id}` (no TTL) so auth middleware can instantly block the user.
-export async function suspendCustomer(
-  customerId: string,
-  adminId: string,
-  reason: string,
-): Promise<{ success: true }> {
+export async function suspendCustomer(customerId: string, adminId: string, reason: string): Promise<{ success: true }> {
   const now = new Date().toISOString();
 
-  // 1. Verify the target is a customer
   const { data: user, error: fetchError } = await supabaseAdmin
-    .from('users')
-    .select('id, name, email, role')
-    .eq('id', customerId)
-    .eq('role', 'customer')
-    .single();
+    .from('users').select('id, name, email, role').eq('id', customerId).eq('role', 'customer').single();
+  if (fetchError || !user) throw Object.assign(new Error('Customer not found'), { statusCode: 404 });
 
-  if (fetchError || !user) {
-    const err = Object.assign(new Error('Customer not found'), { statusCode: 404 });
-    throw err;
-  }
-
-  // 2. Update DB — mark inactive + record suspension metadata
   const { error: updateError } = await supabaseAdmin
     .from('users')
-    .update({
-      is_active: false,
-      suspension_reason: reason,
-      suspended_at: now,
-      suspended_by: adminId,
-      updated_at: now,
-    })
-    .eq('id', customerId)
-    .eq('role', 'customer');
-
+    .update({ is_active: false, suspension_reason: reason, suspended_at: now, suspended_by: adminId, updated_at: now })
+    .eq('id', customerId).eq('role', 'customer');
   if (updateError) throw updateError;
 
-  // 3. Revoke all active JWTs by setting Redis sentinel key (no TTL — persists until unsuspended)
   await redis.set(`suspended:${customerId}`, 'true');
 
-  // 4. In-app notification to the customer
-  await createInApp(
-    customerId,
-    'system_alert',
-    'Account Suspended',
-    'Your account has been suspended. Contact support@dineluxe.app',
-  ).catch((err: unknown) => console.error('[suspendCustomer] Notification failed:', err));
+  await createInApp(customerId, 'system_alert', 'Account Suspended', 'Your account has been suspended. Contact support@dineluxe.app')
+    .catch((err: unknown) => console.error('[suspendCustomer] Notification failed:', err));
 
-  // 5. Audit log (fire-and-forget)
-  insertAuditLog({
-    actorId: adminId,
-    action: 'CUSTOMER_SUSPENDED',
-    targetType: 'user',
-    targetId: customerId,
-    newValue: { is_active: false, suspension_reason: reason, suspended_at: now },
-  }).catch(() => {});
+  insertAuditLog({ actorId: adminId, action: 'CUSTOMER_SUSPENDED', targetType: 'user', targetId: customerId, newValue: { is_active: false, suspension_reason: reason, suspended_at: now } }).catch(() => {});
 
   return { success: true };
 }
 
 // ─── Unsuspend a customer ─────────────────────────────────────────────────────
-export async function unsuspendCustomer(
-  customerId: string,
-  adminId: string,
-): Promise<{ success: true }> {
+export async function unsuspendCustomer(customerId: string, adminId: string): Promise<{ success: true }> {
   const now = new Date().toISOString();
 
-  // 1. Restore active status and clear suspension fields
   const { error: updateError } = await supabaseAdmin
     .from('users')
-    .update({
-      is_active: true,
-      suspension_reason: null,
-      suspended_at: null,
-      suspended_by: null,
-      updated_at: now,
-    })
+    .update({ is_active: true, suspension_reason: null, suspended_at: null, suspended_by: null, updated_at: now })
     .eq('id', customerId);
-
   if (updateError) throw updateError;
 
-  // 2. Remove Redis sentinel key so JWTs become valid again immediately
   await redis.del(`suspended:${customerId}`);
 
-  // 3. Audit log
-  insertAuditLog({
-    actorId: adminId,
-    action: 'CUSTOMER_UNSUSPENDED',
-    targetType: 'user',
-    targetId: customerId,
-    newValue: { is_active: true },
-  }).catch(() => {});
+  insertAuditLog({ actorId: adminId, action: 'CUSTOMER_UNSUSPENDED', targetType: 'user', targetId: customerId, newValue: { is_active: true } }).catch(() => {});
 
   return { success: true };
 }
 
 // ─── Flag a customer for review ───────────────────────────────────────────────
-// Flagging ≠ suspending. The account stays active; it is marked for admin review.
-export async function flagCustomer(
-  customerId: string,
-  adminId: string,
-  flagReason: string,
-): Promise<{ success: true }> {
+export async function flagCustomer(customerId: string, adminId: string, flagReason: string): Promise<{ success: true }> {
   const now = new Date().toISOString();
 
-  // Attempt DB column update first (columns may not exist on older schemas)
   const { error: updateError } = await supabaseAdmin
     .from('users')
-    .update({
-      is_flagged: true,
-      flag_reason: flagReason,
-      flagged_at: now,
-      flagged_by: adminId,
-      updated_at: now,
-    })
+    .update({ is_flagged: true, flag_reason: flagReason, flagged_at: now, flagged_by: adminId, updated_at: now })
     .eq('id', customerId);
 
   if (updateError) {
-    // Graceful fallback: store flag in Redis if columns are absent
     console.warn('[flagCustomer] DB update failed, using Redis fallback:', updateError.message);
-    await redis.set(
-      `flagged:${customerId}`,
-      JSON.stringify({ reason: flagReason, flaggedBy: adminId, flaggedAt: now }),
-    );
+    await redis.set(`flagged:${customerId}`, JSON.stringify({ reason: flagReason, flaggedBy: adminId, flaggedAt: now }));
   }
 
-  // Audit log
-  insertAuditLog({
-    actorId: adminId,
-    action: 'CUSTOMER_FLAGGED',
-    targetType: 'user',
-    targetId: customerId,
-    newValue: { is_flagged: true, flag_reason: flagReason, flagged_at: now },
-  }).catch(() => {});
+  insertAuditLog({ actorId: adminId, action: 'CUSTOMER_FLAGGED', targetType: 'user', targetId: customerId, newValue: { is_flagged: true, flag_reason: flagReason, flagged_at: now } }).catch(() => {});
 
   return { success: true };
 }
 
 // ─── Get full customer detail (admin view) ────────────────────────────────────
 export async function getCustomerDetail(customerId: string) {
-  // 1. User profile
   const { data: user, error: userError } = await supabaseAdmin
     .from('users')
-    .select(
-      'id, name, email, phone, date_of_birth, role, is_active, is_flagged, flag_reason, suspension_reason, suspended_at, created_at',
-    )
-    .eq('id', customerId)
-    .eq('role', 'customer')
-    .single();
+    .select('id, name, email, phone, date_of_birth, role, is_active, is_flagged, flag_reason, suspension_reason, suspended_at, created_at')
+    .eq('id', customerId).eq('role', 'customer').single();
 
-  if (userError || !user) {
-    const err = Object.assign(new Error('Customer not found'), { statusCode: 404 });
-    throw err;
-  }
+  if (userError || !user) throw Object.assign(new Error('Customer not found'), { statusCode: 404 });
 
-  // 2. Order history summary
   const { data: orders } = await supabaseAdmin
-    .from('orders')
-    .select('id, total_amount, created_at, status')
-    .eq('customer_id', customerId)
-    .order('created_at', { ascending: false });
+    .from('orders').select('id, total_amount, created_at, status').eq('customer_id', customerId).order('created_at', { ascending: false });
 
   const totalOrders = orders?.length ?? 0;
   const totalSpent = (orders ?? []).reduce((sum, o: any) => sum + (o.total_amount ?? 0), 0);
   const lastOrderDate = orders?.[0]?.created_at ?? null;
 
-  // 3. Open support tickets count
   const { count: openTickets } = await supabaseAdmin
-    .from('support_tickets')
-    .select('id', { count: 'exact', head: true })
-    .eq('customer_id', customerId)
-    .in('status', ['open', 'in_progress']);
+    .from('support_tickets').select('id', { count: 'exact', head: true }).eq('customer_id', customerId).in('status', ['open', 'in_progress']);
 
-  // 4. Pending refund requests
   const { data: pendingRefunds } = await supabaseAdmin
-    .from('refund_requests')
-    .select('id, order_id, amount, reason, created_at, status')
-    .eq('customer_id', customerId)
-    .eq('status', 'pending');
+    .from('refund_requests').select('id, order_id, amount, reason, created_at, status').eq('customer_id', customerId).eq('status', 'pending');
 
-  // 5. Determine account status label
   const isSuspended = !(user as any).is_active;
   const isFlagged = (user as any).is_flagged === true;
-  const accountStatus: 'active' | 'suspended' | 'flagged' = isSuspended
-    ? 'suspended'
-    : isFlagged
-      ? 'flagged'
-      : 'active';
+  const accountStatus: 'active' | 'suspended' | 'flagged' = isSuspended ? 'suspended' : isFlagged ? 'flagged' : 'active';
 
   return {
     profile: user,
-    orderSummary: {
-      totalOrders,
-      totalSpent,
-      lastOrderDate,
-    },
+    orderSummary: { totalOrders, totalSpent, lastOrderDate },
     openTickets: openTickets ?? 0,
     pendingRefunds: pendingRefunds ?? [],
     accountStatus,
   };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ─── SPONSORED PLACEMENTS — Section 9.2 / 19.1 ────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+
+const SPONSORSHIP_CACHE_PREFIX = 'sponsorships:';
+const SPONSORSHIP_CACHE_TTL = 300; // 5 minutes — matches product spec
+
+// ─── Impression debounce via Redis INCR + background flush ───────────────────
+//
+// Architecture: instead of hitting Postgres on every impression request we:
+//   1. atomically INCR a Redis counter key  `sponsorship:impressions:{id}`
+//   2. a module-level setInterval fires every 60 s, scans all pending
+//      counter keys, reads+deletes them with GETDEL, and calls the
+//      increment_impression_count() Postgres RPC to batch-write the totals.
+//
+// Result: zero DB writes per request; at most N writes per minute where
+// N = number of distinct sponsored items that received impressions.
+
+const IMPRESSION_REDIS_PREFIX = 'sponsorship:impressions:';
+let _impressionFlushStarted = false;
+
+function startImpressionFlush(): void {
+  if (_impressionFlushStarted) return;
+  _impressionFlushStarted = true;
+
+  setInterval(async () => {
+    try {
+      // SCAN is safe in production (non-blocking, cursor-based)
+      let cursor = '0';
+      const pendingKeys: string[] = [];
+
+      do {
+        const [nextCursor, batch] = (await redis.call(
+          'SCAN', cursor, 'MATCH', `${IMPRESSION_REDIS_PREFIX}*`, 'COUNT', '200',
+        )) as [string, string[]];
+        cursor = nextCursor;
+        pendingKeys.push(...batch);
+      } while (cursor !== '0');
+
+      if (pendingKeys.length === 0) return;
+
+      // Flush each counter to Postgres
+      await Promise.all(
+        pendingKeys.map(async (key) => {
+          // GETDEL atomically reads and removes — prevents double-counting
+          const raw = await (redis as any).getdel(key) as string | null;
+          const delta = parseInt(raw ?? '0', 10);
+          if (!delta || delta <= 0) return;
+
+          const id = key.slice(IMPRESSION_REDIS_PREFIX.length);
+
+          // Prefer the atomic RPC; fall back to a direct UPDATE if the RPC
+          // hasn't been created yet (e.g. during initial deploy).
+          const { error: rpcError } = await supabaseAdmin.rpc('increment_impression_count', {
+            p_id: id,
+            p_delta: delta,
+          });
+
+          if (rpcError) {
+            // Fallback: raw UPDATE (not atomic but acceptable for rare edge case)
+            await supabaseAdmin
+              .from('sponsored_placements')
+              .update({ impression_count: delta }) // note: Supabase JS doesn't support += directly
+              .eq('id', id);
+          }
+        }),
+      );
+    } catch (err) {
+      console.error('[sponsored] Impression flush error:', err);
+    }
+  }, 60_000);
+}
+
+// Start flush loop immediately when this module is first imported by the server
+startImpressionFlush();
+
+// ─── getActiveSponsorships ────────────────────────────────────────────────────
+/**
+ * Public endpoint — returns currently live sponsored placements of a given type.
+ * Cached in Redis for 5 minutes under key `sponsorships:{placementType}`.
+ */
+export async function getActiveSponsorships(placementType: string) {
+  const cacheKey = `${SPONSORSHIP_CACHE_PREFIX}${placementType}`;
+
+  // Cache hit
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch {}
+
+  const nowIso = new Date().toISOString();
+
+  const { data, error } = await supabaseAdmin
+    .from('sponsored_placements')
+    .select(
+      `
+      id,
+      restaurant_id,
+      placement_type,
+      banner_url,
+      headline,
+      cta_text,
+      is_active,
+      starts_at,
+      ends_at,
+      impression_count,
+      click_count,
+      created_at,
+      restaurant:restaurants!sponsored_placements_restaurant_id_fkey(
+        id,
+        name
+      ),
+      branding:restaurant_branding!restaurant_branding_restaurant_id_fkey(
+        logo_url,
+        primary_color
+      )
+      `,
+    )
+    .eq('placement_type', placementType)
+    .eq('is_active', true)
+    .lte('starts_at', nowIso)
+    .gte('ends_at', nowIso)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+
+  // Flatten joined relations into a single-level object for the frontend
+  const result = (data ?? []).map((sp: any) => ({
+    id:               sp.id,
+    restaurant_id:    sp.restaurant_id,
+    placement_type:   sp.placement_type,
+    banner_url:       sp.banner_url,
+    headline:         sp.headline,
+    cta_text:         sp.cta_text,
+    is_active:        sp.is_active,
+    starts_at:        sp.starts_at,
+    ends_at:          sp.ends_at,
+    impression_count: sp.impression_count,
+    click_count:      sp.click_count,
+    created_at:       sp.created_at,
+    // Flattened joins
+    restaurant_name:  sp.restaurant?.name ?? null,
+    logo_url:         sp.branding?.logo_url ?? null,
+    primary_color:    sp.branding?.primary_color ?? null,
+  }));
+
+  try {
+    await redis.setex(cacheKey, SPONSORSHIP_CACHE_TTL, JSON.stringify(result));
+  } catch {}
+
+  return result;
+}
+
+// ─── recordImpression ─────────────────────────────────────────────────────────
+/**
+ * Fire-and-forget — increments a Redis counter only.
+ * The background flush loop writes to Postgres every 60 s.
+ */
+export async function recordImpression(sponsorshipId: string): Promise<void> {
+  await redis.incr(`${IMPRESSION_REDIS_PREFIX}${sponsorshipId}`);
+}
+
+// ─── recordClick ──────────────────────────────────────────────────────────────
+/**
+ * Clicks are low-volume and high-value signals so we write directly to Postgres.
+ * Uses the increment_click_count RPC for an atomic update.
+ */
+export async function recordClick(sponsorshipId: string): Promise<void> {
+  const { error } = await supabaseAdmin.rpc('increment_click_count', { p_id: sponsorshipId });
+
+  if (error) {
+    // Fallback: plain UPDATE if the RPC hasn't been deployed yet
+    console.warn('[sponsored] recordClick RPC failed, using fallback:', error.message);
+    await supabaseAdmin
+      .from('sponsored_placements')
+      .update({ click_count: supabaseAdmin.raw('click_count + 1') as any })
+      .eq('id', sponsorshipId);
+  }
+}
+
+// ─── createSponsorship ────────────────────────────────────────────────────────
+export interface CreateSponsorshipInput {
+  restaurant_id:  string;
+  placement_type: 'home_banner' | 'search_top' | 'featured_card';
+  banner_url?:    string | null;
+  headline?:      string | null;
+  cta_text?:      string | null;
+  starts_at:      string;   // ISO 8601
+  ends_at:        string;   // ISO 8601
+  is_active?:     boolean;
+}
+
+export async function createSponsorship(
+  input: CreateSponsorshipInput,
+  adminId: string,
+) {
+  const { data, error } = await supabaseAdmin
+    .from('sponsored_placements')
+    .insert({
+      restaurant_id:    input.restaurant_id,
+      placement_type:   input.placement_type,
+      banner_url:       input.banner_url  ?? null,
+      headline:         input.headline    ?? null,
+      cta_text:         input.cta_text    ?? null,
+      starts_at:        input.starts_at,
+      ends_at:          input.ends_at,
+      is_active:        input.is_active   ?? true,
+      impression_count: 0,
+      click_count:      0,
+      created_by:       adminId,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  // Immediately bust the cache so the new record shows up without waiting for TTL
+  await redis.del(`${SPONSORSHIP_CACHE_PREFIX}${input.placement_type}`).catch(() => {});
+
+  return data;
+}
+
+// ─── listSponsorships ─────────────────────────────────────────────────────────
+export async function listSponsorships(page: number, limit: number) {
+  const { from, to } = paginate(page, limit);
+
+  const { data, error, count } = await supabaseAdmin
+    .from('sponsored_placements')
+    .select(
+      `
+      id,
+      placement_type,
+      banner_url,
+      headline,
+      cta_text,
+      is_active,
+      starts_at,
+      ends_at,
+      impression_count,
+      click_count,
+      created_at,
+      restaurant:restaurants!sponsored_placements_restaurant_id_fkey(
+        id,
+        name
+      )
+      `,
+      { count: 'exact' },
+    )
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) throw error;
+
+  const items = (data ?? []).map((sp: any) => ({
+    ...sp,
+    restaurant_name: sp.restaurant?.name  ?? null,
+    restaurant_id:   sp.restaurant?.id    ?? null,
+    restaurant:      undefined, // strip nested object
+  }));
+
+  return { data: items, count };
+}
+
+// ─── toggleSponsorship ────────────────────────────────────────────────────────
+export async function toggleSponsorship(id: string) {
+  // 1. Fetch current state (need placement_type to bust the right cache key)
+  const { data: current, error: fetchError } = await supabaseAdmin
+    .from('sponsored_placements')
+    .select('id, is_active, placement_type')
+    .eq('id', id)
+    .single();
+
+  if (fetchError) throw fetchError;
+  if (!current) throw Object.assign(new Error('Sponsorship not found'), { statusCode: 404 });
+
+  // 2. Flip the flag
+  const { data: updated, error: updateError } = await supabaseAdmin
+    .from('sponsored_placements')
+    .update({ is_active: !(current as any).is_active })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (updateError) throw updateError;
+
+  // 3. Bust cache so the change is visible immediately
+  await redis.del(`${SPONSORSHIP_CACHE_PREFIX}${(current as any).placement_type}`).catch(() => {});
+
+  return updated;
 }

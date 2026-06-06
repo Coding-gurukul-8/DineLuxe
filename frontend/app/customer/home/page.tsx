@@ -14,7 +14,11 @@ import { QueryBoundary } from "@/components/shared/QueryBoundary";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { formatCurrency } from "@/lib/utils";
-import type { Order, MenuItem, LoyaltyData } from "@/types/api";
+import type { Order, MenuItem, LoyaltyData, SponsoredPlacement } from "@/types/api";
+
+// SPONSORED PLACEMENT ADDITION ────────────────────────────────────────────────
+import { SponsoredBannerCarousel } from "@/components/customer/SponsoredBanner";
+// END SPONSORED PLACEMENT ADDITION ────────────────────────────────────────────
 
 // QUICK REORDER ADDITION — types ─────────────────────────────────────────────
 interface LastOrder {
@@ -86,8 +90,6 @@ const quickActions = [
 ];
 
 // ── Mood Tiles ─────────────────────────────────────────────────────────────────
-// Each tile carries a `filter` object that gets appended as query params when
-// the user taps the tile. The restaurant feed re-fetches with these params.
 
 interface MoodFilter {
   max_prep_time?: number;
@@ -153,7 +155,6 @@ const MOOD_TILES: MoodTile[] = [
   },
 ];
 
-/** Converts a MoodFilter to a URL query-string segment */
 function buildMoodQueryString(filter: MoodFilter): string {
   const params = new URLSearchParams();
   Object.entries(filter).forEach(([k, v]) => {
@@ -175,6 +176,20 @@ function ShimmerCard() {
     </div>
   );
 }
+
+// SPONSORED PLACEMENT ADDITION — skeleton shown while banners load ─────────────
+function SponsoredBannerSkeleton() {
+  return (
+    <div
+      className="w-full rounded-2xl overflow-hidden animate-pulse"
+      style={{ height: 180 }}
+      aria-hidden
+    >
+      <div className="w-full h-full bg-gradient-to-r from-gray-100 via-gray-200 to-gray-100" />
+    </div>
+  );
+}
+// END SPONSORED PLACEMENT ADDITION ────────────────────────────────────────────
 
 // ── Pull-to-refresh indicator ─────────────────────────────────────────────────
 
@@ -333,10 +348,13 @@ export default function CustomerHomePage() {
   const greeting = useTypewriter(`${getGreeting()}, ${user?.name?.split(" ")[0] ?? "there"} 👋`, 45);
 
   // Intersection observers for staggered reveals
-  const { ref: heroRef, inView: heroInView } = useInView({ triggerOnce: true, threshold: 0.1 });
+  const { ref: heroRef,    inView: heroInView    } = useInView({ triggerOnce: true, threshold: 0.1 });
   const { ref: actionsRef, inView: actionsInView } = useInView({ triggerOnce: true, threshold: 0.1 });
-  const { ref: moodRef, inView: moodInView } = useInView({ triggerOnce: true, threshold: 0.1 });
-  const { ref: aiRef, inView: aiInView } = useInView({ triggerOnce: true, threshold: 0.1 });
+  // SPONSORED PLACEMENT ADDITION ─────────────────────────────────────────────
+  const { ref: bannersRef, inView: bannersInView } = useInView({ triggerOnce: true, threshold: 0.1 });
+  // END SPONSORED PLACEMENT ADDITION ────────────────────────────────────────
+  const { ref: moodRef,    inView: moodInView    } = useInView({ triggerOnce: true, threshold: 0.1 });
+  const { ref: aiRef,      inView: aiInView      } = useInView({ triggerOnce: true, threshold: 0.1 });
   const { ref: loyaltyRef, inView: loyaltyInView } = useInView({ triggerOnce: true, threshold: 0.1 });
 
   // ── Active mood filter → query string ────────────────────────────────────────
@@ -362,6 +380,16 @@ export default function CustomerHomePage() {
     queryFn: () => apiClient.get<MenuItem[]>(`/menu/branch/${branchId}/items?limit=6`),
     enabled: !!branchId,
   });
+
+  // SPONSORED PLACEMENT ADDITION ──────────────────────────────────────────────
+  // staleTime matches the Redis TTL on the server so we never re-fetch more
+  // often than the cache refreshes.
+  const { data: sponsoredBanners, isLoading: bannersLoading } = useQuery({
+    queryKey: ["sponsored-banners"],
+    queryFn: () => apiClient.get<SponsoredPlacement[]>("/sponsorships/active?type=home_banner"),
+    staleTime: 5 * 60 * 1000,
+  });
+  // END SPONSORED PLACEMENT ADDITION ────────────────────────────────────────
 
   // Mood-filtered restaurant feed — re-fetches whenever activeMoodId changes
   const {
@@ -394,7 +422,6 @@ export default function CustomerHomePage() {
   });
 
   // QUICK REORDER ADDITION — query ─────────────────────────────────────────────
-  // Only fires for logged-in customers; guests see nothing.
   const { data: lastOrders } = useQuery({
     queryKey: ["customer", "last-orders", user?.id],
     queryFn: () => apiClient.get<LastOrder[]>("/orders/customer/last-three"),
@@ -407,31 +434,26 @@ export default function CustomerHomePage() {
   const handleMoodPress = useCallback((tile: MoodTile) => {
     setActiveMoodId((prev) => {
       if (prev === tile.id) {
-        // Deselect
         setMoodFilteredCount(null);
         return null;
       }
-      setMoodFilteredCount(null); // reset while new results load
+      setMoodFilteredCount(null);
       return tile.id;
     });
   }, []);
 
   // QUICK REORDER ADDITION — handler ───────────────────────────────────────────
   const handleReorder = async (orderId: string) => {
-    if (reorderingId) return; // prevent double-tap
+    if (reorderingId) return;
     setReorderingId(orderId);
     try {
       const result = await apiClient.post<ReorderResult>(`/orders/${orderId}/reorder`, {});
-      // Stash items in localStorage for the menu page to pick up
       localStorage.setItem("reorder_items",     JSON.stringify(result.items));
       localStorage.setItem("reorder_branch_id", result.branch_id);
-      // Navigate to the restaurant menu with a reorder flag
       router.push(`/customer/restaurant/${result.restaurant_id}?reorder=true`);
       if (result.unavailable_items.length > 0) {
         const names = result.unavailable_items.join(", ");
         const verb  = result.unavailable_items.length === 1 ? "was" : "were";
-        // toast is imported via the existing sonner dependency in this file
-        // We use a dynamic import to avoid circular-import issues
         import("sonner").then(({ toast }) => {
           toast.info(`${names} ${verb} not available and skipped`);
         });
@@ -461,6 +483,9 @@ export default function CustomerHomePage() {
       refetchFeatured().finally(() => setTimeout(() => setPulling(false), 600));
     }
   };
+
+  // Whether to show/reserve space for the sponsored section
+  const hasBanners = (sponsoredBanners?.length ?? 0) > 0;
 
   return (
     <div
@@ -560,6 +585,33 @@ export default function CustomerHomePage() {
           })}
         </motion.div>
 
+        {/* ── SPONSORED BANNERS ─────────────────────────────────────────── */}
+        {/*
+          Position: immediately below Quick Actions, above Active Order Banner.
+          Section 9.2: "featured banner on home screen … clearly labeled 'Sponsored'"
+          Section 19.1: "top of search results, featured banner on home screen"
+
+          Visibility rules:
+          • bannersLoading → show skeleton so layout doesn't jump
+          • loaded + banners.length > 0 → show carousel
+          • loaded + banners.length === 0 → render nothing (no empty gap)
+        */}
+        {(bannersLoading || hasBanners) && (
+          <motion.div
+            ref={bannersRef}
+            initial={{ opacity: 0, y: 16 }}
+            animate={bannersInView ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+          >
+            {bannersLoading ? (
+              <SponsoredBannerSkeleton />
+            ) : (
+              <SponsoredBannerCarousel banners={sponsoredBanners!} />
+            )}
+          </motion.div>
+        )}
+        {/* ── END SPONSORED BANNERS ────────────────────────────────────── */}
+
         {/* ── Active Order Banner ──────────────────────────────────────── */}
         <AnimatePresence>
           {!ordersLoading && !ordersError && activeOrders.length > 0 && (
@@ -611,7 +663,6 @@ export default function CustomerHomePage() {
         </motion.div>
 
         {/* QUICK REORDER ADDITION ─────────────────────────────────────────── */}
-        {/* Only rendered when the logged-in customer has at least one past order */}
         {lastOrders && lastOrders.length > 0 && (
           <motion.section
             initial={{ opacity: 0, y: 16 }}
