@@ -16,6 +16,7 @@ import {
   handleGatewayWebhook,
   requestRefund,
   processRefund,
+  getRefundStatusForCustomer,
 } from './payments.service';
 
 // ── POST /payments/initiate ───────────────────────────────────────────────────
@@ -193,3 +194,19 @@ export async function handleProcessRefund(
   }
 }
 
+// ── GET /payments/my-refunds  (Spec §9.7 — Refund Status Tracker) ────────────
+// Returns all refund requests for the authenticated customer with lifecycle stage.
+
+export async function handleGetMyRefunds(
+  req: any,
+  res: any,
+  next: any,
+) {
+  try {
+    const userId = req.user!.id;
+    const refunds = await getRefundStatusForCustomer(userId);
+    res.json(success(refunds));
+  } catch (err) {
+    next(err);
+  }
+}

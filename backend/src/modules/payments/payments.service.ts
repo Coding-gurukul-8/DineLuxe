@@ -915,3 +915,183 @@ export async function processRefund(
 
   throw Object.assign(new Error('Invalid action. Must be approve or reject.'), { statusCode: 400 });
 }
+
+// ─── Get Refund Status for Customer (Spec §9.7) ───────────────────────────────
+// Called by customer via GET /payments/my-refunds
+// Returns all refund requests for the authenticated customer, each annotated
+// with a 4-stage lifecycle: submitted | under_review | approved | rejected
+
+export type RefundStage = 'submitted' | 'under_review' | 'approved' | 'rejected';
+
+export interface RefundStatusItem {
+  order_id:         string;
+  restaurant_name:  string;
+  amount:           number;
+  stage:            RefundStage;
+  requested_at:     string | null;
+  last_updated:     string | null;
+  estimated_days:   number | null;   // null when approved, 3 otherwise
+  rejection_reason: string | null;
+  ticket_id:        string | null;
+}
+
+/**
+ * Maps raw DB statuses to a 4-stage lifecycle enum.
+ *
+ * Priority order (most-specific first):
+ *   payment.status = 'refunded'                                    → 'approved'
+ *   ticket.status  = 'resolved' AND payment.status != 'refunded'  → 'rejected'
+ *   ticket.status  = 'in_progress'                                 → 'under_review'
+ *   everything else (refund_requested / open ticket)               → 'submitted'
+ */
+function mapToRefundStage(
+  paymentStatus: string | null,
+  ticketStatus:  string | null,
+): RefundStage {
+  if (paymentStatus === 'refunded') return 'approved';
+  if (ticketStatus  === 'resolved' && paymentStatus !== 'refunded') return 'rejected';
+  if (ticketStatus  === 'in_progress') return 'under_review';
+  return 'submitted';
+}
+
+export async function getRefundStatusForCustomer(
+  userId: string,
+): Promise<RefundStatusItem[]> {
+  // ── Step 1: fetch all orders for this customer that have a refund-state payment
+  //           OR a refund-type support ticket ──────────────────────────────────
+
+  // Fetch payments in refund lifecycle states for this customer's orders
+  const { data: refundPayments, error: paymentsErr } = await supabaseAdmin
+    .from('payments')
+    .select(
+      `id,
+       order_id,
+       amount,
+       status,
+       refund_requested_at,
+       refunded_at,
+       orders!inner (
+         id,
+         created_at,
+         customer_id,
+         branch_id,
+         branches!inner (
+           restaurant_id,
+           restaurants!inner ( name )
+         )
+       )`,
+    )
+    .in('status', ['refund_requested', 'refunded', 'refund_rejected', 'failed'])
+    .eq('orders.customer_id', userId);
+
+  if (paymentsErr) throw paymentsErr;
+
+  // Fetch open/assigned/resolved refund support tickets for this customer
+  // (covers cases where a ticket exists but payment status hasn't been updated yet)
+  const { data: refundTickets, error: ticketsErr } = await supabaseAdmin
+    .from('support_tickets')
+    .select('id, status, created_at, updated_at, conversation')
+    .eq('user_id', userId)
+    .in('status', ['open', 'assigned', 'in_progress', 'resolved']);
+
+  if (ticketsErr) throw ticketsErr;
+
+  // Filter tickets to only refund-type (by meta stored in first conversation entry)
+  const refundTicketsByOrderId = new Map<
+    string,
+    { id: string; status: string; created_at: string; updated_at: string; rejection_reason: string | null }
+  >();
+
+  for (const ticket of refundTickets ?? []) {
+    const conv = Array.isArray(ticket.conversation) ? ticket.conversation : [];
+    const meta = conv[0]?.meta ?? {};
+    if (meta.reference_type === 'refund' && meta.order_id) {
+      // Extract rejection reason from last admin message (if rejected)
+      let rejectionReason: string | null = null;
+      if (ticket.status === 'resolved') {
+        const adminMsg = [...conv].reverse().find((m: any) => m.sender_role === 'admin');
+        if (adminMsg?.message) rejectionReason = adminMsg.message;
+      }
+      refundTicketsByOrderId.set(meta.order_id, {
+        id:               ticket.id,
+        status:           ticket.status,
+        created_at:       ticket.created_at,
+        updated_at:       ticket.updated_at,
+        rejection_reason: rejectionReason,
+      });
+    }
+  }
+
+  // ── Step 2: merge — for every payment row, join its ticket; then add any
+  //           tickets whose order_id didn't appear in the payments query ────────
+
+  const seenOrderIds = new Set<string>();
+  const results: RefundStatusItem[] = [];
+
+  for (const pmt of refundPayments ?? []) {
+    const order = pmt.orders as any;
+    if (!order) continue;
+
+    seenOrderIds.add(order.id);
+
+    const ticket = refundTicketsByOrderId.get(order.id) ?? null;
+
+    const stage = mapToRefundStage(pmt.status, ticket?.status ?? null);
+
+    const restaurantName: string =
+      (order.branches as any)?.restaurants?.name ?? 'Unknown Restaurant';
+
+    results.push({
+      order_id:         order.id,
+      restaurant_name:  restaurantName,
+      amount:           Number(pmt.amount),
+      stage,
+      requested_at:     ticket?.created_at ?? pmt.refund_requested_at ?? null,
+      last_updated:     ticket?.updated_at ?? pmt.refunded_at        ?? null,
+      estimated_days:   stage === 'approved' ? null : 3,
+      rejection_reason: ticket?.rejection_reason ?? null,
+      ticket_id:        ticket?.id ?? null,
+    });
+  }
+
+  // Add any ticket-only entries (payment status not yet updated)
+  for (const [orderId, ticket] of refundTicketsByOrderId.entries()) {
+    if (seenOrderIds.has(orderId)) continue;
+
+    // Fetch the order + payment details for this ticket-only entry
+    const { data: order } = await supabaseAdmin
+      .from('orders')
+      .select(`id, branches!inner ( restaurants!inner ( name ) )`)
+      .eq('id', orderId)
+      .single();
+
+    const { data: pmt } = await supabaseAdmin
+      .from('payments')
+      .select('id, amount, status')
+      .eq('order_id', orderId)
+      .maybeSingle();
+
+    const stage = mapToRefundStage(pmt?.status ?? null, ticket.status);
+
+    results.push({
+      order_id:         orderId,
+      restaurant_name:  (order?.branches as any)?.restaurants?.name ?? 'Unknown Restaurant',
+      amount:           Number(pmt?.amount ?? 0),
+      stage,
+      requested_at:     ticket.created_at,
+      last_updated:     ticket.updated_at,
+      estimated_days:   stage === 'approved' ? null : 3,
+      rejection_reason: ticket.rejection_reason,
+      ticket_id:        ticket.id,
+    });
+  }
+
+  // Sort by most-recent first (requested_at DESC)
+  results.sort((a, b) => {
+    const tA = a.requested_at ? new Date(a.requested_at).getTime() : 0;
+    const tB = b.requested_at ? new Date(b.requested_at).getTime() : 0;
+    return tB - tA;
+  });
+
+  return results;
+}

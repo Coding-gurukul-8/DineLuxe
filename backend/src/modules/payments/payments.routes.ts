@@ -22,6 +22,7 @@ import {
   handleGatewayWebhookController,
   handleRefundRequest,
   handleProcessRefund,
+  handleGetMyRefunds,
 } from './payments.controller';
 
 const router: import('express').Router = Router();
@@ -32,6 +33,19 @@ const router: import('express').Router = Router();
 router.post('/webhook', validate({ body: webhookSchema }), handleGatewayWebhookController);
 
 // ─── Protected Payment Routes ─────────────────────────────────────────────────
+
+// GET /payments/my-refunds  (Spec §9.7 — Refund Status Tracker)
+// Returns all refund requests for the authenticated customer, each annotated
+// with a lifecycle stage: submitted | under_review | approved | rejected
+//
+// IMPORTANT: This route MUST be declared before any '/:param' routes to prevent
+// Express from matching "my-refunds" as an orderId or paymentId param.
+router.get(
+  '/my-refunds',
+  authenticate,
+  requireRole('customer'),
+  handleGetMyRefunds,
+);
 
 // GET /payments/:orderId/receipt (digital PDF URL)
 // If the PDF isn't ready, handler returns 202 + generating status.

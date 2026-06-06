@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Settings, ChevronRight, Star, ShoppingBag, Calendar,
   Gift, LogOut, Edit3, Camera, Bell, Shield, HelpCircle,
-  BookOpen, ClipboardList,
+  BookOpen, ClipboardList, RotateCcw,
 } from "lucide-react";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -56,8 +56,8 @@ function StatCard({ label, value, icon: Icon, color, trigger }: {
 }
 
 // ── Menu link ─────────────────────────────────────────────────────────────────
-function MenuLink({ label, icon: Icon, onClick, danger = false }: {
-  label: string; icon: React.ComponentType<any>; onClick: () => void; danger?: boolean;
+function MenuLink({ label, icon: Icon, onClick, danger = false, badge }: {
+  label: string; icon: React.ComponentType<any>; onClick: () => void; danger?: boolean; badge?: string;
 }) {
   return (
     <motion.button
@@ -74,6 +74,12 @@ function MenuLink({ label, icon: Icon, onClick, danger = false }: {
       <span className={cn("text-sm font-semibold flex-1", danger ? "text-[#C0392B]" : "text-gray-800")}>
         {label}
       </span>
+      {/* Badge — shown when there are active refund requests */}
+      {badge && (
+        <span className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#E8A020]/10 text-[#E8A020]">
+          {badge}
+        </span>
+      )}
       {!danger && <ChevronRight size={15} className="text-gray-300" />}
     </motion.button>
   );
@@ -103,6 +109,21 @@ export default function ProfilePage() {
     queryKey: ["customer", "order-history"],
     queryFn: () => apiClient.get<any[]>("/orders/user/me?limit=5"),
   });
+
+  // ── Fetch active refund count for badge (Spec §9.7) ───────────────────────
+  const { data: refundData } = useQuery({
+    queryKey: ["customer", "refunds"],
+    queryFn: () => apiClient.get<{ order_id: string; stage: string }[]>("/payments/my-refunds"),
+  });
+
+  // Count only non-terminal (pending) refunds for the badge
+  const activeRefundCount = (refundData ?? []).filter(
+    (r) => r.stage !== "approved" && r.stage !== "rejected",
+  ).length;
+
+  const refundBadge = activeRefundCount > 0
+    ? `${activeRefundCount} request${activeRefundCount > 1 ? "s" : ""}`
+    : undefined;
 
   function handleLogout() {
     logout();
@@ -237,11 +258,18 @@ export default function ProfilePage() {
 
       {/* ── Menu links ────────────────────────────────────────────────── */}
       {/* ✅ AUDIT FIX — added /customer/profile/bookings and /customer/profile/orders */}
+      {/* ✅ SPEC §9.7  — added Refunds entry linking to support page with ?tab=refunds */}
       <div className="space-y-2 mb-6">
         <MenuLink label="Edit Profile"       icon={Edit3}         onClick={() => router.push("/customer/profile/edit")} />
         <MenuLink label="My Orders"          icon={ClipboardList} onClick={() => router.push("/customer/profile/orders")} />
         <MenuLink label="My Bookings"        icon={BookOpen}      onClick={() => router.push("/customer/profile/bookings")} />
         <MenuLink label="Loyalty & Rewards"  icon={Gift}          onClick={() => router.push("/customer/profile/loyalty")} />
+        <MenuLink
+          label="Refunds"
+          icon={RotateCcw}
+          onClick={() => router.push("/customer/support?tab=refunds")}
+          badge={refundBadge}
+        />
         <MenuLink label="Notifications"      icon={Bell}          onClick={() => router.push("/customer/notifications")} />
         <MenuLink label="Privacy & Security" icon={Shield}        onClick={() => router.push("/customer/profile/privacy")} />
         <MenuLink label="Help & Support"     icon={HelpCircle}    onClick={() => router.push("/customer/support")} />
