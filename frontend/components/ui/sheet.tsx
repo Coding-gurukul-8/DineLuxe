@@ -2,13 +2,19 @@ import type { ReactNode } from 'react'
 
 type SheetProps = {
 	open: boolean
-	onClose: () => void
+	onClose?: () => void
+	onOpenChange?: (open: boolean) => void
 	title?: string
 	children: ReactNode
 }
 
-export function Sheet({ open, onClose, title, children }: SheetProps) {
+export function Sheet({ open, onClose, onOpenChange, title, children }: SheetProps) {
 	if (!open) return null
+
+	const handleClose = () => {
+		onClose?.()
+		onOpenChange?.(false)
+	}
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30 p-4 backdrop-blur">
@@ -17,7 +23,7 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
 					{title && <h3 className="font-display text-xl text-ink">{title}</h3>}
 					<button
 						type="button"
-						onClick={onClose}
+						onClick={handleClose}
 						className="rounded-full border border-ink/10 px-3 py-1 text-xs font-semibold text-ink"
 					>
 						Close
@@ -27,4 +33,17 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
 			</div>
 		</div>
 	)
+}
+
+// Subcomponents expected by callers
+export function SheetContent({ children, className }: { children: ReactNode; className?: string }) {
+	return <div className={className}>{children}</div>
+}
+
+export function SheetHeader({ children, className }: { children: ReactNode; className?: string }) {
+	return <div className={className}>{children}</div>
+}
+
+export function SheetTitle({ children }: { children: ReactNode }) {
+	return <h3 className="font-display text-lg text-ink">{children}</h3>
 }

@@ -24,7 +24,7 @@ import {
   handleProcessRefund,
 } from './payments.controller';
 
-const router = Router();
+const router: import('express').Router = Router();
 
 // ─── Public Webhook (no auth — gateway calls this) ────────────────────────────
 // NOTE: Must use express.raw() middleware on this route for signature verification

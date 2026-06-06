@@ -94,12 +94,13 @@ export async function updateBranding(
   if (input.banner_url !== undefined) updateData.banner_url = input.banner_url;
   if (input.font_family !== undefined) updateData.font_preference = input.font_family;
 
+  // Use upsert to handle both update and create cases safely. Use onConflict
+  // on restaurant_id to ensure a single row per restaurant.
   const { data, error } = await supabaseAdmin
     .from('restaurant_branding')
-    .update(updateData)
-    .eq('restaurant_id', restaurantId)
+    .upsert({ restaurant_id: restaurantId, ...updateData }, { onConflict: 'restaurant_id' })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(`Branding update failed: ${error.message}`);
 

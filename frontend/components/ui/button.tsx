@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost'
+type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive'
 type ButtonSize = 'sm' | 'md' | 'lg'
 
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -17,7 +17,11 @@ const variantStyles: Record<ButtonVariant, string> = {
 	secondary: 'bg-accent text-paper shadow-soft hover:-translate-y-0.5',
 	outline: 'border border-ink/15 bg-paper/80 text-ink hover:border-ink/30',
 	ghost: 'bg-transparent text-ink hover:bg-ink/5',
+	destructive: 'bg-red-600 text-paper shadow-sm hover:bg-red-700',
 }
+
+// add destructive as a common utility style
+// (keep type-safe by expanding ButtonVariant)
 
 const sizeStyles: Record<ButtonSize, string> = {
 	sm: 'h-8 px-4 text-xs',

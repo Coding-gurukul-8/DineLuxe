@@ -99,8 +99,8 @@ export function useFCMToken(): void {
 
         // Handle foreground messages (app is open in the browser tab)
         // Background messages are handled by the service worker (sw.js)
-        unsubscribeOnMessage = onMessage(messaging, (payload) => {
-          const { title, body } = payload.notification || {};
+        unsubscribeOnMessage = onMessage(messaging, (payload: any) => {
+          const { title, body } = (payload as any).notification || {};
           toast(body || title || 'New notification', {
             icon: '🔔',
             description: body && title ? body : undefined,

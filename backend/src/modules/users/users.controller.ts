@@ -235,7 +235,6 @@ export async function checkEmail(req: Request, res: Response, next: NextFunction
     next(err);
   }
 }
-}
 /*import { Request, Response, NextFunction } from 'express';
 import * as authService from '../auth/auth.service';
 import * as usersService from './users.service';

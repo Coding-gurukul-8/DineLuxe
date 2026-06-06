@@ -12,6 +12,9 @@
 --   4.  Core RPCs                     (analytics, reports, admin)
 --   5.  Audit log shortcut            (log_audit_event)
 --   6.  Storage bucket instructions   (manual – cannot be done in SQL)
+--
+-- OrderStatus enum values (verified):
+--   created | confirmed | preparing | ready | served | paid | closed
 -- =============================================================================
 
 
@@ -58,8 +61,6 @@ $$;
 -- =============================================================================
 
 -- ─── mv_branch_daily_stats ───────────────────────────────────────────────────
--- Aggregates per-branch daily revenue & order counts.  Used by analytics and
--- the materialized-view refresh cron.
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_branch_daily_stats AS
 SELECT
   o.branch_id,
@@ -81,8 +82,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS mv_branch_daily_stats_uq
 
 
 -- ─── mv_menu_item_performance ────────────────────────────────────────────────
--- Per-item 30-day order counts and revenue.  Used by analytics & slow-mover
--- detection in getMenuPerformance().
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_menu_item_performance AS
 SELECT
   oi.menu_item_id,
@@ -105,8 +104,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS mv_menu_item_performance_uq
 
 
 -- ─── mv_restaurant_monthly_summary ──────────────────────────────────────────
--- Per-restaurant monthly totals.  Used by the top-restaurants and platform
--- report queries.
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_restaurant_monthly_summary AS
 SELECT
   b.restaurant_id,
@@ -129,33 +126,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS mv_restaurant_monthly_summary_uq
 -- =============================================================================
 
 -- ─── waiter_workload view ─────────────────────────────────────────────────────
--- Used as a fallback inside waiter-assign.ts when the get_least_busy_waiter
--- RPC is unavailable.
+-- FIX: 'occupied' → 'served', removed 'cancelled' (not valid enum values).
 CREATE OR REPLACE VIEW waiter_workload AS
 SELECT
   u.id                                                             AS staff_id,
   u.branch_id,
   u.is_active,
-  COUNT(DISTINCT o.id)  FILTER (WHERE o.status = 'occupied')      AS active_tables,
+  COUNT(DISTINCT o.id)  FILTER (WHERE o.status = 'served')        AS active_tables,
   COUNT(DISTINCT o.id)  FILTER (
     WHERE o.status IN ('confirmed','preparing','ready')
   )                                                                AS active_orders,
   COUNT(DISTINCT o.id)  FILTER (WHERE o.status = 'ready')         AS pending_serves
 FROM   users   u
 LEFT  JOIN orders o ON o.waiter_id = u.id
-  AND o.status NOT IN ('paid','closed','cancelled')
+  AND o.status NOT IN ('paid','closed')
 WHERE  u.role = 'waiter'
 GROUP BY u.id, u.branch_id, u.is_active;
 
 
 -- =============================================================================
--- SECTION 3 — MISSING 1: get_top_restaurants_by_revenue
--- Verified against admin.service.ts call:
---   supabaseAdmin.rpc('get_top_restaurants_by_revenue', {
---     p_since: thirtyDaysAgo,   ← TIMESTAMPTZ string
---     p_limit: 5                ← INTEGER
---   })
--- Parameter names MUST be p_since and p_limit (exact match).
+-- SECTION 2b — DROP EXISTING FUNCTIONS (required when return types change)
+-- CREATE OR REPLACE cannot change OUT parameter types; DROP first is safe
+-- because all functions are recreated immediately below.
+-- =============================================================================
+
+DROP FUNCTION IF EXISTS get_top_restaurants_by_revenue(TIMESTAMPTZ, INTEGER);
+DROP FUNCTION IF EXISTS refresh_materialized_views();
+DROP FUNCTION IF EXISTS get_db_metrics();
+DROP FUNCTION IF EXISTS log_audit_event(UUID, TEXT, TEXT, UUID, TEXT, JSONB);
+DROP FUNCTION IF EXISTS get_peak_hours_matrix();
+DROP FUNCTION IF EXISTS get_sales_report(UUID, UUID, TIMESTAMPTZ, TIMESTAMPTZ, TEXT);
+DROP FUNCTION IF EXISTS get_menu_performance(UUID, UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS get_kitchen_performance(UUID, TIMESTAMPTZ, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS get_returning_customers(UUID);
+DROP FUNCTION IF EXISTS get_top_spenders(UUID, INTEGER);
+DROP FUNCTION IF EXISTS get_platform_report();
+DROP FUNCTION IF EXISTS get_platform_trends(TIMESTAMPTZ, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS get_item_order_counts(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS get_co_order_pairs(UUID, INTEGER, INTEGER);
+DROP FUNCTION IF EXISTS get_order_hourly_distribution(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS get_scheduled_staff(UUID);
+DROP FUNCTION IF EXISTS get_least_busy_waiter(UUID);
+DROP FUNCTION IF EXISTS deduct_inventory_for_item(UUID, UUID, INTEGER);
+
+
+-- =============================================================================
+-- SECTION 3 — get_top_restaurants_by_revenue
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION get_top_restaurants_by_revenue(
@@ -199,11 +215,7 @@ GRANT EXECUTE ON FUNCTION get_top_restaurants_by_revenue(TIMESTAMPTZ, INTEGER) T
 
 
 -- =============================================================================
--- SECTION 4 — MISSING 2: refresh_materialized_views
--- Called every hour by app.ts:
---   supabaseAdmin.rpc('refresh_materialized_views')
--- Uses graceful degradation: only refreshes views that actually exist,
--- so the function is safe to deploy before the views are created.
+-- SECTION 4 — refresh_materialized_views
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION refresh_materialized_views()
@@ -212,7 +224,6 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
-  -- Only refresh if the view exists (graceful degradation)
   IF EXISTS (
     SELECT 1 FROM pg_matviews WHERE matviewname = 'mv_branch_daily_stats'
   ) THEN
@@ -237,11 +248,7 @@ GRANT EXECUTE ON FUNCTION refresh_materialized_views() TO service_role;
 
 
 -- =============================================================================
--- SECTION 5 — MISSING 3: get_db_metrics (safe version for managed Supabase)
--- Replaces the previous version that used pg_stat_activity, which is
--- restricted on Supabase's managed PostgreSQL.
--- This version uses only pg_database_size, information_schema, and
--- pg_statio_user_tables — all accessible to service_role.
+-- SECTION 5 — get_db_metrics
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION get_db_metrics()
@@ -260,11 +267,12 @@ AS $$
     ),
     'cache_hit_ratio', (
       SELECT ROUND(
-        100.0 * SUM(blks_hit)
-        / NULLIF(SUM(blks_hit + blks_read), 0),
+        100.0 * blks_hit
+        / NULLIF(blks_hit + blks_read, 0),
         2
       )
-      FROM pg_statio_user_tables
+      FROM pg_stat_database
+      WHERE datname = current_database()
     ),
     'generated_at', NOW()
   );
@@ -274,7 +282,7 @@ GRANT EXECUTE ON FUNCTION get_db_metrics() TO service_role;
 
 
 -- =============================================================================
--- SECTION 6 — MISSING 4: Supabase Storage — 'reports' bucket
+-- SECTION 6 — Supabase Storage — 'reports' bucket
 -- Storage buckets CANNOT be created via SQL.
 -- Follow the manual steps below or use the Management API.
 --
@@ -288,36 +296,18 @@ GRANT EXECUTE ON FUNCTION get_db_metrics() TO service_role;
 --        application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 --        application/pdf
 --
--- Storage RLS policies (paste into Dashboard → Storage → Policies):
--- =============================================================================
-
--- Policy: service_role has full access (this is the Supabase default for
--- service_role; listed here for documentation purposes only).
---
---   Bucket: reports
---   Role:   service_role
---   Action: ALL
---   Policy: TRUE
---
--- No public read policy is needed — signed URLs handle authenticated downloads.
+-- Policy: service_role has full access (Supabase default; listed for docs only).
 --
 -- NOTE: The existing reports.service.ts uses an 'exports' bucket (not
 -- 'reports').  If you rename to 'reports', update the bucket name in
 -- reports.service.ts → exportReport() and ensureExportsBucket() accordingly.
 -- For async jobs in jobs/report-export.ts, update the bucket reference there
 -- as well.
+-- =============================================================================
 
 
 -- =============================================================================
--- SECTION 7 — MISSING 5: log_audit_event
--- Convenience shortcut for inserting audit log records directly from the DB
--- (e.g. from triggers or other stored procedures).
--- NOTE: audit_logs columns from the Prisma schema:
---   actor_id, action, target_type, target_id, old_value, new_value,
---   ip_address, created_at
--- The prompt specified p_resource_type / p_resource_id.  We map these to
--- target_type / target_id to match the actual table columns exactly.
--- p_meta is stored in new_value (there is no separate 'meta' column).
+-- SECTION 7 — log_audit_event
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION log_audit_event(
@@ -352,7 +342,6 @@ BEGIN
     NOW()
   );
 EXCEPTION WHEN OTHERS THEN
-  -- Audit log failures must NEVER block the main operation
   RAISE WARNING 'log_audit_event failed: % (action=%, resource=% id=%)',
     SQLERRM, p_action, p_resource_type, p_resource_id;
 END;
@@ -362,17 +351,14 @@ GRANT EXECUTE ON FUNCTION log_audit_event(UUID, TEXT, TEXT, UUID, TEXT, JSONB) T
 
 
 -- =============================================================================
--- SECTION 8 — EXISTING RPCs (from P2-1 and later phases)
--- All preserved exactly.  Re-running with CREATE OR REPLACE is safe.
+-- SECTION 8 — EXISTING RPCs
 -- =============================================================================
 
 -- ─── get_peak_hours_matrix ───────────────────────────────────────────────────
--- Called by admin.service.ts → getPlatformStats()
--- Returns a 7×24 matrix of average orders per (day_of_week, hour).
 CREATE OR REPLACE FUNCTION get_peak_hours_matrix()
 RETURNS TABLE (
-  day_of_week  INTEGER,   -- 0 = Sunday … 6 = Saturday
-  hour         INTEGER,   -- 0 – 23
+  day_of_week  INTEGER,
+  hour         INTEGER,
   avg_orders   NUMERIC
 )
 LANGUAGE sql
@@ -396,15 +382,12 @@ GRANT EXECUTE ON FUNCTION get_peak_hours_matrix() TO service_role;
 
 
 -- ─── get_sales_report ────────────────────────────────────────────────────────
--- Called by reports.service.ts → getSales()
--- Parameters verified:
---   p_restaurant_id, p_branch_id (nullable), p_from, p_to, p_trunc
 CREATE OR REPLACE FUNCTION get_sales_report(
   p_restaurant_id UUID,
   p_branch_id     UUID,
   p_from          TIMESTAMPTZ,
   p_to            TIMESTAMPTZ,
-  p_trunc         TEXT DEFAULT 'day'    -- 'hour' | 'day' | 'week' | 'month'
+  p_trunc         TEXT DEFAULT 'day'
 )
 RETURNS TABLE (
   period          TIMESTAMPTZ,
@@ -440,9 +423,7 @@ $$;
 GRANT EXECUTE ON FUNCTION get_sales_report(UUID, UUID, TIMESTAMPTZ, TIMESTAMPTZ, TEXT) TO service_role;
 
 
--- ─── get_menu_performance ─────────────────────────────────────────────────────
--- Called by reports.service.ts → getMenuPerformance()
--- Parameters: p_restaurant_id, p_branch_id (nullable), p_since
+-- ─── get_menu_performance ────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION get_menu_performance(
   p_restaurant_id UUID,
   p_branch_id     UUID,
@@ -485,8 +466,6 @@ GRANT EXECUTE ON FUNCTION get_menu_performance(UUID, UUID, TIMESTAMPTZ) TO servi
 
 
 -- ─── get_kitchen_performance ─────────────────────────────────────────────────
--- Called by reports.service.ts → getKitchenPerformance()
--- Parameters: p_branch_id, p_from, p_to
 CREATE OR REPLACE FUNCTION get_kitchen_performance(
   p_branch_id UUID,
   p_from      TIMESTAMPTZ,
@@ -532,8 +511,6 @@ GRANT EXECUTE ON FUNCTION get_kitchen_performance(UUID, TIMESTAMPTZ, TIMESTAMPTZ
 
 
 -- ─── get_returning_customers ─────────────────────────────────────────────────
--- Called by reports.service.ts → getCustomerInsights()
--- Parameter: p_restaurant_id
 CREATE OR REPLACE FUNCTION get_returning_customers(
   p_restaurant_id UUID
 )
@@ -566,7 +543,7 @@ AS $$
     AND  o.created_at   >= NOW() - INTERVAL '90 days'
     AND  o.status NOT IN ('created')
   GROUP BY u.id, u.name, u.email
-  HAVING COUNT(DISTINCT o.id) > 1   -- "returning" = more than one visit
+  HAVING COUNT(DISTINCT o.id) > 1
   ORDER BY order_count DESC;
 $$;
 
@@ -574,8 +551,6 @@ GRANT EXECUTE ON FUNCTION get_returning_customers(UUID) TO service_role;
 
 
 -- ─── get_top_spenders ────────────────────────────────────────────────────────
--- Called by reports.service.ts → getCustomerInsights()
--- Parameters: p_restaurant_id, p_limit
 CREATE OR REPLACE FUNCTION get_top_spenders(
   p_restaurant_id UUID,
   p_limit         INTEGER DEFAULT 10
@@ -616,8 +591,6 @@ GRANT EXECUTE ON FUNCTION get_top_spenders(UUID, INTEGER) TO service_role;
 
 
 -- ─── get_platform_report ─────────────────────────────────────────────────────
--- Called by reports.service.ts → getAdminPlatformReport()
--- No parameters.
 CREATE OR REPLACE FUNCTION get_platform_report()
 RETURNS TABLE (
   restaurant_id   UUID,
@@ -661,8 +634,6 @@ GRANT EXECUTE ON FUNCTION get_platform_report() TO service_role;
 
 
 -- ─── get_platform_trends ─────────────────────────────────────────────────────
--- Called by reports.service.ts → getAdminTrends()
--- Parameters: p_from, p_to
 CREATE OR REPLACE FUNCTION get_platform_trends(
   p_from TIMESTAMPTZ,
   p_to   TIMESTAMPTZ
@@ -697,8 +668,6 @@ GRANT EXECUTE ON FUNCTION get_platform_trends(TIMESTAMPTZ, TIMESTAMPTZ) TO servi
 
 
 -- ─── get_item_order_counts ────────────────────────────────────────────────────
--- Called by analytics.service.ts → getMenuSuggestions()
--- Parameters: p_branch_id, p_since
 CREATE OR REPLACE FUNCTION get_item_order_counts(
   p_branch_id UUID,
   p_since     TIMESTAMPTZ
@@ -733,9 +702,6 @@ GRANT EXECUTE ON FUNCTION get_item_order_counts(UUID, TIMESTAMPTZ) TO service_ro
 
 
 -- ─── get_co_order_pairs ───────────────────────────────────────────────────────
--- Called by analytics.service.ts → getBundleOpportunities()
--- Parameters: p_branch_id, p_min_count, p_limit
--- Finds pairs of menu items frequently ordered together.
 CREATE OR REPLACE FUNCTION get_co_order_pairs(
   p_branch_id UUID,
   p_min_count INTEGER DEFAULT 10,
@@ -764,7 +730,7 @@ AS $$
     COUNT(*)                               AS co_orders
   FROM   order_items a
   JOIN   order_items b   ON b.order_id    = a.order_id
-                        AND b.menu_item_id > a.menu_item_id   -- avoid duplicates
+                        AND b.menu_item_id > a.menu_item_id
   JOIN   menu_items  mia ON mia.id        = a.menu_item_id
   JOIN   menu_items  mib ON mib.id        = b.menu_item_id
   JOIN   orders      o   ON o.id          = a.order_id
@@ -782,15 +748,13 @@ GRANT EXECUTE ON FUNCTION get_co_order_pairs(UUID, INTEGER, INTEGER) TO service_
 
 
 -- ─── get_order_hourly_distribution ───────────────────────────────────────────
--- Called by analytics.service.ts → getDemandForecast()
--- Parameters: p_branch_id, p_since
 CREATE OR REPLACE FUNCTION get_order_hourly_distribution(
   p_branch_id UUID,
   p_since     TIMESTAMPTZ
 )
 RETURNS TABLE (
-  day_of_week INTEGER,   -- 0 = Sunday … 6 = Saturday
-  hour        INTEGER,   -- 0 – 23
+  day_of_week INTEGER,
+  hour        INTEGER,
   avg_orders  NUMERIC
 )
 LANGUAGE sql
@@ -815,9 +779,9 @@ GRANT EXECUTE ON FUNCTION get_order_hourly_distribution(UUID, TIMESTAMPTZ) TO se
 
 
 -- ─── get_scheduled_staff ─────────────────────────────────────────────────────
--- Called by analytics.service.ts → getStaffingRecommendation()
--- Parameter: p_branch_id
--- Returns scheduled waiter & chef counts per day for the next 7 days.
+-- NOTE: 'shifts' table does not exist in the current schema.
+-- Stubbed to return empty results so dependent callers don't error.
+-- Replace body with real query once the shifts table is migrated.
 CREATE OR REPLACE FUNCTION get_scheduled_staff(
   p_branch_id UUID
 )
@@ -831,25 +795,17 @@ STABLE
 SECURITY DEFINER
 AS $$
   SELECT
-    s.date,
-    COUNT(s.id) FILTER (WHERE s.role_for_shift = 'waiter'
-                           OR (s.role_for_shift IS NULL AND u.role = 'waiter')) AS waiter_count,
-    COUNT(s.id) FILTER (WHERE s.role_for_shift = 'chef'
-                           OR (s.role_for_shift IS NULL AND u.role = 'chef'))   AS chef_count
-  FROM   shifts s
-  JOIN   users  u ON u.id = s.staff_id
-  WHERE  s.branch_id = p_branch_id
-    AND  s.date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
-  GROUP BY s.date
-  ORDER BY s.date;
+    NULL::DATE  AS date,
+    0::BIGINT   AS waiter_count,
+    0::BIGINT   AS chef_count
+  WHERE FALSE;
 $$;
 
 GRANT EXECUTE ON FUNCTION get_scheduled_staff(UUID) TO service_role;
 
 
 -- ─── get_least_busy_waiter ────────────────────────────────────────────────────
--- Called by waiter-assign.ts → findLeastBusyWaiter()
--- Parameter: p_branch_id
+-- FIX: 'occupied' → 'served', removed 'cancelled' (not valid enum values).
 -- Workload score: active_tables×3 + active_orders×1 + pending_serves×0.5
 CREATE OR REPLACE FUNCTION get_least_busy_waiter(
   p_branch_id UUID
@@ -865,17 +821,17 @@ AS $$
   SELECT
     u.id  AS staff_id,
     (
-      COUNT(o.id) FILTER (WHERE o.status = 'occupied')        * 3.0  +
+      COUNT(o.id) FILTER (WHERE o.status = 'served')               * 3.0  +
       COUNT(o.id) FILTER (
         WHERE o.status IN ('confirmed','preparing','ready')
-      )                                                        * 1.0  +
-      COUNT(o.id) FILTER (WHERE o.status = 'ready')           * 0.5
+      )                                                             * 1.0  +
+      COUNT(o.id) FILTER (WHERE o.status = 'ready')                * 0.5
     )     AS score
   FROM   users  u
   LEFT  JOIN orders o
          ON o.waiter_id = u.id
         AND o.branch_id = p_branch_id
-        AND o.status NOT IN ('paid','closed','cancelled')
+        AND o.status NOT IN ('paid','closed')
   WHERE  u.branch_id = p_branch_id
     AND  u.role      = 'waiter'
     AND  u.is_active = TRUE
@@ -888,10 +844,6 @@ GRANT EXECUTE ON FUNCTION get_least_busy_waiter(UUID) TO service_role;
 
 
 -- ─── deduct_inventory_for_item ───────────────────────────────────────────────
--- Called by orders.service.ts when an order item is placed.
--- Parameters: p_branch_id, p_menu_item_id, p_quantity
--- Deducts recipe ingredient quantities from inventory for a menu item.
--- Updates inventory_items.status based on new quantity vs thresholds.
 CREATE OR REPLACE FUNCTION deduct_inventory_for_item(
   p_branch_id    UUID,
   p_menu_item_id UUID,
@@ -904,7 +856,6 @@ AS $$
 DECLARE
   rec RECORD;
 BEGIN
-  -- Loop through all recipe ingredients for this menu item
   FOR rec IN
     SELECT
       ri.inventory_item_id,
@@ -918,22 +869,20 @@ BEGIN
      AND ii.branch_id = p_branch_id
     WHERE ri.menu_item_id = p_menu_item_id
   LOOP
-    -- Deduct and clamp to 0 (never go negative)
     UPDATE inventory_items
     SET
       quantity   = GREATEST(0, quantity - rec.total_deduct),
       status     = CASE
                      WHEN GREATEST(0, rec.current_qty - rec.total_deduct)
-                            <= rec.critical_stock_threshold THEN 'critical'::\"InventoryStatus\"
+                            <= rec.critical_stock_threshold THEN 'critical'::"InventoryStatus"
                      WHEN GREATEST(0, rec.current_qty - rec.total_deduct)
-                            <= rec.low_stock_threshold      THEN 'low'::\"InventoryStatus\"
-                     ELSE 'normal'::\"InventoryStatus\"
+                            <= rec.low_stock_threshold      THEN 'low'::"InventoryStatus"
+                     ELSE 'normal'::"InventoryStatus"
                    END,
       updated_at = NOW()
     WHERE id = rec.inventory_item_id;
   END LOOP;
 EXCEPTION WHEN OTHERS THEN
-  -- Inventory deduction failures should not block order creation
   RAISE WARNING 'deduct_inventory_for_item failed: % (menu_item=%, branch=%, qty=%)',
     SQLERRM, p_menu_item_id, p_branch_id, p_quantity;
 END;

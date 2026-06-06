@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils"
 
 interface StatusBadgeProps {
-  status: string
+  status?: string
   size?: 'sm' | 'md' | 'lg'
   className?: string
   children?: React.ReactNode
@@ -56,7 +56,7 @@ const sizeConfig = {
 }
 
 export function StatusBadge({ status, size = 'md', className, children }: StatusBadgeProps) {
-  const normalizedStatus = status.toLowerCase().replace(/\s+/g, '_')
+  const normalizedStatus = (status ?? 'neutral').toLowerCase().replace(/\s+/g, '_')
   const config = statusConfig[normalizedStatus as keyof typeof statusConfig] || {
     ...statusConfig.neutral,
     label: status,

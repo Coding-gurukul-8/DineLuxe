@@ -42,10 +42,10 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
       return
     }
 
-    if (role && !allowedRoles.includes(role)) {
+    if (role && !allowedRoles.includes(role as Role)) {
       // User is authenticated but landed on the wrong section.
       // Send them to their own dashboard instead of showing a blank/403 page.
-      router.replace(getRoleDashboard(role))
+      router.replace(getRoleDashboard(role as Role))
     }
   }, [loading, isAuthenticated, role, allowedRoles, router])
 
@@ -63,7 +63,7 @@ export function RouteGuard({ allowedRoles, children }: RouteGuardProps) {
   // ── Not authenticated or wrong role ────────────────────────────────────────
   // Return null while the router.replace() in the effect fires.
   // This prevents a momentary render of protected UI during the redirect.
-  if (!isAuthenticated || (role && !allowedRoles.includes(role))) {
+  if (!isAuthenticated || (role && !allowedRoles.includes(role as Role))) {
     return null
   }
 

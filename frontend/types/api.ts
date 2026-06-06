@@ -159,6 +159,7 @@ export interface MenuItem {
   allergens: string[] | null;
   prep_time_minutes: number | null;
   is_available: boolean;
+  status?: MenuItemStatus;
   display_order: number;
   is_featured: boolean;
   addons: Array<{ name: string; extra_price: number }> | null;
@@ -512,6 +513,26 @@ export interface StaffFeedbackStats {
   neutral_pct: number;
   negative_pct: number;
   high_negative_branches: string[];
+}
+
+export type SponsoredPlacementType = 'home_banner' | 'search_top' | 'featured_card';
+
+export interface SponsoredPlacement {
+  id: string;
+  restaurant_id: string;
+  placement_type: SponsoredPlacementType;
+  banner_url: string | null;
+  headline: string | null;
+  cta_text: string | null;
+  is_active: boolean;
+  starts_at: string;
+  ends_at: string;
+  impression_count: number;
+  click_count: number;
+  created_at: string;
+  restaurant_name: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
 }
 
 // ─── AI Recommendations ───────────────────────────────────────────────────────

@@ -124,7 +124,45 @@ function logServerStarted(): void {
 async function startServer(): Promise<void> {
   await socketRedisAdapterReady;
 
-  httpServer.listen(PORT, logServerStarted);
+  // Attempt to listen with a small retry loop on EADDRINUSE. This helps
+  // when nodemon restarts quickly and the previous process has not fully
+  // released the port yet (transient TCP TIME_WAIT). We retry a few times
+  // with backoff before giving up.
+  let attemptsLeft = 5;
+
+  function attemptListen() {
+    try {
+      httpServer.listen(PORT, logServerStarted);
+    } catch (err: any) {
+      // Rare: listen can throw synchronously on some platforms
+      if (err && err.code === 'EADDRINUSE' && attemptsLeft > 0) {
+        console.warn(`[server] Port ${PORT} in use — retrying in 1s (${attemptsLeft} attempts left)`);
+        attemptsLeft -= 1;
+        setTimeout(attemptListen, 1000);
+        return;
+      }
+      console.error('Failed to start server:', err);
+      throw err;
+    }
+
+    // Also handle asynchronous 'error' events emitted by the server
+    httpServer.on('error', (err: any) => {
+      if (err && err.code === 'EADDRINUSE' && attemptsLeft > 0) {
+        console.warn(`[server] Port ${PORT} in use (async) — retrying in 1s (${attemptsLeft} attempts left)`);
+        attemptsLeft -= 1;
+        try {
+          httpServer.close(() => setTimeout(attemptListen, 1000));
+        } catch (_e) {
+          setTimeout(attemptListen, 1000);
+        }
+        return;
+      }
+      console.error('Server error:', err);
+      process.exit(1);
+    });
+  }
+
+  attemptListen();
 }
 
 startServer().catch((err) => {

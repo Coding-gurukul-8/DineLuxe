@@ -945,11 +945,29 @@ export async function recordClick(sponsorshipId: string): Promise<void> {
 
   if (error) {
     // Fallback: plain UPDATE if the RPC hasn't been deployed yet
+    // Supabase client doesn't expose a `raw()` helper on the client type.
+    // Do a simple read-then-write increment as a safe fallback (best-effort).
     console.warn('[sponsored] recordClick RPC failed, using fallback:', error.message);
-    await supabaseAdmin
-      .from('sponsored_placements')
-      .update({ click_count: supabaseAdmin.raw('click_count + 1') as any })
-      .eq('id', sponsorshipId);
+    try {
+      const { data: row, error: selErr } = await supabaseAdmin
+        .from('sponsored_placements')
+        .select('click_count')
+        .eq('id', sponsorshipId)
+        .limit(1)
+        .single();
+
+      if (selErr) {
+        console.warn('[sponsored] fallback select failed:', selErr.message);
+      } else {
+        const current = (row && (row as any).click_count) ?? 0;
+        await supabaseAdmin
+          .from('sponsored_placements')
+          .update({ click_count: Number(current) + 1 })
+          .eq('id', sponsorshipId);
+      }
+    } catch (e) {
+      console.error('[sponsored] fallback update failed:', e instanceof Error ? e.message : e);
+    }
   }
 }
 

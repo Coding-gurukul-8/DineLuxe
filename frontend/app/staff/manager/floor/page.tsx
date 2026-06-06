@@ -69,7 +69,7 @@ function toFloorTable(t: Table, index: number): FloorTable {
     id:       t.id,
     label:    t.label,
     capacity: t.capacity,
-    status:   t.status,
+    status:   (t.status === 'available' ? 'free' : (t.status as FloorTable['status'])),
     shape:    t.shape === "booth" ? "rectangle" : (t.shape as FloorTable["shape"]),
     x:        t.x_pos ?? 40 + col * 130,
     y:        t.y_pos ?? 40 + row * 110,

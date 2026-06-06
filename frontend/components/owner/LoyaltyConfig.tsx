@@ -156,7 +156,7 @@ function StatCard({
         <p className="text-xs text-gray-400 font-medium tracking-wide uppercase">{label}</p>
         <p
           className="text-2xl font-bold text-gray-900 mt-0.5 font-mono"
-          style={{ fontFamily: "Playfair Display, serif", fontFamily: "inherit" }}
+          style={{ fontFamily: "Playfair Display, serif" }}
         >
           {typeof value === "number" ? value.toLocaleString("en-IN") : value}
         </p>
@@ -745,7 +745,7 @@ export default function LoyaltyConfig({ restaurantId }: { restaurantId: string }
               className={cn(adjustErrors.points && "border-red-400 focus:border-red-400")}
             />
             {adjustErrors.points && (
-              <p className="text-xs text-red-500 mt-1">{adjustErrors.points as string}</p>
+              <p className="text-xs text-red-500 mt-1">{String(adjustErrors.points)}</p>
             )}
           </Field>
 

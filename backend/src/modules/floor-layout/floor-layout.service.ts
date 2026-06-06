@@ -182,7 +182,19 @@ export async function getLayout(branchId: string) {
     .maybeSingle();
 
   if (error) throw error;
-  if (!draft) throw Object.assign(new Error('No layout found for this branch'), { statusCode: 404 });
+  if (!draft) {
+    // Return an empty-but-valid layout object instead of 404 so callers
+    // can render an empty canvas without treating this as an error.
+    return {
+      id: null,
+      branch_id: branchId,
+      layout_version: null,
+      status: null,
+      layout_data: { tables: [], canvas_width: 1200, canvas_height: 800, walls: [], decorations: [] },
+      created_at: null,
+      updated_at: null,
+    } as any;
+  }
   return draft;
 }
 

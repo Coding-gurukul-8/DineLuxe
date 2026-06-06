@@ -14,7 +14,7 @@ interface FoodCardProps {
     discountedPrice?: number
     photoUrl?: string
     dietaryTags?: string[]
-    allergens?: string[]
+    allergens?: string[] | null
     prepTimeMinutes?: number
     isAvailable?: boolean
     isSoldOut?: boolean

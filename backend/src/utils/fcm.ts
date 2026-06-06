@@ -178,14 +178,16 @@ export async function sendFCMToMultiple(
 
       // Collect stale tokens from failed entries
       const staleTokens: string[] = [];
-      response.responses.forEach((resp, idx) => {
-        if (
-          !resp.success &&
-          resp.error?.code === 'messaging/registration-token-not-registered'
-        ) {
-          staleTokens.push(batch[idx]);
-        }
-      });
+      response.responses.forEach(
+        (resp: { success: boolean; error?: { code?: string } }, idx: number) => {
+          if (
+            !resp.success &&
+            resp.error?.code === 'messaging/registration-token-not-registered'
+          ) {
+            staleTokens.push(batch[idx]);
+          }
+        },
+      );
 
       // Remove all stale tokens in parallel (best-effort)
       if (staleTokens.length > 0) {

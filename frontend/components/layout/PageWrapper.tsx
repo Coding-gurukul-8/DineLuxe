@@ -8,6 +8,7 @@ interface PageWrapperProps {
   className?: string
   title?: string
   subtitle?: string
+  description?: string
   action?: React.ReactNode
 }
 
