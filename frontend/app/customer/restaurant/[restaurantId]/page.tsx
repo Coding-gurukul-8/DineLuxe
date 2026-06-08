@@ -13,6 +13,7 @@ import { FoodCard } from "@/components/customer/FoodCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { SkeletonCard } from "@/components/shared/SkeletonCard";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import { getSocket } from "@/lib/socket";
 import {
   Star, Clock, MapPin, Phone, ChevronLeft,
   Utensils, Info, MessageSquare,
@@ -20,6 +21,7 @@ import {
   Calendar, Users,
   // INTEGRATION ADDITION: New icons for allergen warning and pricing badge
   AlertTriangle, Flame, Tag,
+  BellRing,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -62,6 +64,12 @@ interface DynamicPricingRule {
 interface LocalDietaryProfile {
   preferences: string[];  // e.g. ["vegan", "halal"]
   allergies: string[];    // e.g. ["nuts", "dairy"]
+}
+
+// CALL WAITER ADDITION: Active dine-in order shape (only fields we need)
+interface ActiveDineInOrder {
+  id: string;
+  table_id: string | null;
 }
 
 function normalizeItem(raw: MenuItemRaw) {
@@ -155,6 +163,80 @@ function DynamicPricingBadge({
     </div>
   );
 }
+
+// ── CALL WAITER ADDITION: CallWaiterButton ────────────────────────────────────
+// Shown below the active order status section when the customer has a dine-in
+// order with an assigned table. Tapping it POSTs to /orders/call-waiter and
+// enforces a 2-minute client-side cooldown matching the server-side Redis TTL.
+
+interface CallWaiterButtonProps {
+  tableId: string | null | undefined;
+  branchId: string | null | undefined;
+  orderId: string | null | undefined;
+}
+
+function CallWaiterButton({ tableId, branchId, orderId }: CallWaiterButtonProps) {
+  const [called, setCalled] = useState(false);
+  const [cooldown, setCooldown] = useState(false);
+
+  // Not a dine-in order — don't render anything
+  if (!tableId) return null;
+
+  const handleCall = async () => {
+    if (cooldown) {
+      toast.info("Please wait before calling again");
+      return;
+    }
+    try {
+      await apiClient.post("/orders/call-waiter", {
+        table_id: tableId,
+        branch_id: branchId,
+      });
+      setCalled(true);
+      setCooldown(true);
+      toast.success("Your waiter has been notified!");
+      // Reset both states after the 2-minute cooldown window
+      setTimeout(() => {
+        setCalled(false);
+        setCooldown(false);
+      }, 120_000);
+    } catch (err: any) {
+      if (err?.status === 429 || err?.response?.status === 429) {
+        toast.warning("Please wait a moment before calling again");
+      } else {
+        toast.error("Could not reach your waiter. Please flag them down.");
+      }
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCall}
+      disabled={cooldown}
+      aria-label={called ? "Waiter has been notified" : "Call your waiter"}
+      className={cn(
+        "w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm transition-all",
+        called
+          ? "bg-green-500 text-white"
+          : "bg-[#1A3C5E] text-white hover:bg-[#1A3C5E]/90",
+        cooldown && !called && "opacity-50 cursor-not-allowed"
+      )}
+    >
+      {called ? (
+        <>
+          <CheckCircle2 size={16} />
+          Waiter Notified
+        </>
+      ) : (
+        <>
+          <BellRing size={16} />
+          Call Waiter
+        </>
+      )}
+    </button>
+  );
+}
+// ── END CALL WAITER ADDITION ──────────────────────────────────────────────────
 
 // ── Animated star rating ──────────────────────────────────────────────────────
 
@@ -290,7 +372,7 @@ interface Props { params: Promise<{ restaurantId: string }> }
 
 export default function RestaurantPage({ params }: Props) {
   const { restaurantId } = use(params);
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const addItem = useCart((s) => s.addItem);
   const cartItems = useCart((s) => s.items);
   const cartTotal = useCart((s) => s.total);
@@ -333,7 +415,6 @@ export default function RestaurantPage({ params }: Props) {
   });
 
   // INTEGRATION ADDITION: Fetch active dynamic pricing rules for the branch.
-  // Runs alongside the menu query when the menu tab is active.
   const { data: activePricingRules = [] } = useQuery<DynamicPricingRule[]>({
     queryKey: ["dynamic-pricing", branchId, "active"],
     queryFn: () =>
@@ -341,14 +422,43 @@ export default function RestaurantPage({ params }: Props) {
         `/dynamic-pricing/branch/${branchId}/active`
       ),
     enabled: !!branchId && activeTab === "menu",
-    // Refresh every 2 minutes so the badge disappears when happy hour ends
     refetchInterval: 2 * 60 * 1000,
-    // Silently ignore 404s – the endpoint may not exist on all deployments
     retry: false,
   });
 
+  // CALL WAITER ADDITION: Fetch the customer's active dine-in order so we
+  // know the table_id (used by CallWaiterButton). Runs only when logged in
+  // as a customer and a branchId is resolved.
+  const { data: activeOrder } = useQuery<ActiveDineInOrder | null>({
+    queryKey: ["my-active-order", branchId, user?.id],
+    queryFn: async () => {
+      const orders = await apiClient.get<ActiveDineInOrder[]>("/orders/user/me");
+      // Find first dine-in order with a table assigned
+      return orders.find((o) => o.table_id) ?? null;
+    },
+    enabled: role === "customer" && !!branchId,
+    refetchInterval: 30_000,
+  });
+
+  // CALL WAITER ADDITION: Listen for 'waiter_acknowledged' Socket.IO event.
+  // When the waiter taps "On My Way", show the customer a confirmation toast.
+  useEffect(() => {
+    if (role !== "customer" || !activeOrder?.table_id) return;
+
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleAcknowledged = ({ waiter_name }: { waiter_name?: string }) => {
+      toast.success(`${waiter_name ?? "Your waiter"} is on the way! 🙌`);
+    };
+
+    socket.on("waiter_acknowledged", handleAcknowledged);
+    return () => {
+      socket.off("waiter_acknowledged", handleAcknowledged);
+    };
+  }, [role, activeOrder?.table_id]);
+
   // INTEGRATION ADDITION: Build a lookup map { menuItemId → DynamicPricingRule }
-  // for O(1) access inside CategorySection.
   const pricingByItemId = useCallback((): Map<string, DynamicPricingRule> => {
     const map = new Map<string, DynamicPricingRule>();
     for (const rule of activePricingRules) {
@@ -360,8 +470,6 @@ export default function RestaurantPage({ params }: Props) {
   const categories = [...menuData].sort((a, b) => a.display_order - b.display_order);
   const selectedCat = activeCategoryId ?? categories[0]?.id ?? null;
 
-  // INTEGRATION ADDITION: CategorySection now receives pricingMap and
-  // dietaryProfile to render badges and allergen warnings per item.
   function CategorySection({
     cat,
     selectedCat,
@@ -374,7 +482,6 @@ export default function RestaurantPage({ params }: Props) {
     selectedCat: string | null;
     getItemQty: (id: string) => number;
     handleCartUpdate: (item: ReturnType<typeof normalizeItem>, newQty: number) => void;
-    // INTEGRATION ADDITION: props for new features
     pricingMap: Map<string, DynamicPricingRule>;
     userAllergies: string[];
   }) {
@@ -393,11 +500,7 @@ export default function RestaurantPage({ params }: Props) {
         >
           {cat.items.map((rawItem) => {
             const item = normalizeItem(rawItem);
-
-            // INTEGRATION ADDITION: Check for active dynamic pricing rule
             const pricingRule = pricingMap.get(item.id) ?? null;
-
-            // INTEGRATION ADDITION: Find allergen overlap between item and user profile
             const overlappingAllergens = userAllergies.filter((a) =>
               item.allergens.includes(a)
             );
@@ -407,12 +510,10 @@ export default function RestaurantPage({ params }: Props) {
                 key={item.id}
                 variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 260 } } }}
               >
-                {/* INTEGRATION ADDITION: Wrapper adds allergen border highlight and badges */}
                 <div className={cn(
                   "relative rounded-2xl transition-all",
                   overlappingAllergens.length > 0 && "ring-1 ring-red-200"
                 )}>
-                  {/* INTEGRATION ADDITION: Allergen warning strip at top of card */}
                   {overlappingAllergens.length > 0 && (
                     <div className="flex items-center gap-1.5 bg-red-50 rounded-t-2xl px-3 py-1.5 border-b border-red-100">
                       <AlertTriangle size={11} className="text-red-500 shrink-0" />
@@ -429,8 +530,6 @@ export default function RestaurantPage({ params }: Props) {
                     onAddToCart={(_id, newQty) => handleCartUpdate(item, newQty)}
                   />
 
-                  {/* INTEGRATION ADDITION: Dynamic pricing badge rendered below the
-                      FoodCard (inside the same card wrapper) when a rule is active */}
                   {pricingRule && (
                     <div className="px-4 pb-3 -mt-1">
                       <DynamicPricingBadge
@@ -477,10 +576,7 @@ export default function RestaurantPage({ params }: Props) {
 
   const branch = restaurant.branches?.[0];
 
-  // INTEGRATION ADDITION: Resolve user allergies from loaded profile (safe empty fallback)
   const userAllergies = dietaryProfile?.allergies ?? [];
-
-  // INTEGRATION ADDITION: Materialise the pricing map once per render
   const pricingMap = pricingByItemId();
 
   return (
@@ -535,7 +631,6 @@ export default function RestaurantPage({ params }: Props) {
                 {liveStatus.is_open ? "Open" : "Closed"}
               </span>
             )}
-            {/* INTEGRATION ADDITION: Queue wait time badge from liveStatus */}
             {liveStatus?.is_open && liveStatus.queue_length > 0 && (
               <span className="flex items-center gap-1 bg-amber-500/80 text-white text-xs font-semibold px-2 py-0.5 rounded-full">
                 <Clock size={10} />
@@ -588,7 +683,6 @@ export default function RestaurantPage({ params }: Props) {
               <div className="py-16 text-center text-sm text-gray-400">Menu not available</div>
             ) : (
               <>
-                {/* INTEGRATION ADDITION: Show allergen context banner if profile has allergies */}
                 {userAllergies.length > 0 && (
                   <div className="mx-4 mt-3 mb-1 flex items-center gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
                     <AlertTriangle size={13} className="text-red-500 shrink-0" />
@@ -598,13 +692,25 @@ export default function RestaurantPage({ params }: Props) {
                   </div>
                 )}
 
-                {/* INTEGRATION ADDITION: Show happy hour banner if any active pricing rules exist */}
                 {activePricingRules.length > 0 && (
                   <div className="mx-4 mt-2 mb-1 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                     <Flame size={13} className="text-amber-500 fill-amber-500 shrink-0" />
                     <p className="text-xs text-amber-700 font-semibold">
                       🔥 Happy Hour is ON — special prices on selected items!
                     </p>
+                  </div>
+                )}
+
+                {/* CALL WAITER ADDITION: Show the Call Waiter button when the
+                    customer has a dine-in order with an assigned table. It sits
+                    prominently at the top of the menu tab so it's always visible. */}
+                {role === "customer" && activeOrder?.table_id && (
+                  <div className="mx-4 mt-3 mb-1">
+                    <CallWaiterButton
+                      tableId={activeOrder.table_id}
+                      branchId={branchId}
+                      orderId={activeOrder.id}
+                    />
                   </div>
                 )}
 
@@ -638,7 +744,6 @@ export default function RestaurantPage({ params }: Props) {
                       selectedCat={selectedCat}
                       getItemQty={getItemQty}
                       handleCartUpdate={handleCartUpdate}
-                      // INTEGRATION ADDITION: Pass new props
                       pricingMap={pricingMap}
                       userAllergies={userAllergies}
                     />
@@ -689,7 +794,7 @@ export default function RestaurantPage({ params }: Props) {
 
       </AnimatePresence>
 
-      {/* ── Book a Table sticky bar ───────────────────────────────────── */}
+      {/* ── Book a Table / View Cart sticky bar ──────────────────────── */}
       <motion.div
         initial={{ y: 80, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}

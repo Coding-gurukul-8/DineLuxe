@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, useCallback, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { motion, AnimatePresence } from "framer-motion"
 import { PageWrapper } from "@/components/layout/PageWrapper"
@@ -12,6 +13,8 @@ import { useAuth } from "@/hooks/useAuth"
 import { toast } from "sonner"
 import { useFoodReady } from "@/hooks/useFoodReady"
 import { useWaiterCall } from "@/hooks/useWaiterCall"
+import { getSocket } from "@/lib/socket"
+import { formatTime } from "@/lib/utils"
 import {
   Search,
   Plus,
@@ -22,6 +25,7 @@ import {
   RefreshCw,
   X,
   AlertCircle,
+  BellRing,
 } from "lucide-react"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -73,6 +77,17 @@ interface DraftItem {
   notes: string
 }
 
+// CALL WAITER ADDITION: Shape of the event emitted by the server when a
+// customer taps "Call Waiter" in the dine-in view.
+interface CallWaiterEvent {
+  table_id: string
+  table_label: string
+  branch_id: string
+  order_id: string
+  called_at: string
+  message: string
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TABLE_STATUS_STYLE: Record<string, string> = {
@@ -91,17 +106,62 @@ const TABLE_STATUS_LABEL: Record<string, string> = {
   maintenance: "Maintenance",
 }
 
+// CALL WAITER ADDITION: Play a short attention-grabbing beep via the Web Audio
+// API. Mirrors the pattern used in the KDS. Fails silently if the browser
+// blocks autoplay.
+function playCallAlert() {
+  try {
+    const ctx = new AudioContext()
+    // Two quick ascending beeps to stand out from ambient noise
+    const beepAt = (start: number, freq: number) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.frequency.value = freq
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      gain.gain.setValueAtTime(0.4, start)
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.25)
+      osc.start(start)
+      osc.stop(start + 0.25)
+    }
+    beepAt(ctx.currentTime, 880)
+    beepAt(ctx.currentTime + 0.3, 1100)
+  } catch {
+    // Autoplay policy blocked — swallow silently
+  }
+}
+
+// CALL WAITER ADDITION: Human-readable relative time for the alert timestamp
+// (e.g. "just now", "2 min ago"). Falls back to HH:MM if older than 10 min.
+function formatRelativeTime(isoString: string): string {
+  const diffMs = Date.now() - new Date(isoString).getTime()
+  const diffSec = Math.floor(diffMs / 1000)
+  if (diffSec < 10) return "just now"
+  if (diffSec < 60) return `${diffSec}s ago`
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 10) return `${diffMin} min ago`
+  return formatTime(isoString)
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function WaiterPage() {
   const { branchId } = useAuth()
   const qc = useQueryClient()
+  const router = useRouter()
 
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null)
   const [showNewOrderPanel, setShowNewOrderPanel] = useState(false)
   const [menuSearch, setMenuSearch] = useState("")
   const [draft, setDraft] = useState<DraftItem[]>([])
   const [specialInstructions, setSpecialInstructions] = useState("")
+
+  // CALL WAITER ADDITION: Persistent list of unacknowledged customer calls.
+  // Each entry is a CallWaiterEvent. New calls are prepended so the most
+  // recent always appears at the top of the banner stack.
+  const [callAlerts, setCallAlerts] = useState<CallWaiterEvent[]>([])
+
+  // ── Existing realtime hooks ───────────────────────────────────────────────
 
   useFoodReady({
     branchId: branchId ?? undefined,
@@ -114,9 +174,52 @@ export default function WaiterPage() {
   useWaiterCall({
     branchId: branchId ?? undefined,
     onWaiterCall: () => {
-      toast.info("A guest requested a waiter")
+      // The useWaiterCall hook is kept for backward-compat Supabase Realtime
+      // listeners. The Socket.IO handler below is the primary alert path.
     },
   })
+
+  // CALL WAITER ADDITION: Socket.IO event listener for 'customer_call_waiter'.
+  // Registers once when the component mounts (or when branchId changes).
+  useEffect(() => {
+    const socket = getSocket()
+    if (!socket) return
+
+    const handleCallWaiter = (data: CallWaiterEvent) => {
+      // Add to top of the persistent alert stack
+      setCallAlerts((prev) => {
+        // De-duplicate: if same table already has an unacknowledged alert,
+        // replace it with the newer one
+        const filtered = prev.filter((a) => a.table_id !== data.table_id)
+        return [data, ...filtered]
+      })
+      playCallAlert()
+      toast.info(`Table ${data.table_label} is calling for assistance`)
+    }
+
+    socket.on("customer_call_waiter", handleCallWaiter)
+    return () => {
+      socket.off("customer_call_waiter", handleCallWaiter)
+    }
+  }, [branchId])
+
+  // CALL WAITER ADDITION: Called when waiter taps "On My Way" on an alert.
+  const handleAcknowledge = useCallback(
+    async (tableId: string, alert: CallWaiterEvent) => {
+      try {
+        await apiClient.post("/orders/acknowledge-call", { table_id: tableId })
+      } catch {
+        // Non-fatal — the customer still gets a socket event via the server,
+        // but we optimistically remove the alert regardless
+      }
+      // Remove from persistent alert list
+      setCallAlerts((prev) => prev.filter((a) => a.table_id !== tableId))
+      // Navigate to that table so the waiter can serve immediately
+      setSelectedTableId(tableId)
+      router.push(`/staff/waiter?table=${tableId}`)
+    },
+    [router]
+  )
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -213,6 +316,62 @@ export default function WaiterPage() {
 
   return (
     <PageWrapper title="Waiter Dashboard" subtitle="Manage tables and take orders">
+
+      {/* ── CALL WAITER ADDITION: Persistent alert banner ──────────────────────
+          Stacks above the main grid. Each unacknowledged call shows its own
+          amber card with an "On My Way" CTA. Dismissing any card calls
+          handleAcknowledge which POSTs to /orders/acknowledge-call, fires the
+          'waiter_acknowledged' socket event back to the customer, and removes
+          the card from the stack. The banner is sticky so the waiter always
+          sees it regardless of how far they've scrolled.
+      ────────────────────────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {callAlerts.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            className="sticky top-0 z-30 space-y-2 px-0 pt-0 pb-3 mb-2"
+          >
+            {callAlerts.map((alert) => (
+              <motion.div
+                key={`${alert.table_id}-${alert.called_at}`}
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95, height: 0 }}
+                layout
+                className="flex items-center justify-between bg-amber-500 text-white rounded-xl px-4 py-3 shadow-lg"
+              >
+                <div className="flex items-center gap-3">
+                  {/* Animated bell */}
+                  <motion.div
+                    animate={{ rotate: [0, -15, 15, -10, 10, 0] }}
+                    transition={{ duration: 0.6, repeat: Infinity, repeatDelay: 2 }}
+                  >
+                    <BellRing size={20} className="shrink-0" />
+                  </motion.div>
+                  <div>
+                    <p className="font-bold text-sm leading-tight">
+                      Table {alert.table_label} needs assistance
+                    </p>
+                    <p className="text-xs opacity-80 mt-0.5">
+                      {formatRelativeTime(alert.called_at)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleAcknowledge(alert.table_id, alert)}
+                  className="ml-3 shrink-0 bg-white text-amber-600 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-amber-50 active:scale-95 transition-transform"
+                >
+                  On My Way
+                </button>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* ── END CALL WAITER ADDITION ─────────────────────────────────────────── */}
+
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6 min-h-[calc(100vh-140px)]">
 
         {/* ── Left: Table Grid ─────────────────────────────────────────────── */}
@@ -240,36 +399,51 @@ export default function WaiterPage() {
             <p className="text-center text-gray-400 py-10">No tables found for this branch.</p>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-              {tables.map((table) => (
-                <motion.button
-                  key={table.id}
-                  onClick={() => {
-                    setSelectedTableId(table.id)
-                    setShowNewOrderPanel(false)
-                  }}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  className={`relative rounded-xl border-2 p-3 text-left transition-all ${
-                    TABLE_STATUS_STYLE[table.status] ?? "border-gray-300 bg-gray-50"
-                  } ${
-                    selectedTableId === table.id
-                      ? "ring-2 ring-brand-primary ring-offset-1"
-                      : ""
-                  }`}
-                >
-                  <div className="font-bold text-gray-900 text-sm">
-                    Table {table.label}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {TABLE_STATUS_LABEL[table.status] ?? table.status}
-                  </div>
-                  {table.current_order && (
-                    <div className="mt-1">
-                      <StatusBadge status={table.current_order.status} size="sm" />
+              {tables.map((table) => {
+                // CALL WAITER ADDITION: Highlight table cards that have a
+                // pending unacknowledged customer call with an amber ring.
+                const hasPendingCall = callAlerts.some((a) => a.table_id === table.id)
+                return (
+                  <motion.button
+                    key={table.id}
+                    onClick={() => {
+                      setSelectedTableId(table.id)
+                      setShowNewOrderPanel(false)
+                    }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    className={`relative rounded-xl border-2 p-3 text-left transition-all ${
+                      TABLE_STATUS_STYLE[table.status] ?? "border-gray-300 bg-gray-50"
+                    } ${
+                      selectedTableId === table.id
+                        ? "ring-2 ring-brand-primary ring-offset-1"
+                        : ""
+                    } ${
+                      hasPendingCall
+                        ? "ring-2 ring-amber-400 ring-offset-1 animate-pulse"
+                        : ""
+                    }`}
+                  >
+                    {/* CALL WAITER ADDITION: Bell badge on table card */}
+                    {hasPendingCall && (
+                      <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center shadow">
+                        <BellRing size={11} className="text-white" />
+                      </span>
+                    )}
+                    <div className="font-bold text-gray-900 text-sm">
+                      Table {table.label}
                     </div>
-                  )}
-                </motion.button>
-              ))}
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {TABLE_STATUS_LABEL[table.status] ?? table.status}
+                    </div>
+                    {table.current_order && (
+                      <div className="mt-1">
+                        <StatusBadge status={table.current_order.status} size="sm" />
+                      </div>
+                    )}
+                  </motion.button>
+                )
+              })}
             </div>
           )}
 

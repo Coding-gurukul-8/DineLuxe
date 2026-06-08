@@ -18,6 +18,7 @@ import {
   handleGetOrderByTable, // P3-1 ADDITION
   handleGetLastThreeOrders, // QUICK REORDER ADDITION
   handleReorder,            // QUICK REORDER ADDITION
+  handleAcknowledgeCall,    // CALL WAITER ADDITION
 } from './orders.controller';
 
 const router: import('express').Router = Router();
@@ -77,6 +78,27 @@ router.get(
 );
 // END QUICK REORDER ADDITION ──────────────────────────────────────────────────
 
+// ── CALL WAITER ADDITION ──────────────────────────────────────────────────────
+// Both routes are flat (no :id segment) so they must be registered BEFORE
+// the generic /:id matcher below — otherwise Express swallows them.
+
+// POST /orders/call-waiter — customer taps "Call Waiter" from dine-in view
+// Body: { table_id, branch_id }
+router.post(
+  '/call-waiter',
+  requireRole('customer'),
+  handleCallWaiter,
+);
+
+// POST /orders/acknowledge-call — waiter/manager taps "On My Way"
+// Body: { table_id }
+router.post(
+  '/acknowledge-call',
+  requireRole('waiter', 'manager', 'owner'),
+  handleAcknowledgeCall,
+);
+// ── END CALL WAITER ADDITION ──────────────────────────────────────────────────
+
 // GET /orders/:id — any authenticated user
 router.get('/:id', injectTenant, handleGetOrder);
 
@@ -87,14 +109,6 @@ router.patch(
   requireRole('manager', 'owner'),
   validate(cancelOrderSchema),
   handleCancelOrder
-);
-
-// POST /orders/:orderId/call-waiter — customer or staff call the waiter
-router.post(
-  '/:orderId/call-waiter',
-  injectTenant,
-  requireRole('customer', 'waiter', 'manager', 'owner'),
-  handleCallWaiter
 );
 
 // P3-1 ADDITION: Apply coupon to an order (customer or cashier)

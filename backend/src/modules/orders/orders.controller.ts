@@ -28,7 +28,7 @@ import {
   getLastThreeOrders, // QUICK REORDER ADDITION
   reorder,            // QUICK REORDER ADDITION
 } from './orders.service';
-import { callWaiter } from './waiter-call.service';
+import { callWaiter, acknowledgeWaiterCall } from './waiter-call.service';
 import type { CreateOrderInput } from './orders.schema';
 
 const STAFF_ORDER_ROLES = ['waiter', 'manager', 'owner', 'cashier', 'host'];
@@ -170,7 +170,9 @@ export async function handleCancelOrder(
   }
 }
 
-// ── POST /orders/:orderId/call-waiter ─────────────────────────────────────────
+// ── POST /orders/call-waiter ──────────────────────────────────────────────────
+// Customer taps "Call Waiter" on the dine-in view.
+// Body: { table_id, branch_id }
 
 export async function handleCallWaiter(
   req: Request,
@@ -178,9 +180,27 @@ export async function handleCallWaiter(
   next: NextFunction,
 ) {
   try {
-    const data = await callWaiter(req.params.orderId, req.user?.id);
-    // 201 — creates a new waiter-call record
-    res.status(201).json(success(data, 'Waiter called'));
+    const { table_id, branch_id } = req.body as { table_id: string; branch_id: string };
+    await callWaiter(table_id, branch_id, req.user!.id);
+    res.status(201).json(success(null, 'Waiter notified'));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── POST /orders/acknowledge-call ─────────────────────────────────────────────
+// Waiter taps "On My Way" on the persistent alert.
+// Body: { table_id }
+
+export async function handleAcknowledgeCall(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const { table_id } = req.body as { table_id: string };
+    await acknowledgeWaiterCall(table_id, req.user!.id);
+    res.json(success(null, 'Acknowledged'));
   } catch (err) {
     next(err);
   }
